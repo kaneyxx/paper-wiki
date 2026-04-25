@@ -269,6 +269,17 @@ def test_bio_search_slash_command_exists() -> None:
     assert cmd.is_file(), ".claude/commands/bio-search.md must exist"
 
 
+def test_readme_documents_bio_search_as_optional() -> None:
+    """README must surface bio-search in Quick Start as an optional advanced feature."""
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "/paperwiki:bio-search" in body, "README must list /paperwiki:bio-search in Quick Start"
+    # Position it as optional / opt-in rather than a default surface.
+    assert "paperclip" in body, "README must mention paperclip dependency"
+    assert "optional" in body.lower(), (
+        "README must position bio-search as optional, not a default surface"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level project files
 # ---------------------------------------------------------------------------

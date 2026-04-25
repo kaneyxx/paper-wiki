@@ -33,6 +33,22 @@ plugin falls back to stdlib `venv` + `pip` otherwise.
 2. `/paperwiki:digest` — generate your first research digest.
 3. `/paperwiki:wiki-query` — search across your accumulated notes.
 
+### Optional: biomedical literature
+
+If you work in life sciences, paper-wiki integrates with
+[paperclip](https://gxl.ai/blog/paperclip) (8M+ papers across bioRxiv,
+medRxiv, PubMed Central):
+
+- `/paperwiki:bio-search <query>` — search biomedical preprints + PMC
+  via the paperclip MCP server, with optional handoff to
+  `/paperwiki:wiki-ingest` so hits land in your wiki.
+
+paperclip is **opt-in**: paper-wiki's other SKILLs (digest, analyze,
+wiki-*) work without it. See [`docs/paperclip-setup.md`](docs/paperclip-setup.md)
+for the one-time CLI install + MCP registration steps. The bundled
+`recipes/biomedical-weekly.yaml` recipe shows a non-MCP, CLI-only
+weekly biomedical digest that also works offline.
+
 ## How it works
 
 paper-wiki composes a four-stage async pipeline:
