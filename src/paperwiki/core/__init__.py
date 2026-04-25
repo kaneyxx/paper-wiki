@@ -24,16 +24,28 @@ from paperwiki.core.models import (
     RunContext,
     ScoreBreakdown,
 )
+from paperwiki.core.protocols import (
+    Filter,
+    Reporter,
+    Scorer,
+    Source,
+    WikiBackend,
+)
 
 __all__ = [
     "DEFAULT_SCORE_WEIGHTS",
     "Author",
+    "Filter",
     "IntegrationError",
     "Paper",
     "PaperWikiError",
     "PluginError",
     "Recommendation",
+    "Reporter",
     "RunContext",
     "ScoreBreakdown",
+    "Scorer",
+    "Source",
     "UserError",
+    "WikiBackend",
 ]
