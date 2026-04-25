@@ -20,11 +20,14 @@ sources:
   - name: paperclip
     config:
       query: "vision-language pathology foundation model"
+      # paperclip's `-n` upper bound; mind the per-tier rate limit on
+      # paperclip.gxl.ai if you raise this aggressively.
       limit: 50
-      sources:
-        - biorxiv
-        - medrxiv
-        - pmc
+      # `--since 7d` filter to keep the digest weekly.
+      since_days: 7
+      # Optional `--journal NAME` filter (omit to search the whole
+      # biomedical corpus across bioRxiv / medRxiv / PMC).
+      # journal: "Nature"
 
 filters:
   - name: recency

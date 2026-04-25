@@ -219,7 +219,8 @@ class TestInstantiatePipeline:
                         "config": {
                             "query": "vision-language pathology",
                             "limit": 25,
-                            "sources": ["biorxiv", "pmc"],
+                            "since_days": 14,
+                            "journal": "Nature",
                         },
                     }
                 ],
@@ -231,7 +232,8 @@ class TestInstantiatePipeline:
         assert isinstance(source, PaperclipSource)
         assert source.query == "vision-language pathology"
         assert source.limit == 25
-        assert source.sources == ["biorxiv", "pmc"]
+        assert source.since_days == 14
+        assert source.journal == "Nature"
 
     def test_unknown_filter_raises_user_error(self) -> None:
         recipe = RecipeSchema.model_validate(_VALID_RECIPE)
