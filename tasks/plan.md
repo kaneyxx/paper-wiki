@@ -523,7 +523,7 @@ After each numbered slice:
 
 ---
 
-## 8. Out of scope
+## 8. Out of scope (for Phases 6–7)
 
 - Multi-user / team wikis.
 - Vector / embedding search inside the wiki (Karpathy's whole point is
@@ -531,7 +531,202 @@ After each numbered slice:
 - Replacing paperclip with our own bioRxiv index.
 - Full citation graph (cite -> cited) — concept ↔ source links are
   enough for v0.x.
-- LLM-generated PDF parsing (still Phase 8+ if at all).
+- ~~LLM-generated PDF parsing~~ — promoted into **Phase 8 candidate**
+  below. Still LLM-free on the Python side (extraction only); Claude
+  Code does any synthesis on top of the extracted text.
+
+---
+
+## 9. Phase 8 — PDF download + text extraction (candidate)
+
+**Status**: Draft, tentative. Targets v0.4.0 after Phase 7 ships v0.3.0.
+Promote to active once paperclip lands and we have empirical signal on
+how often the abstract-only flow leaves users wanting deeper analysis.
+
+### 9.0 Why this matters
+
+`v0.2.0` ships `Wiki/sources/<id>.md` files whose body is just
+`title + authors + landing_url + abstract`. The `analyze` SKILL inherits
+the same limitation: deep-analysis prose is grounded in the abstract,
+not the paper. For pathology / VLM / agents work where the meat is in
+methods and ablations, abstracts are not enough.
+
+The fix is to give SKILLs *eyes on the PDF* without asking Python to do
+LLM work. Python:
+
+1. Downloads the PDF (idempotently, with backoff).
+2. Extracts plain text via `pypdf`.
+3. Writes the text to a sibling cache file.
+
+Claude Code SKILLs:
+
+1. Read the cached text instead of the abstract when present.
+2. Write deeper, citation-grounded prose into `Sources/` and concept
+   articles.
+
+This stays inside SPEC §6 boundaries (no LLM in Python).
+
+### 9.1 Architectural decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Cache location | `{vault}/Wiki/.cache/pdfs/<canonical>.pdf` and<br>`{vault}/Wiki/.cache/text/<canonical>.txt` | Project-local, gitignored (already), scoped to one vault. |
+| PDF library | `pypdf>=4.0` | Pure-Python, BSD-3, no native deps. Good enough for arXiv text. Can swap to `pdfplumber` later if needed. |
+| Trigger model | **Lazy / opt-in** — fetched only when SKILL or runner requests | Don't blow disk on every digest; respect user agency. |
+| Concurrency | Single fetch at a time per SKILL invocation; rate-limit 1/sec for arXiv | Polite citizen of upstream services. |
+| Failure handling | PDF unavailable / parse fails → frontmatter `pdf_cached: false`, fall back to abstract; SKILL caps `confidence` at 0.4 | Don't break the wiki when a PDF 404s. |
+| Frontmatter contract | `Wiki/sources/<id>.md` frontmatter gains `pdf_cached: bool` and `text_chars: int \| null` | Other runners/SKILLs know whether full text is available without re-fetching. |
+| Test fixture | Commit a tiny pre-baked `tests/fixtures/sample.pdf` (~2 KB) | Avoids a heavy `reportlab` dev dependency. |
+| GC | `paperwiki.runners.gc_pdf_cache` LRU by mtime, configurable `--max-files` (default 50) and `--max-mb` (default 500) | Bounded disk usage; opt-in cleanup. |
+
+### 9.2 Vertical slices
+
+#### 9.2.1 PDF fetch + text-extract foundation *(no user-visible change yet)*
+
+- **8.1.1** Add `src/paperwiki/_internal/pdf.py`:
+  - `async def fetch_pdf(url: str, dest: Path, *, http_client: AsyncClient) -> Path`
+    — idempotent (skip if `dest.exists()` and non-empty); honors a 1/sec
+    rate-limit token bucket; surfaces HTTP errors as
+    `IntegrationError`.
+- **8.1.2** Add `extract_text(pdf_path: Path) -> str` using `pypdf`.
+  Returns the concatenation of every page's text, with `\f` form feeds
+  between pages so SKILLs can split on page breaks if useful.
+- **8.1.3** Pin `pypdf>=4.0` in `pyproject.toml`. Commit a 2 KB
+  `tests/fixtures/sample.pdf`. Add `Wiki/.cache/` to `.gitignore`.
+
+##### Acceptance
+- **AC-8.1.1** `fetch_pdf` happy-path test passes; idempotent re-run
+  performs zero HTTP calls.
+- **AC-8.1.2** `extract_text(tests/fixtures/sample.pdf)` returns a
+  deterministic non-empty string covering both pages.
+- **AC-8.1.3** `pypdf` is the only new runtime dep; total install
+  size delta < 1 MB.
+
+#### 9.2.2 `paperwiki.runners.fetch_pdf` runner
+
+- **8.2.1** Add the runner. CLI:
+  ```
+  python -m paperwiki.runners.fetch_pdf <vault> <canonical-id>
+       [--force] [--no-text]
+  ```
+  Reads `Wiki/sources/<id>.md` frontmatter to find `pdf_url`. Downloads
+  via `_internal.pdf.fetch_pdf`. Extracts via `extract_text`. Updates
+  frontmatter with `pdf_cached: true` and `text_chars: <n>`. Emits JSON
+  `{pdf_path, text_path, char_count, status, cached}` on stdout.
+- **8.2.2** Tests cover: happy path, source file missing, `pdf_url`
+  missing in frontmatter, HTTP 404, malformed PDF, idempotent re-run
+  (skip if `pdf_cached` is already true unless `--force`).
+- **8.2.3** Update `MarkdownWikiBackend.upsert_paper` to include
+  `pdf_url` in frontmatter when `paper.pdf_url` is set; this is a
+  pre-req for the runner to find it.
+
+##### Acceptance
+- **AC-8.2.1** Runner exits 0 on success, 3 (`IntegrationError`) on
+  HTTP failure, 2 (`UserError`) on missing source file or missing
+  `pdf_url`.
+- **AC-8.2.2** Re-running on a cached source is a no-op (zero HTTP,
+  zero re-extract) unless `--force` is passed.
+
+#### 9.2.3 Frontmatter markers + `wiki_lint` cache exclusion
+
+- **8.3.1** `MarkdownWikiBackend.list_sources` reads the new
+  `pdf_cached` and `text_chars` fields into `SourceSummary`. Defaults
+  remain false / null when absent so legacy files still parse.
+- **8.3.2** `wiki_lint` ignores files under `Wiki/.cache/`: never count
+  cache files toward `BROKEN_LINK` resolution, never glob into them
+  during `OVERSIZED` checks. New test pins this so a future refactor
+  can't break it silently.
+
+##### Acceptance
+- **AC-8.3.1** `SourceSummary` exposes `pdf_cached: bool` and
+  `text_chars: int | None`.
+- **AC-8.3.2** A vault with a 50 MB cached text file under
+  `Wiki/.cache/text/` produces zero `OVERSIZED` findings.
+
+#### 9.2.4 `analyze` SKILL grounded in cached PDF text
+
+- **8.4.1** Update `skills/analyze/SKILL.md` Step 3:
+  > Invoke `paperwiki.runners.fetch_pdf <canonical-id>` before writing
+  > the analysis. If the JSON returns `text_chars >= 1000`, ground the
+  > six sections in that text. Otherwise fall back to the abstract and
+  > cap `confidence` at `0.4` so `wiki_lint` flags
+  > `STATUS_MISMATCH` if the user marks it `reviewed` prematurely.
+- **8.4.2** Smoke test asserts the SKILL references both
+  `fetch_pdf` and the confidence cap.
+
+##### Acceptance
+- **AC-8.4.1** SKILL smoke test green.
+- **AC-8.4.2** Manual: running `/paperwiki:analyze arxiv:2506.13063`
+  produces a note that quotes from the *body* of the paper, not just
+  the abstract. (Manual because the LLM half is human-judged.)
+
+#### 9.2.5 `/paperwiki:fetch-pdf` batch SKILL
+
+- **8.5.1** Add `skills/fetch-pdf/SKILL.md` (six-section anatomy) +
+  `.claude/commands/fetch-pdf.md`. Workflow:
+  1. Walk `Wiki/sources/*.md`; collect ids whose `pdf_cached` is false.
+  2. If > 10 pending, ask user to confirm before fetching.
+  3. Loop over ids, invoking `paperwiki.runners.fetch_pdf` per id;
+     log failures but continue.
+  4. Summarize: N succeeded, M failed (with reasons), total MB cached.
+- **8.5.2** Parametrized smoke test passes for the new SKILL.
+
+##### Acceptance
+- **AC-8.5.1** Slash command lands; SKILL frontmatter and anatomy
+  pass smoke tests.
+- **AC-8.5.2** SKILL stops gracefully (non-zero summary, exit 0) when
+  the runner reports `IntegrationError` for individual ids; never
+  aborts the whole batch on a single 404.
+
+#### 9.2.6 Cache lifecycle / GC
+
+- **8.6.1** Add `paperwiki.runners.gc_pdf_cache`:
+  ```
+  python -m paperwiki.runners.gc_pdf_cache <vault>
+       [--max-files N=50] [--max-mb M=500] [--dry-run]
+  ```
+  LRU by mtime. Always preserves entries whose source's
+  `last_synthesized` is within the last 30 days. Emits JSON
+  `{deleted: [...], kept: int, freed_mb: float}`.
+- **AC-8.6.1** Test covers trim by count, trim by size, dry-run mode,
+  preservation of recently synthesized entries.
+
+#### 9.2.7 Wiki-backend integration polish
+
+- **8.7.1** When `ObsidianReporter.wiki_backend=True`, append a single
+  hint line to each source's body:
+  ```
+  > _Full text not yet fetched. Run `/paperwiki:fetch-pdf
+  > <canonical-id>` to deepen this entry._
+  ```
+  Removed automatically the next time the source is upserted with
+  `pdf_cached: true`.
+
+#### Gate (Phase 8)
+- All 8.x slice tests green.
+- New tests bring coverage of `_internal/pdf.py` and the new runners
+  to ≥ 90%.
+- `mypy --strict`, `ruff`, `claude plugin validate .` all green.
+- `CHANGELOG.md` cuts `[0.4.0]`. Version bump in `pyproject.toml`,
+  `__init__.py`, `plugin.json`. Tag `v0.4.0`.
+
+### 9.3 Risks (Phase 8)
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Bulk PDF fetch hits arXiv rate-limit and 429s | Users see errors mid-batch | 1/sec token bucket per process; surface 429 with retry-after suggestion. |
+| pypdf misreads math-heavy LaTeX-rendered PDFs | Garbled text feeds Claude | Text extract is best-effort; SKILL caps `confidence` at 0.4 when extraction is suspicious (e.g., `text_chars / page_count < 200`). |
+| Cache balloons to many GB | User disk pressure | `gc_pdf_cache` runner; documented default `--max-mb 500`. |
+| Users commit `Wiki/.cache/` accidentally | PR bloat / leaked PDFs | `Wiki/.cache/` already in `.gitignore`; SPEC §3 mentions it. |
+| pypdf license / supply-chain risk | New runtime dep | BSD-3, widely audited; pin a version range, not `*`. |
+
+### 9.4 Out of scope (Phase 8)
+
+- OCR for scanned-image PDFs.
+- Figure / table extraction.
+- Citation graph extraction from PDF body.
+- Image extraction (paperclip / `paper-analyze` covers this in their
+  own ecosystems).
 
 ---
 
