@@ -87,8 +87,6 @@ async def lint_wiki(
     sources = await backend.list_sources()
 
     report = LintReport()
-    if not concepts:
-        return report
 
     # Wikilinks may target either a concept (by name) or a source file
     # (by file stem); both are valid resolution targets.
@@ -105,6 +103,24 @@ async def lint_wiki(
             known_concepts=known_targets,
             report=report,
         )
+
+    # Sources that aren't referenced by any concept — "dangling".
+    referenced_ids: set[str] = set()
+    for concept in concepts:
+        referenced_ids.update(concept.sources)
+    for source in sources:
+        if source.canonical_id and source.canonical_id not in referenced_ids:
+            report.findings.append(
+                LintFinding(
+                    severity="info",
+                    code="DANGLING_SOURCE",
+                    path=str(source.path.relative_to(vault_path)),
+                    message=(
+                        f"Source {source.canonical_id!r} isn't referenced by any "
+                        "concept; run /paperwiki:wiki-ingest to fold it in."
+                    ),
+                )
+            )
 
     for f in report.findings:
         report.counts[f.severity] = report.counts.get(f.severity, 0) + 1

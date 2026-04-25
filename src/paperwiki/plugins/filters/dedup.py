@@ -134,12 +134,14 @@ class MarkdownVaultKeyLoader:
         self,
         root: Path,
         *,
-        arxiv_id_keys: Sequence[str] = ("paper_id", "arxiv_id"),
+        arxiv_id_keys: Sequence[str] = ("canonical_id", "paper_id", "arxiv_id"),
         title_keys: Sequence[str] = ("title",),
+        sources_list_keys: Sequence[str] = ("sources",),
     ) -> None:
         self.root = root
         self.arxiv_id_keys = tuple(arxiv_id_keys)
         self.title_keys = tuple(title_keys)
+        self.sources_list_keys = tuple(sources_list_keys)
         self.name = f"markdown-vault:{root.name}"
 
     async def load(self, ctx: RunContext) -> DedupKeys:
@@ -161,6 +163,7 @@ class MarkdownVaultKeyLoader:
             if frontmatter is None:
                 continue
 
+            # Single-id fields (legacy paper_id, modern canonical_id).
             for key in self.arxiv_id_keys:
                 raw = frontmatter.get(key)
                 if isinstance(raw, str):
@@ -168,6 +171,17 @@ class MarkdownVaultKeyLoader:
                     if normalized is not None:
                         arxiv_ids.add(normalized)
                         break
+
+            # List-typed sources (concept frontmatter on the wiki).
+            for key in self.sources_list_keys:
+                raw_list = frontmatter.get(key)
+                if isinstance(raw_list, list):
+                    for item in raw_list:
+                        if isinstance(item, str):
+                            normalized = normalize_arxiv_id(item)
+                            if normalized is not None:
+                                arxiv_ids.add(normalized)
+                    break
 
             for key in self.title_keys:
                 raw = frontmatter.get(key)

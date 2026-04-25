@@ -151,6 +151,49 @@ class TestStatusMismatch:
         assert "STATUS_MISMATCH" in codes
 
 
+class TestDanglingSource:
+    async def test_source_without_concept_reference_is_flagged(self, tmp_path: Path) -> None:
+        # Source file exists but no concept references its canonical_id.
+        source = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md"
+        _write(
+            source,
+            (
+                'canonical_id: "arxiv:2506.13063"\n'
+                'title: "Lonely Source"\n'
+                "status: draft\nconfidence: 0.5\n"
+            ),
+            "Body",
+        )
+        report = await wiki_lint_runner.lint_wiki(tmp_path, now=_NOW)
+        codes = {f.code for f in report.findings}
+        assert "DANGLING_SOURCE" in codes
+
+    async def test_source_referenced_by_concept_not_flagged(self, tmp_path: Path) -> None:
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        # Source exists.
+        source = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md"
+        _write(
+            source,
+            (
+                'canonical_id: "arxiv:2506.13063"\n'
+                'title: "Referenced Source"\n'
+                "status: draft\nconfidence: 0.5\n"
+            ),
+            "Body",
+        )
+        # And a concept references it.
+        await backend.upsert_concept(
+            name="Vision-Language",
+            body="Body.",
+            sources=["arxiv:2506.13063"],
+            confidence=0.7,
+            status="reviewed",
+        )
+        report = await wiki_lint_runner.lint_wiki(tmp_path, now=_NOW)
+        codes = {f.code for f in report.findings}
+        assert "DANGLING_SOURCE" not in codes
+
+
 class TestSeverityCounts:
     async def test_counts_aggregate(self, tmp_path: Path) -> None:
         concept = tmp_path / "Wiki" / "concepts" / "Multi.md"

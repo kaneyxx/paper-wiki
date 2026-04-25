@@ -271,3 +271,31 @@ class TestMarkdownVaultKeyLoader:
 
         assert keys.arxiv_ids == frozenset()
         assert "justatitle" in keys.title_keys
+
+    async def test_canonical_id_field_recognized(self, tmp_path: Path) -> None:
+        """Wiki source files use ``canonical_id``; the loader picks it up."""
+        _write_note(
+            tmp_path,
+            "Wiki/sources/arxiv_2506.13063.md",
+            extra='canonical_id: "arxiv:2506.13063"\ntitle: "PRISM2"',
+        )
+        loader = MarkdownVaultKeyLoader(root=tmp_path)
+        keys = await loader.load(_make_ctx())
+        assert "2506.13063" in keys.arxiv_ids
+
+    async def test_concept_sources_list_contributes_each_id(self, tmp_path: Path) -> None:
+        """Wiki concept files list multiple sources; every entry contributes."""
+        target = tmp_path / "Wiki/concepts/Vision-Language.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "---\n"
+            'title: "Vision-Language"\n'
+            'sources: ["arxiv:2506.13063", "arxiv:0001.0001"]\n'
+            "---\n"
+            "Body.\n",
+            encoding="utf-8",
+        )
+        loader = MarkdownVaultKeyLoader(root=tmp_path)
+        keys = await loader.load(_make_ctx())
+        assert "2506.13063" in keys.arxiv_ids
+        assert "0001.0001" in keys.arxiv_ids
