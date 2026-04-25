@@ -3,16 +3,31 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytest
 from typer.testing import CliRunner
 
 from paperwiki.runners import diagnostics as diagnostics_runner
 
-if TYPE_CHECKING:
-    import pytest
+
+@pytest.fixture(autouse=True)
+def _stub_claude_mcp_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default: stub ``claude mcp list`` so tests never shell out for real.
+
+    Individual tests that care about the MCP behavior re-patch
+    ``diagnostics_runner.subprocess.run`` themselves and override this.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=args, returncode=0, stdout="No MCP servers configured.\n", stderr=""
+        )
+
+    monkeypatch.setattr(diagnostics_runner.subprocess, "run", fake_run)
+
 
 # ---------------------------------------------------------------------------
 # build_report
@@ -83,6 +98,72 @@ class TestBuildReport:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
         report = diagnostics_runner.build_report()
         assert report.config_exists is True
+
+
+# ---------------------------------------------------------------------------
+# mcp_servers detection (Phase 7.1)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpServersDetection:
+    """`build_report.mcp_servers` reflects ``claude mcp list`` output."""
+
+    @staticmethod
+    def _patch_claude_mcp_list(
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        stdout: str,
+        returncode: int = 0,
+    ) -> None:
+        """Stub ``subprocess.run`` so the test never shells out for real."""
+        import subprocess as sp_real
+
+        def fake_run(*args: object, **kwargs: object) -> sp_real.CompletedProcess[str]:
+            return sp_real.CompletedProcess(
+                args=args, returncode=returncode, stdout=stdout, stderr=""
+            )
+
+        monkeypatch.setattr(diagnostics_runner.subprocess, "run", fake_run)
+
+    def test_lists_registered_mcp_servers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_claude_mcp_list(
+            monkeypatch,
+            stdout=(
+                "Checking MCP server health...\n"
+                "\n"
+                "paperclip: https://paperclip.gxl.ai/mcp - ✓ Connected\n"
+                "plugin:oh-my-claudecode:t: node /tmp/server.js - ✓ Connected\n"
+            ),
+        )
+        report = diagnostics_runner.build_report()
+        assert "paperclip" in report.mcp_servers
+        assert "plugin:oh-my-claudecode:t" in report.mcp_servers
+
+    def test_empty_when_no_mcp_servers_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch_claude_mcp_list(
+            monkeypatch,
+            stdout="Checking MCP server health...\n\nNo MCP servers configured.\n",
+        )
+        report = diagnostics_runner.build_report()
+        assert report.mcp_servers == []
+
+    def test_claude_cli_missing_records_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If ``claude`` isn't on PATH, surface gracefully — never raise."""
+
+        def raises_filenotfound(*args: object, **kwargs: object) -> object:
+            raise FileNotFoundError("claude")
+
+        monkeypatch.setattr(diagnostics_runner.subprocess, "run", raises_filenotfound)
+        report = diagnostics_runner.build_report()
+        assert report.mcp_servers == []
+        assert any("claude CLI not found" in i for i in report.issues)
+
+    def test_claude_cli_failure_records_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-zero exit → empty list + issue, not a crash."""
+        self._patch_claude_mcp_list(monkeypatch, stdout="oh no\n", returncode=1)
+        report = diagnostics_runner.build_report()
+        assert report.mcp_servers == []
+        assert any("claude mcp list" in i for i in report.issues)
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,7 +49,18 @@ class DiagnosticsReport(BaseModel):
     config_path: str
     config_exists: bool
     bundled_recipes: list[str] = Field(default_factory=list)
+    mcp_servers: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
+
+
+# ``claude mcp list`` prints lines shaped like::
+#
+#     <server-name>: <command-or-url> - ✓ Connected
+#     <server-name>: <command-or-url> - ✗ Failed: ...
+#
+# Server names may themselves contain ``:`` (e.g. ``plugin:foo:bar``), so
+# we anchor on the first ``: `` (colon + space) — the field separator.
+_MCP_LIST_LINE = re.compile(r"^(?P<name>\S(?:.*?\S)?): \S")
 
 
 def build_report() -> DiagnosticsReport:
@@ -78,6 +92,8 @@ def build_report() -> DiagnosticsReport:
         sorted(p.name for p in _RECIPES_DIR.glob("*.yaml")) if _RECIPES_DIR.is_dir() else []
     )
 
+    mcp_servers = _detect_mcp_servers(issues)
+
     return DiagnosticsReport(
         paperwiki_version=__version__,
         python_version=(
@@ -89,8 +105,66 @@ def build_report() -> DiagnosticsReport:
         config_path=str(config_path),
         config_exists=config_exists,
         bundled_recipes=bundled_recipes,
+        mcp_servers=mcp_servers,
         issues=issues,
     )
+
+
+def _detect_mcp_servers(issues: list[str]) -> list[str]:
+    """Run ``claude mcp list`` and return the registered server names.
+
+    Failures (CLI missing, non-zero exit) are folded into ``issues`` so
+    the SKILL can offer guidance, but never raise — the diagnostics
+    runner stays usable even when the surrounding tooling drifts.
+    """
+    claude_bin = shutil.which("claude")
+    if claude_bin is None:
+        issues.append(
+            "claude CLI not found on PATH; MCP server detection skipped. "
+            "Install Claude Code or run inside a Claude Code session."
+        )
+        return []
+
+    try:
+        # argv is fully controlled (resolved by shutil.which + literals);
+        # shell=False; user input never reaches the call. S603's "untrusted
+        # input" warning does not apply here.
+        completed = subprocess.run(  # noqa: S603
+            [claude_bin, "mcp", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+            check=False,
+        )
+    except FileNotFoundError:
+        # `which` resolved a path that subsequently disappeared (e.g.,
+        # the CLI was uninstalled mid-session). Treat the same as
+        # "not on PATH" — we never want diagnostics to crash.
+        issues.append(
+            "claude CLI not found on PATH; MCP server detection skipped. "
+            "Install Claude Code or run inside a Claude Code session."
+        )
+        return []
+    except (OSError, subprocess.SubprocessError) as exc:
+        issues.append(f"claude mcp list failed to launch: {exc}")
+        return []
+
+    if completed.returncode != 0:
+        issues.append(
+            f"claude mcp list exited with code {completed.returncode}; "
+            "MCP server list may be incomplete."
+        )
+        return []
+
+    servers: list[str] = []
+    for raw in completed.stdout.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("Checking") or line.startswith("No MCP"):
+            continue
+        match = _MCP_LIST_LINE.match(line)
+        if match is not None:
+            servers.append(match.group("name"))
+    return servers
 
 
 def _resolve_config_path() -> Path:
