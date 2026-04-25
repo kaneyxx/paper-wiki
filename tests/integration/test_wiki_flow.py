@@ -53,8 +53,7 @@ async def test_full_wiki_flow(tmp_path: Path) -> None:
     await backend.upsert_concept(
         name="Vision-Language Foundation Models",
         body=(
-            "A synthesis of vision-language foundation model work, drawing on "
-            "[[arxiv_2506.13063]]."
+            "A synthesis of vision-language foundation model work, drawing on [[arxiv_2506.13063]]."
         ),
         sources=["arxiv:2506.13063"],
         confidence=0.7,
