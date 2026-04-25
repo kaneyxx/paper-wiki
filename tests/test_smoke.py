@@ -208,6 +208,30 @@ def test_analyze_skill_hands_off_to_wiki_ingest() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SKILL content invariants (Phase 7.1 — paperclip MCP wiring)
+# ---------------------------------------------------------------------------
+
+
+def test_setup_skill_surfaces_paperclip_mcp_status() -> None:
+    """setup SKILL must consult diagnostics' mcp_servers for paperclip."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    assert "paperclip" in body, "setup SKILL must mention paperclip"
+    assert "mcp_servers" in body, "setup SKILL must reference the diagnostics ``mcp_servers`` field"
+
+
+def test_setup_skill_documents_registration_command_without_running() -> None:
+    """setup SKILL must show the registration command but not auto-run it."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    # The command itself appears verbatim so users can copy it.
+    assert "claude mcp add" in body, "setup SKILL must show the registration command"
+    assert "paperclip.gxl.ai/mcp" in body, "setup SKILL must show the paperclip MCP URL"
+    # Auth is sensitive — the SKILL must explicitly *not* run the command.
+    assert "do not auto-run" in body.lower() or "without auto-running" in body.lower(), (
+        "setup SKILL must explicitly not auto-run the registration command"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level project files
 # ---------------------------------------------------------------------------
 
