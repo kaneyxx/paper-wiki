@@ -9,6 +9,8 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-25
+
 ### Phase 6.3 — Wiki / dedup integration
 
 #### Added
