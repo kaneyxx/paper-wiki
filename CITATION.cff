@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use paper-wiki in your research, please cite it as below."
+title: paper-wiki
+abstract: "A Claude Code plugin that builds a personal research wiki from academic papers via a pluggable async pipeline."
+authors:
+  - alias: kaneyxx
+type: software
+license: GPL-3.0
+repository-code: "https://github.com/kaneyxx/paper-wiki"
+url: "https://github.com/kaneyxx/paper-wiki"
+keywords:
+  - claude-code
+  - claude-code-plugin
+  - research-wiki
+  - personal-knowledge-base
+  - academic-tools
+  - paper-management
+  - obsidian
+  - arxiv

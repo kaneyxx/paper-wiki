@@ -1,0 +1,14 @@
+{
+  "name": "paper-wiki",
+  "owner": { "name": "kaneyxx" },
+  "metadata": {
+    "description": "Personal research wiki builder for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "paper-wiki",
+      "source": { "source": "github", "repo": "kaneyxx/paper-wiki" },
+      "description": "Pipeline-driven paper ingestion with plugin architecture."
+    }
+  ]
+}
