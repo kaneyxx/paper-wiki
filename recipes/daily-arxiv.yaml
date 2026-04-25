@@ -44,7 +44,9 @@ filters:
   - name: dedup
     config:
       vault_paths:
-        - ~/Documents/Obsidian-Vault/20_Research/Papers
+        # Default friendly layout. Johnny.Decimal / PARA users can swap
+        # this for `~/Documents/Obsidian-Vault/20_Research/Papers` etc.
+        - ~/Documents/Obsidian-Vault/Sources
 
 scorer:
   name: composite
@@ -82,6 +84,7 @@ reporters:
   - name: obsidian
     config:
       vault_path: ~/Documents/Obsidian-Vault
-      daily_subdir: 10_Daily
+      # Override to "10_Daily" if you use Johnny.Decimal / PARA numbering.
+      daily_subdir: Daily
 
 top_k: 10

@@ -36,3 +36,7 @@ coverage.xml
 .claude/local/
 .omc/state/
 .omc/logs/
+
+# Wiki drafts area (only matches a vault embedded in the repo; harmless
+# elsewhere). Pending-review concept articles should not be committed.
+Wiki/.drafts/

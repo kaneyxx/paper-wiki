@@ -39,7 +39,7 @@ filters:
   - name: dedup
     config:
       vault_paths:
-        - ~/Documents/Obsidian-Vault/20_Research/Papers
+        - ~/Documents/Obsidian-Vault/Sources
 
 scorer:
   name: composite
@@ -70,7 +70,7 @@ reporters:
   - name: obsidian
     config:
       vault_path: ~/Documents/Obsidian-Vault
-      daily_subdir: 10_Weekly
+      daily_subdir: Weekly
       filename_template: "{date}-weekly-deep-dive.md"
 
 top_k: 15

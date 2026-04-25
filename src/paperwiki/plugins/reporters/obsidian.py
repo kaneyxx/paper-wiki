@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import aiofiles
 
 from paperwiki import __version__
+from paperwiki.config.layout import DAILY_SUBDIR
 from paperwiki.core.errors import UserError
 
 if TYPE_CHECKING:
@@ -138,7 +139,7 @@ class ObsidianReporter:
         self,
         vault_path: Path,
         *,
-        daily_subdir: str = "10_Daily",
+        daily_subdir: str = DAILY_SUBDIR,
         filename_template: str = "{date}-paper-digest.md",
     ) -> None:
         self.vault_path = vault_path

@@ -151,8 +151,8 @@ class TestObsidianReporter:
     async def test_default_daily_subdir(self, tmp_path: Path) -> None:
         reporter = ObsidianReporter(vault_path=tmp_path)
         await reporter.emit([_make_recommendation()], _make_ctx())
-        # Default subdir is "10_Daily".
-        assert (tmp_path / "10_Daily" / "2026-04-25-paper-digest.md").exists()
+        # Default subdir is "Daily" — friendly, no Johnny.Decimal prefix.
+        assert (tmp_path / "Daily" / "2026-04-25-paper-digest.md").exists()
 
     async def test_custom_filename_template(self, tmp_path: Path) -> None:
         reporter = ObsidianReporter(
