@@ -231,6 +231,21 @@ def test_setup_skill_documents_registration_command_without_running() -> None:
     )
 
 
+def test_paperclip_setup_doc_exists() -> None:
+    """docs/paperclip-setup.md walks users through MCP registration + auth."""
+    doc = REPO_ROOT / "docs" / "paperclip-setup.md"
+    assert doc.is_file(), "docs/paperclip-setup.md must exist"
+    body = doc.read_text(encoding="utf-8")
+    # The full registration command appears verbatim.
+    assert "claude mcp add --transport http paperclip" in body
+    assert "paperclip.gxl.ai/mcp" in body
+    # Auth step + tier guidance are present (link to upstream, not duplicated).
+    assert "paperclip login" in body
+    assert "https://gxl.ai/blog/paperclip" in body or "paperclip.gxl.ai" in body
+    # Stance: optional opt-in, never required.
+    assert "optional" in body.lower()
+
+
 # ---------------------------------------------------------------------------
 # Top-level project files
 # ---------------------------------------------------------------------------
