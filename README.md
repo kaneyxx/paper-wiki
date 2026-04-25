@@ -49,6 +49,23 @@ A "recipe" YAML file declares which plugins to use and how to configure
 them, so you can describe a complete research workflow without writing
 code.
 
+## Vault layout
+
+paper-wiki writes into three subdirs of your vault by default:
+
+```text
+<vault>/
+├── Daily/      # daily digest output
+├── Sources/    # per-paper notes (created by /paperwiki:analyze)
+└── Wiki/       # synthesized concept articles (Phase 6)
+```
+
+The defaults are deliberately friendly. If you use
+[Johnny.Decimal](https://johnnydecimal.com/) or
+[PARA](https://fortelabs.com/blog/para/), every subdir is configurable
+per recipe — for example `daily_subdir: 10_Daily`. paper-wiki neither
+requires nor blocks those conventions.
+
 ## Architecture and contributing
 
 - See [SPEC.md](SPEC.md) for the full operating contract.

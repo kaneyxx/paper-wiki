@@ -278,6 +278,22 @@ paper-wiki/
 - Plugin classes named after their role:
   `*Source`, `*Filter`, `*Scorer`, `*Reporter`, `*Backend`.
 
+### Vault subdirectory defaults
+
+The plugin writes user-facing artifacts under three default subdirs of
+the user's vault. They are exposed as constants in
+`paperwiki.config.layout`:
+
+| Constant | Default value | Purpose |
+|----------|--------------|---------|
+| `DAILY_SUBDIR` | `Daily` | Per-day digests written by `ObsidianReporter`. |
+| `SOURCES_SUBDIR` | `Sources` | Per-paper notes written by the `analyze` SKILL (Phase 6). |
+| `WIKI_SUBDIR` | `Wiki` | Synthesized concept articles + index (Phase 6). |
+
+The defaults are deliberately friendly (no numeric prefixes) so the
+plugin does not impose Johnny.Decimal / PARA conventions on users who
+do not follow them. Users who do can override every subdir per-recipe.
+
 ---
 
 ## 4. Manifest contracts

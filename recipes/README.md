@@ -42,3 +42,17 @@ parameters. Unknown plugin names raise `UserError` at recipe load time.
 Any recipe path that starts with `~` is expanded to the user home
 directory at load time. Use absolute or `~`-prefixed paths so recipes
 remain portable across machines.
+
+## Vault subdirectory defaults
+
+paper-wiki ships with friendly subdirectory defaults — `Daily/`,
+`Sources/`, `Wiki/` — without numeric prefixes. The defaults live as
+constants in [`paperwiki.config.layout`](../src/paperwiki/config/layout.py)
+so reporters, runners, and the wiki backend share one source of truth.
+
+If you use [Johnny.Decimal](https://johnnydecimal.com/) or
+[PARA](https://fortelabs.com/blog/para/), override the relevant subdir
+per-recipe — for example, set `daily_subdir: 10_Daily` on the
+`obsidian` reporter or point `vault_paths` at
+`~/Vault/20_Research/Papers`. paper-wiki neither requires nor blocks
+those conventions; defaults stay neutral.
