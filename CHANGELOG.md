@@ -9,6 +9,36 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-04-25
+
+### Fixed
+- **`PaperclipSource` rewritten against the real paperclip 0.2.x CLI.**
+  v0.3.0 shipped a plugin built against an assumed `--json` flag and
+  imaginary `--source biorxiv,pmc` arguments — the real CLI has no JSON
+  output and uses `-T TYPE`, `--journal NAME`, `--since Nd` instead.
+  The plugin now follows paperclip's actual two-step flow:
+  1. `paperclip search QUERY -n N [--since Nd] [--journal NAME] [-T TYPE]`
+     captures a session id of the form `[s_<hex>]` from stdout.
+  2. `paperclip results <session_id> --save <tmpfile.csv>` exports the
+     structured CSV (`title,authors,id,source,date,url,abstract`).
+  Recipe config keys for `PaperclipSource` change from `sources: [...]`
+  to `since_days: int`, `journal: str`, `document_type: str`.
+- **Empty paperclip abstracts no longer drop the paper.** Real CSV
+  exports frequently ship empty `abstract` cells; the plugin now
+  substitutes `_(no abstract available from paperclip)_` so dedup,
+  scoring, and the wiki backend keep the entry while making the gap
+  visible to the user.
+- `recipes/biomedical-weekly.yaml` config keys updated to match the
+  real CLI surface area (`since_days: 7` replacing the imaginary
+  `sources: [biorxiv, medrxiv, pmc]` list).
+
+### Verified end-to-end
+- Live smoke test against real paperclip 0.2.0 with the query
+  `"CRISPR base editing"`: 3/3 hits parsed cleanly; one had a real
+  abstract, two used the placeholder.
+- `diagnostics.mcp_servers` correctly enumerates `claude mcp list`
+  output on a real machine.
+
 ## [0.3.0] — 2026-04-25
 
 ### Phase 7 — Paperclip integration (optional)
