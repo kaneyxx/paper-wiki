@@ -10,6 +10,12 @@ without depending on internal module paths.
 
 from __future__ import annotations
 
+from paperwiki.core.errors import (
+    IntegrationError,
+    PaperWikiError,
+    PluginError,
+    UserError,
+)
 from paperwiki.core.models import (
     DEFAULT_SCORE_WEIGHTS,
     Author,
@@ -22,8 +28,12 @@ from paperwiki.core.models import (
 __all__ = [
     "DEFAULT_SCORE_WEIGHTS",
     "Author",
+    "IntegrationError",
     "Paper",
+    "PaperWikiError",
+    "PluginError",
     "Recommendation",
     "RunContext",
     "ScoreBreakdown",
+    "UserError",
 ]
