@@ -54,6 +54,7 @@ dev = [
   "syrupy>=4.7",
   "hypothesis>=6.115",
   "types-PyYAML>=6.0",
+  "types-aiofiles>=24.1",
 ]
 
 [project.urls]
