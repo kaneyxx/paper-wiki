@@ -84,12 +84,15 @@ async def lint_wiki(
     """Inspect the wiki and return structured findings."""
     backend = MarkdownWikiBackend(vault_path=vault_path, wiki_subdir=wiki_subdir)
     concepts = await backend.list_concepts()
+    sources = await backend.list_sources()
 
     report = LintReport()
     if not concepts:
         return report
 
-    concept_names = {c.name for c in concepts}
+    # Wikilinks may target either a concept (by name) or a source file
+    # (by file stem); both are valid resolution targets.
+    known_targets = {c.name for c in concepts} | {s.path.stem for s in sources}
     when = now or datetime.now(UTC)
     cutoff = when.date() - timedelta(days=stale_days)
 
@@ -99,7 +102,7 @@ async def lint_wiki(
             vault_path=vault_path,
             cutoff_date=cutoff,
             max_lines=max_lines,
-            known_concepts=concept_names,
+            known_concepts=known_targets,
             report=report,
         )
 
