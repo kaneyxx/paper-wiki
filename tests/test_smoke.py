@@ -13,6 +13,8 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
@@ -136,22 +138,28 @@ def _read_frontmatter(path: Path) -> dict[str, str]:
     return fields
 
 
-def test_setup_skill_has_required_frontmatter() -> None:
-    """``skills/setup/SKILL.md`` declares ``name`` and ``description``."""
-    skill = REPO_ROOT / "skills" / "setup" / "SKILL.md"
-    assert skill.is_file(), skill
-
-    fields = _read_frontmatter(skill)
-
-    assert fields.get("name") == "setup"
-    assert fields.get("description"), "description is required"
-    assert "Use when" in fields["description"], "description must list trigger conditions"
+_ALL_SKILLS = sorted((REPO_ROOT / "skills").glob("*/SKILL.md"))
+_ALL_SLASH_COMMANDS = sorted((REPO_ROOT / ".claude" / "commands").glob("*.md"))
 
 
-def test_setup_skill_has_six_section_anatomy() -> None:
-    """``skills/setup/SKILL.md`` follows the six-section anatomy from SPEC.md §4."""
-    skill = REPO_ROOT / "skills" / "setup" / "SKILL.md"
-    body = skill.read_text(encoding="utf-8")
+@pytest.mark.parametrize("skill_path", _ALL_SKILLS, ids=lambda p: p.parent.name)
+def test_skill_has_required_frontmatter(skill_path: Path) -> None:
+    """Every ``skills/<name>/SKILL.md`` declares ``name`` + ``description``."""
+    fields = _read_frontmatter(skill_path)
+
+    assert fields.get("name") == skill_path.parent.name, (
+        f"frontmatter name must match directory: {skill_path}"
+    )
+    assert fields.get("description"), f"description is required: {skill_path}"
+    assert "Use when" in fields["description"], (
+        f"description must list trigger conditions: {skill_path}"
+    )
+
+
+@pytest.mark.parametrize("skill_path", _ALL_SKILLS, ids=lambda p: p.parent.name)
+def test_skill_has_six_section_anatomy(skill_path: Path) -> None:
+    """Every SKILL follows the six-section anatomy from SPEC.md §4."""
+    body = skill_path.read_text(encoding="utf-8")
 
     required_sections = (
         "## Overview",
@@ -162,16 +170,14 @@ def test_setup_skill_has_six_section_anatomy() -> None:
         "## Verification",
     )
     for section in required_sections:
-        assert section in body, f"missing section: {section}"
+        assert section in body, f"missing section {section!r}: {skill_path}"
 
 
-def test_setup_slash_command_present() -> None:
-    """``.claude/commands/setup.md`` exists with a description."""
-    cmd = REPO_ROOT / ".claude" / "commands" / "setup.md"
-    assert cmd.is_file(), cmd
-
-    fields = _read_frontmatter(cmd)
-    assert fields.get("description"), "slash command must have a description"
+@pytest.mark.parametrize("cmd_path", _ALL_SLASH_COMMANDS, ids=lambda p: p.stem)
+def test_slash_command_has_description(cmd_path: Path) -> None:
+    """Every ``.claude/commands/<name>.md`` declares ``description``."""
+    fields = _read_frontmatter(cmd_path)
+    assert fields.get("description"), f"slash command must have a description: {cmd_path}"
 
 
 # ---------------------------------------------------------------------------
