@@ -131,7 +131,14 @@ def _render_recommendation(index: int, rec: Recommendation) -> str:
 
 
 class ObsidianReporter:
-    """Persist an Obsidian-flavored digest under ``vault_path/daily_subdir``."""
+    """Persist an Obsidian-flavored digest under ``vault_path/daily_subdir``.
+
+    When ``wiki_backend`` is true the reporter additionally writes each
+    recommendation as a per-paper source file under
+    ``vault_path/Wiki/sources/`` via :class:`MarkdownWikiBackend`. This is
+    the digest-side half of the wiki ingest loop — concept synthesis is
+    still driven by ``/paperwiki:wiki-ingest`` afterwards.
+    """
 
     name = "obsidian"
 
@@ -141,10 +148,12 @@ class ObsidianReporter:
         *,
         daily_subdir: str = DAILY_SUBDIR,
         filename_template: str = "{date}-paper-digest.md",
+        wiki_backend: bool = False,
     ) -> None:
         self.vault_path = vault_path
         self.daily_subdir = daily_subdir
         self.filename_template = filename_template
+        self.wiki_backend = wiki_backend
 
     async def emit(
         self,
@@ -168,6 +177,16 @@ class ObsidianReporter:
         async with aiofiles.open(path, "w", encoding="utf-8") as fh:
             await fh.write(rendered)
         ctx.increment("reporter.obsidian.written")
+
+        if self.wiki_backend:
+            # Lazy-import keeps the daily-digest fast path free of the
+            # backend's yaml round-trip overhead when the flag is off.
+            from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
+
+            backend = MarkdownWikiBackend(vault_path=self.vault_path)
+            for rec in recs:
+                await backend.upsert_paper(rec)
+                ctx.increment("reporter.obsidian.wiki_backend.written")
 
 
 __all__ = [

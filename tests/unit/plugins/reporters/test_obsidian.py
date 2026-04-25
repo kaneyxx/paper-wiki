@@ -176,3 +176,43 @@ class TestObsidianReporter:
 
         reporter = ObsidianReporter(vault_path=tmp_path)
         assert isinstance(reporter, Reporter)
+
+    async def test_wiki_backend_default_does_not_create_sources(self, tmp_path: Path) -> None:
+        """Without ``wiki_backend=True`` the reporter must not touch ``Wiki/``."""
+        reporter = ObsidianReporter(vault_path=tmp_path)
+        await reporter.emit([_make_recommendation()], _make_ctx())
+        assert not (tmp_path / "Wiki").exists()
+
+    async def test_wiki_backend_true_writes_per_paper_source(self, tmp_path: Path) -> None:
+        """With ``wiki_backend=True`` each rec lands as ``Wiki/sources/<id>.md``."""
+        reporter = ObsidianReporter(vault_path=tmp_path, wiki_backend=True)
+        ctx = _make_ctx()
+        await reporter.emit([_make_recommendation()], ctx)
+
+        expected = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md"
+        assert expected.exists()
+        body = expected.read_text(encoding="utf-8")
+        assert "canonical_id: arxiv:2506.13063" in body
+        assert "PRISM2" in body
+        assert ctx.counters["reporter.obsidian.wiki_backend.written"] == 1
+
+    async def test_wiki_backend_true_writes_one_file_per_recommendation(
+        self, tmp_path: Path
+    ) -> None:
+        reporter = ObsidianReporter(vault_path=tmp_path, wiki_backend=True)
+        recs = [
+            _make_recommendation(canonical_id="arxiv:1111.1111", title="Alpha"),
+            _make_recommendation(canonical_id="arxiv:2222.2222", title="Beta"),
+            _make_recommendation(canonical_id="arxiv:3333.3333", title="Gamma"),
+        ]
+        ctx = _make_ctx()
+        await reporter.emit(recs, ctx)
+
+        sources_dir = tmp_path / "Wiki" / "sources"
+        files = sorted(p.name for p in sources_dir.glob("*.md"))
+        assert files == [
+            "arxiv_1111.1111.md",
+            "arxiv_2222.2222.md",
+            "arxiv_3333.3333.md",
+        ]
+        assert ctx.counters["reporter.obsidian.wiki_backend.written"] == 3
