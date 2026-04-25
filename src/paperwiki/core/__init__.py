@@ -32,9 +32,20 @@ from paperwiki.core.protocols import (
     Source,
     WikiBackend,
 )
+from paperwiki.core.registry import (
+    FILTERS_GROUP,
+    REPORTERS_GROUP,
+    SCORERS_GROUP,
+    SOURCES_GROUP,
+    discover_plugins,
+)
 
 __all__ = [
     "DEFAULT_SCORE_WEIGHTS",
+    "FILTERS_GROUP",
+    "REPORTERS_GROUP",
+    "SCORERS_GROUP",
+    "SOURCES_GROUP",
     "Author",
     "Filter",
     "IntegrationError",
@@ -51,4 +62,5 @@ __all__ = [
     "Source",
     "UserError",
     "WikiBackend",
+    "discover_plugins",
 ]
