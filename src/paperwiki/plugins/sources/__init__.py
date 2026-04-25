@@ -8,5 +8,6 @@ external systems. Each source must satisfy
 from __future__ import annotations
 
 from paperwiki.plugins.sources.arxiv import ArxivSource
+from paperwiki.plugins.sources.semantic_scholar import SemanticScholarSource
 
-__all__ = ["ArxivSource"]
+__all__ = ["ArxivSource", "SemanticScholarSource"]
