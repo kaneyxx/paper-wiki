@@ -9,6 +9,43 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-25
+
+### Phase 7 — Paperclip integration (optional)
+
+#### Added
+- **`paperwiki.runners.diagnostics`** gains an `mcp_servers: list[str]`
+  field. The runner shells out to `claude mcp list` (resolved via
+  `shutil.which`) and parses the registered server names. Failures
+  (missing CLI, non-zero exit, race conditions) fold into `issues`
+  rather than crashing.
+- **`PaperclipSource`** plugin (`paperwiki.plugins.sources.paperclip`)
+  wraps the third-party paperclip CLI as a paper-wiki `Source`. Maps
+  hits' canonical ids to `arxiv:<id>` when the paper exposes one
+  (so dedup converges with `ArxivSource`), `paperclip:bio_<id>` for
+  bioRxiv/medRxiv, and `paperclip:pmc_<id>` for PubMed Central. Tests
+  mock at `asyncio.create_subprocess_exec` and never shell out for
+  real.
+- Recipes can now name `paperclip` like any other source plugin.
+- New bundled recipe **`recipes/biomedical-weekly.yaml`** demonstrates
+  paperclip + dedup + `wiki_backend: true` for a weekly biomedical
+  preprint pull.
+- New SKILL **`paperwiki:bio-search`** (six-section anatomy) +
+  `.claude/commands/bio-search.md`. Walks Claude through paperclip
+  MCP-driven biomedical search with optional handoff to
+  `/paperwiki:wiki-ingest`. Fails gracefully when the MCP server is
+  not registered.
+- New documentation **`docs/paperclip-setup.md`** covers CLI install,
+  authentication, MCP registration, removal, and troubleshooting.
+- README Quick Start gains an "Optional: biomedical literature"
+  subsection.
+
+#### Changed
+- `setup` SKILL surfaces the diagnostics `mcp_servers` field. When
+  `paperclip` is missing it offers the registration command verbatim
+  but **never auto-runs** `claude mcp add` — auth is sensitive and
+  paperclip may be on a metered tier. Two new Red Flags pin this.
+
 ## [0.2.0] — 2026-04-25
 
 ### Phase 6.3 — Wiki / dedup integration
