@@ -1,0 +1,108 @@
+# personal-johnny-decimal — example recipe for users who keep their Obsidian
+# vault on a Johnny.Decimal / PARA numbering scheme (e.g.,
+# `10_Daily/`, `20_Research/Papers/`, etc.).
+#
+# Copy this to your own private location, e.g.:
+#   ~/.config/paperwiki/recipes/personal.yaml
+# and edit the topics + paths to match your setup.
+#
+# Why a personal recipe (vs. tweaking the bundled ones):
+# - bundled recipes ship friendly defaults (`Daily/`, `Sources/`, `Wiki/`)
+#   so first-time users don't get surprise-named directories
+# - existing PARA / Johnny.Decimal users override per-recipe instead of
+#   migrating their vault — your existing 10_Daily/ history stays put
+
+name: personal-arxiv
+
+sources:
+  - name: arxiv
+    config:
+      categories:
+        - cs.AI
+        - cs.LG
+        - cs.CL
+        - cs.CV
+      lookback_days: 1
+      max_results: 200
+
+filters:
+  - name: recency
+    config:
+      max_days: 1
+  - name: relevance
+    config:
+      topics:
+        - name: vision-language
+          keywords:
+            - vision-language
+            - vision language model
+            - multimodal
+            - foundation model
+          categories:
+            - cs.CV
+            - cs.LG
+        - name: agents
+          keywords:
+            - agent
+            - tool use
+            - reasoning
+          categories:
+            - cs.AI
+  - name: dedup
+    config:
+      vault_paths:
+        # Existing daily digests (avoids re-recommending what was
+        # surfaced last week).
+        - ~/Documents/Obsidian-Vault/10_Daily
+        # Your hand-curated paper notes.
+        - ~/Documents/Obsidian-Vault/20_Research/Papers
+        # Future Wiki concepts will also contribute dedup keys via
+        # their `sources:` frontmatter once you opt in (see below).
+        # - ~/Documents/Obsidian-Vault/30_Wiki/concepts
+
+scorer:
+  name: composite
+  config:
+    topics:
+      - name: vision-language
+        keywords:
+          - vision-language
+          - vision language model
+          - multimodal
+          - foundation model
+        categories:
+          - cs.CV
+          - cs.LG
+      - name: agents
+        keywords:
+          - agent
+          - tool use
+          - reasoning
+        categories:
+          - cs.AI
+    weights:
+      relevance: 0.40
+      novelty: 0.20
+      momentum: 0.30
+      rigor: 0.10
+    momentum_full_citations: 100
+    recency_full_days: 7
+
+reporters:
+  - name: markdown
+    config:
+      output_dir: ~/paper-wiki/digests
+  - name: obsidian
+    config:
+      vault_path: ~/Documents/Obsidian-Vault
+      # Override the friendly "Daily/" default to match Johnny.Decimal.
+      daily_subdir: 10_Daily
+      # Opt in to wiki backend? When true, top-K papers are mirrored
+      # into `<vault>/Wiki/sources/` (NOT 30_Wiki/sources). The wiki
+      # subdir is currently NOT overridable per-recipe — track issue
+      # https://github.com/kaneyxx/paper-wiki/issues for a future
+      # `wiki_subdir` option. For now, leave wiki_backend off if you
+      # want a numbered wiki dir; flip to true once we ship the override.
+      # wiki_backend: true
+
+top_k: 10
