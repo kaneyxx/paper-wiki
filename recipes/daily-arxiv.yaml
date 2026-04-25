@@ -86,5 +86,10 @@ reporters:
       vault_path: ~/Documents/Obsidian-Vault
       # Override to "10_Daily" if you use Johnny.Decimal / PARA numbering.
       daily_subdir: Daily
+      # Opt in to the wiki backend: each top-K paper is also written to
+      # `Wiki/sources/<canonical-id>.md` so /paperwiki:wiki-ingest can
+      # fold it into your concept articles. Off by default to avoid
+      # touching first-time-user vaults.
+      # wiki_backend: true
 
 top_k: 10

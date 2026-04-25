@@ -27,3 +27,16 @@ def test_bundled_recipe_loads_and_instantiates(recipe_path: Path) -> None:
     assert recipe.name
     assert pipeline.sources
     assert pipeline.reporters
+
+
+def test_daily_arxiv_demonstrates_wiki_backend_flag() -> None:
+    """The flagship recipe must show users how to opt in to ``wiki_backend``.
+
+    The reference is intentionally a commented YAML line — we don't want
+    to surprise-write into a fresh user's vault on first run, but the
+    feature has to be discoverable from the canonical recipe.
+    """
+    text = (RECIPES_DIR / "daily-arxiv.yaml").read_text(encoding="utf-8")
+    assert "wiki_backend" in text, (
+        "daily-arxiv.yaml must demonstrate the wiki_backend flag (commented or live)"
+    )
