@@ -24,6 +24,7 @@ from paperwiki.core.models import (
     RunContext,
     ScoreBreakdown,
 )
+from paperwiki.core.pipeline import Pipeline, PipelineResult
 from paperwiki.core.protocols import (
     Filter,
     Reporter,
@@ -39,6 +40,8 @@ __all__ = [
     "IntegrationError",
     "Paper",
     "PaperWikiError",
+    "Pipeline",
+    "PipelineResult",
     "PluginError",
     "Recommendation",
     "Reporter",
