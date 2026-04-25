@@ -246,6 +246,29 @@ def test_paperclip_setup_doc_exists() -> None:
     assert "optional" in body.lower()
 
 
+def test_bio_search_skill_documents_mcp_dependency_and_fallback() -> None:
+    """bio-search SKILL must explain the paperclip MCP requirement + fallback."""
+    skill = REPO_ROOT / "skills" / "bio-search" / "SKILL.md"
+    assert skill.is_file(), "skills/bio-search/SKILL.md must exist"
+    body = skill.read_text(encoding="utf-8")
+    # Trigger keywords: biomedical research vocabulary.
+    assert "biomedical" in body.lower()
+    assert "biorxiv" in body.lower() or "pubmed" in body.lower()
+    # Hard dependency on paperclip MCP must be called out explicitly.
+    assert "paperclip" in body.lower()
+    assert "mcp" in body.lower()
+    # Graceful fallback when paperclip MCP isn't registered.
+    assert "docs/paperclip-setup.md" in body or "/paperwiki:setup" in body, (
+        "bio-search SKILL must point users at setup docs when MCP is missing"
+    )
+
+
+def test_bio_search_slash_command_exists() -> None:
+    """`.claude/commands/bio-search.md` registers the slash command."""
+    cmd = REPO_ROOT / ".claude" / "commands" / "bio-search.md"
+    assert cmd.is_file(), ".claude/commands/bio-search.md must exist"
+
+
 # ---------------------------------------------------------------------------
 # Top-level project files
 # ---------------------------------------------------------------------------
