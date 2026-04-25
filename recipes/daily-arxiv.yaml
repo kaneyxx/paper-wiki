@@ -1,0 +1,87 @@
+# daily-arxiv recipe — pull yesterday's arXiv submissions, filter for the
+# user's topics, dedup against the Obsidian vault, and write a digest to
+# both a plain Markdown directory and the vault's daily folder.
+#
+# Edit the topics, vault paths, and category list to match your setup.
+
+name: daily-arxiv
+
+sources:
+  - name: arxiv
+    config:
+      categories:
+        - cs.AI
+        - cs.LG
+        - cs.CL
+        - cs.CV
+      lookback_days: 1
+      max_results: 200
+
+filters:
+  - name: recency
+    config:
+      max_days: 1
+  - name: relevance
+    config:
+      topics:
+        - name: vision-language
+          keywords:
+            - vision-language
+            - vision language model
+            - multimodal
+            - foundation model
+          categories:
+            - cs.CV
+            - cs.LG
+        - name: agents
+          keywords:
+            - agent
+            - tool use
+            - reasoning
+          categories:
+            - cs.AI
+            - cs.MA
+  - name: dedup
+    config:
+      vault_paths:
+        - ~/Documents/Obsidian-Vault/20_Research/Papers
+
+scorer:
+  name: composite
+  config:
+    topics:
+      - name: vision-language
+        keywords:
+          - vision-language
+          - vision language model
+          - multimodal
+          - foundation model
+        categories:
+          - cs.CV
+          - cs.LG
+      - name: agents
+        keywords:
+          - agent
+          - tool use
+          - reasoning
+        categories:
+          - cs.AI
+          - cs.MA
+    weights:
+      relevance: 0.40
+      novelty: 0.20
+      momentum: 0.30
+      rigor: 0.10
+    momentum_full_citations: 100
+    recency_full_days: 7
+
+reporters:
+  - name: markdown
+    config:
+      output_dir: ~/paper-wiki/digests
+  - name: obsidian
+    config:
+      vault_path: ~/Documents/Obsidian-Vault
+      daily_subdir: 10_Daily
+
+top_k: 10

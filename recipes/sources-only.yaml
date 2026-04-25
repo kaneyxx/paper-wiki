@@ -1,0 +1,37 @@
+# sources-only recipe — minimal end-to-end test of source plugins
+# without filters, vault dependencies, or scoring weights to tune.
+#
+# Useful for first-time setup and source-plugin smoke testing. Run with:
+#   python -m paperwiki.runners.digest recipes/sources-only.yaml
+#
+# Output goes to ./out by default; change `output_dir` to redirect.
+
+name: sources-only
+
+sources:
+  - name: arxiv
+    config:
+      categories:
+        - cs.AI
+      lookback_days: 1
+      max_results: 20
+
+filters: []
+
+scorer:
+  name: composite
+  config:
+    topics:
+      - name: catch-all
+        keywords:
+          - learning
+          - model
+        categories:
+          - cs.AI
+
+reporters:
+  - name: markdown
+    config:
+      output_dir: ./out
+
+top_k: 5

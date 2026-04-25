@@ -1,0 +1,76 @@
+# weekly-deep-dive recipe — wider lookback, citation-aware scoring, and
+# a Semantic Scholar source for high-influence papers across the past week.
+
+name: weekly-deep-dive
+
+sources:
+  - name: arxiv
+    config:
+      categories:
+        - cs.AI
+        - cs.LG
+        - cs.CL
+        - cs.CV
+      lookback_days: 7
+      max_results: 200
+  - name: semantic_scholar
+    config:
+      query: foundation model multimodal reasoning
+      lookback_days: 30
+      limit: 50
+
+filters:
+  - name: recency
+    config:
+      max_days: 30
+  - name: relevance
+    config:
+      topics:
+        - name: foundation-models
+          keywords:
+            - foundation model
+            - multimodal
+            - large language model
+            - reasoning
+          categories:
+            - cs.CV
+            - cs.LG
+            - cs.CL
+  - name: dedup
+    config:
+      vault_paths:
+        - ~/Documents/Obsidian-Vault/20_Research/Papers
+
+scorer:
+  name: composite
+  config:
+    topics:
+      - name: foundation-models
+        keywords:
+          - foundation model
+          - multimodal
+          - large language model
+          - reasoning
+        categories:
+          - cs.CV
+          - cs.LG
+          - cs.CL
+    # Lean toward momentum (citations) for the weekly sweep.
+    weights:
+      relevance: 0.30
+      novelty: 0.10
+      momentum: 0.50
+      rigor: 0.10
+    momentum_full_citations: 200
+
+reporters:
+  - name: markdown
+    config:
+      output_dir: ~/paper-wiki/weekly
+  - name: obsidian
+    config:
+      vault_path: ~/Documents/Obsidian-Vault
+      daily_subdir: 10_Weekly
+      filename_template: "{date}-weekly-deep-dive.md"
+
+top_k: 15
