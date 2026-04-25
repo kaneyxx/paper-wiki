@@ -1,0 +1,80 @@
+# biomedical-weekly recipe — pull biomedical preprints from paperclip
+# (bioRxiv + medRxiv + PubMed Central) for a single research focus,
+# dedup against your existing wiki, and write a digest into the
+# vault's daily folder.
+#
+# Requirements:
+# - paperclip CLI installed (see docs/paperclip-setup.md)
+# - `paperclip login` completed
+# - claude mcp registration is optional; the source plugin shells out
+#   to the CLI directly and does not depend on the MCP layer
+#
+# This recipe demonstrates the wiki_backend handoff: each top-K paper
+# lands as a `Wiki/sources/<id>.md` file alongside the daily digest, so
+# /paperwiki:wiki-ingest can fold it straight into your concept
+# articles.
+
+name: biomedical-weekly
+
+sources:
+  - name: paperclip
+    config:
+      query: "vision-language pathology foundation model"
+      limit: 50
+      sources:
+        - biorxiv
+        - medrxiv
+        - pmc
+
+filters:
+  - name: recency
+    config:
+      max_days: 7
+  - name: dedup
+    config:
+      vault_paths:
+        - ~/Documents/Obsidian-Vault/Sources
+        - ~/Documents/Obsidian-Vault/Wiki/sources
+        - ~/Documents/Obsidian-Vault/Wiki/concepts
+
+scorer:
+  name: composite
+  config:
+    topics:
+      - name: pathology-foundation-model
+        keywords:
+          - foundation model
+          - vision-language
+          - pathology
+          - whole-slide image
+          - histopathology
+        categories: []
+      - name: clinical-translation
+        keywords:
+          - clinical
+          - prospective
+          - retrospective
+          - diagnosis
+        categories: []
+    weights:
+      relevance: 0.50
+      novelty: 0.20
+      momentum: 0.20
+      rigor: 0.10
+    momentum_full_citations: 50
+    recency_full_days: 14
+
+reporters:
+  - name: markdown
+    config:
+      output_dir: ~/paper-wiki/digests/biomedical
+  - name: obsidian
+    config:
+      vault_path: ~/Documents/Obsidian-Vault
+      daily_subdir: Daily
+      # Drop top-K hits into Wiki/sources/ so /paperwiki:wiki-ingest
+      # can fold them into concept articles. Recommended for the
+      # weekly cadence — 10 sources/week is comfortable to ingest.
+      wiki_backend: true
+
+top_k: 10

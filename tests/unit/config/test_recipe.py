@@ -206,6 +206,33 @@ class TestInstantiatePipeline:
         with pytest.raises(UserError, match="unknown source"):
             instantiate_pipeline(recipe)
 
+    def test_paperclip_source_builds(self) -> None:
+        """Recipes can name ``paperclip`` like any other source plugin."""
+        from paperwiki.plugins.sources.paperclip import PaperclipSource
+
+        recipe = RecipeSchema.model_validate(
+            {
+                **_VALID_RECIPE,
+                "sources": [
+                    {
+                        "name": "paperclip",
+                        "config": {
+                            "query": "vision-language pathology",
+                            "limit": 25,
+                            "sources": ["biorxiv", "pmc"],
+                        },
+                    }
+                ],
+            }
+        )
+        pipeline = instantiate_pipeline(recipe)
+        assert len(pipeline.sources) == 1
+        source = pipeline.sources[0]
+        assert isinstance(source, PaperclipSource)
+        assert source.query == "vision-language pathology"
+        assert source.limit == 25
+        assert source.sources == ["biorxiv", "pmc"]
+
     def test_unknown_filter_raises_user_error(self) -> None:
         recipe = RecipeSchema.model_validate(_VALID_RECIPE)
         recipe.filters.append(PluginSpec(name="bogus"))

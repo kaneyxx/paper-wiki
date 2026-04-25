@@ -33,6 +33,7 @@ from paperwiki.plugins.reporters.markdown import MarkdownReporter
 from paperwiki.plugins.reporters.obsidian import ObsidianReporter
 from paperwiki.plugins.scorers.composite import CompositeScorer
 from paperwiki.plugins.sources.arxiv import ArxivSource
+from paperwiki.plugins.sources.paperclip import PaperclipSource
 from paperwiki.plugins.sources.semantic_scholar import SemanticScholarSource
 
 if TYPE_CHECKING:
@@ -116,6 +117,8 @@ def _build_source(spec: PluginSpec) -> Source:
         return ArxivSource(**spec.config)
     if spec.name == "semantic_scholar":
         return SemanticScholarSource(**spec.config)
+    if spec.name == "paperclip":
+        return PaperclipSource(**spec.config)
     msg = f"unknown source plugin: {spec.name!r}"
     raise UserError(msg)
 
