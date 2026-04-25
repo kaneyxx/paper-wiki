@@ -7,5 +7,6 @@ satisfies :class:`paperwiki.core.protocols.Filter`.
 from __future__ import annotations
 
 from paperwiki.plugins.filters.recency import RecencyFilter
+from paperwiki.plugins.filters.relevance import RelevanceFilter, Topic
 
-__all__ = ["RecencyFilter"]
+__all__ = ["RecencyFilter", "RelevanceFilter", "Topic"]
