@@ -181,6 +181,33 @@ def test_slash_command_has_description(cmd_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# SKILL content invariants (Phase 6.3 — wiki integration)
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_skill_writes_to_sources_subdir() -> None:
+    """The analyze SKILL must direct writes into the canonical ``Sources/``."""
+    body = (REPO_ROOT / "skills" / "analyze" / "SKILL.md").read_text(encoding="utf-8")
+    # The friendly default lives at the top level of the vault, not under
+    # the legacy ``{paper_subdir}`` placeholder. Both forms are accepted.
+    assert "Sources/" in body or "/Sources/" in body, (
+        "analyze SKILL must reference the Sources/ subdir per Phase 6.1 layout"
+    )
+    # The legacy placeholder must be gone — it's misleading now.
+    assert "{paper_subdir}" not in body, (
+        "analyze SKILL still references the legacy {paper_subdir} placeholder"
+    )
+
+
+def test_analyze_skill_hands_off_to_wiki_ingest() -> None:
+    """After writing the source, analyze must call /paperwiki:wiki-ingest."""
+    body = (REPO_ROOT / "skills" / "analyze" / "SKILL.md").read_text(encoding="utf-8")
+    assert "/paperwiki:wiki-ingest" in body, (
+        "analyze SKILL must hand off to /paperwiki:wiki-ingest after writing"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level project files
 # ---------------------------------------------------------------------------
 

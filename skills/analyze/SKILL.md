@@ -45,11 +45,20 @@ overviews or topic surveys (no SKILL covers that yet).
 4. **Build the analysis.** Cover six sections in this order:
    research problem, method overview, key innovations, experimental
    results, deep analysis, comparison with related work.
-5. **Write to the vault.** Paper notes live at
-   `{vault_path}/{paper_subdir}/{normalized-title}.md` with frontmatter
-   carrying `paper_id`, `title`, `domain`, `tags`, and a status field
-   so dedup recognizes the entry on the next digest run.
-6. **Cross-link.** If the user came from a digest entry, update the
+5. **Write to the vault.** Paper notes live under the vault's
+   `Sources/` subdir at `{vault_path}/Sources/{normalized-title}.md`
+   (the constant `SOURCES_SUBDIR` in `paperwiki.config.layout`).
+   Frontmatter must carry `canonical_id`, `title`, `tags`, `status`,
+   and `confidence` so dedup recognizes the entry on the next digest
+   run and `wiki_lint` does not flag it as broken. Johnny.Decimal /
+   PARA users may override the subdir name in their recipe; the
+   constant is the single source of truth.
+6. **Hand off to wiki-ingest.** Immediately invoke
+   `/paperwiki:wiki-ingest <canonical-id>` so the new source is
+   folded into the user's concept articles. Skipping this step
+   leaves a `DANGLING_SOURCE` finding the next time `wiki-lint`
+   runs.
+7. **Cross-link.** If the user came from a digest entry, update the
    digest line to point its wikilink at the new note.
 
 ## Common Rationalizations
@@ -71,8 +80,13 @@ overviews or topic surveys (no SKILL covers that yet).
 
 ## Verification
 
-- The output file lives at the expected path under the vault.
-- Frontmatter parses as YAML and contains at least `paper_id`,
-  `title`, and `tags`.
+- The output file lives under `{vault_path}/Sources/` (or whatever
+  `SOURCES_SUBDIR` is configured to in the active recipe).
+- Frontmatter parses as YAML and contains at least `canonical_id`,
+  `title`, `tags`, `status`, and `confidence`.
+- `/paperwiki:wiki-ingest` ran on the new canonical id and reported
+  zero `BROKEN_LINK` findings.
+- `/paperwiki:wiki-lint` does not flag the new source with
+  `DANGLING_SOURCE` (a concept now references it).
 - The next `/paperwiki:digest` run dedupes the analyzed paper out of
   recommendations (it should not surface again).
