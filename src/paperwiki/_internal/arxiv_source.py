@@ -37,8 +37,14 @@ if TYPE_CHECKING:
 
 
 _E_PRINT_URL = "https://arxiv.org/e-print/{arxiv_id}"
-_FIGURE_DIRS = {"figures", "fig", "pics", "images", "img"}
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+# Both ``figure`` (singular) and ``figures`` are common; we've also seen
+# ``fig``, ``pics``, ``images``, ``img`` and ``Figures`` (capitalized).
+# Match case-insensitively so the surface is forgiving.
+_FIGURE_DIRS = {"figures", "figure", "fig", "pics", "images", "img"}
+# PNGs / JPEGs cover most LaTeX-baked figures. PDFs are common too
+# (vector figures); Obsidian renders ``![[file.pdf]]`` as a first-page
+# preview so they're still useful to keep alongside.
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}
 
 
 async def download_arxiv_source(

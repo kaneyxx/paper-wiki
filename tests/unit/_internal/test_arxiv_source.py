@@ -83,13 +83,14 @@ class TestExtractImagesFromTarball:
             assert p.stat().st_size > 0
 
     def test_handles_alternate_figure_dirs(self, tmp_path: Path) -> None:
-        """``figures``, ``fig``, ``pics``, ``images``, ``img`` are all valid."""
+        """``figures``, ``figure``, ``fig``, ``pics``, ``images``, ``img`` valid."""
         from paperwiki._internal.arxiv_source import extract_images_from_tarball
 
         tarball = tmp_path / "src.tar.gz"
         tarball.write_bytes(
             _build_tarball(
                 [
+                    ("paper/figure/zero.png", _TINY_PNG),  # singular form
                     ("paper/fig/a.png", _TINY_PNG),
                     ("paper/pics/b.jpg", _TINY_PNG),
                     ("paper/img/c.jpeg", _TINY_PNG),
@@ -99,8 +100,34 @@ class TestExtractImagesFromTarball:
         )
         out = tmp_path / "images"
         extracted = extract_images_from_tarball(tarball, out)
-        assert len(extracted) == 4
-        assert {p.name for p in extracted} == {"a.png", "b.jpg", "c.jpeg", "d.png"}
+        assert len(extracted) == 5
+        assert {p.name for p in extracted} == {
+            "zero.png",
+            "a.png",
+            "b.jpg",
+            "c.jpeg",
+            "d.png",
+        }
+
+    def test_extracts_pdf_figures(self, tmp_path: Path) -> None:
+        """Many arXiv papers ship vector PDFs as figures; keep them — Obsidian
+        renders ``![[file.pdf]]`` as a first-page preview."""
+        from paperwiki._internal.arxiv_source import extract_images_from_tarball
+
+        tarball = tmp_path / "src.tar.gz"
+        tarball.write_bytes(
+            _build_tarball(
+                [
+                    ("latex/figure/Figure_1.pdf", b"%PDF-1.4 stub\n"),
+                    ("latex/figure/Figure_2.pdf", b"%PDF-1.4 stub\n"),
+                    ("latex/main.tex", b"\\documentclass{article}"),
+                ]
+            )
+        )
+        out = tmp_path / "images"
+        extracted = extract_images_from_tarball(tarball, out)
+        names = sorted(p.name for p in extracted)
+        assert names == ["Figure_1.pdf", "Figure_2.pdf"]
 
     def test_skips_images_outside_figure_dirs(self, tmp_path: Path) -> None:
         """A bare ``logo.png`` at the root is probably not a paper figure."""
