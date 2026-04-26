@@ -15,11 +15,15 @@ from paperwiki.runners import diagnostics as diagnostics_runner
 
 @pytest.fixture(autouse=True)
 def _stub_claude_mcp_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default: stub ``claude mcp list`` so tests never shell out for real.
+    """Default: stub ``shutil.which`` + ``subprocess.run`` so tests never
+    shell out for real, regardless of whether the host has the ``claude``
+    CLI on PATH.
 
-    Individual tests that care about the MCP behavior re-patch
-    ``diagnostics_runner.subprocess.run`` themselves and override this.
+    Without the ``shutil.which`` stub, CI hosts (which lack claude) skip
+    the subprocess.run path entirely and the tests' subprocess mocks
+    never fire. Individual tests re-patch these as needed.
     """
+    monkeypatch.setattr(diagnostics_runner.shutil, "which", lambda _name: "/fake/claude")
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
@@ -148,7 +152,17 @@ class TestMcpServersDetection:
         assert report.mcp_servers == []
 
     def test_claude_cli_missing_records_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """If ``claude`` isn't on PATH, surface gracefully — never raise."""
+        """``shutil.which("claude") -> None`` surfaces gracefully (the realistic
+        path on CI / fresh hosts that don't have Claude Code installed)."""
+        monkeypatch.setattr(diagnostics_runner.shutil, "which", lambda _name: None)
+        report = diagnostics_runner.build_report()
+        assert report.mcp_servers == []
+        assert any("claude CLI not found" in i for i in report.issues)
+
+    def test_claude_cli_disappears_mid_call_records_empty_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``which`` resolves a path but the binary disappears before exec — race condition."""
 
         def raises_filenotfound(*args: object, **kwargs: object) -> object:
             raise FileNotFoundError("claude")
