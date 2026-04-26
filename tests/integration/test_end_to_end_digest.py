@@ -154,7 +154,9 @@ async def test_end_to_end_pipeline_writes_digest_file(tmp_path: Path) -> None:
     ob_path = obsidian_vault / "10_Daily" / "2026-04-25-paper-digest.md"
     assert ob_path.exists()
     ob_text = ob_path.read_text(encoding="utf-8")
-    assert "## 1. [[A Foundation Model for Vision Language Tasks|" in ob_text
+    # Title link points at the canonical-id source stub, with the
+    # display alias preserving the original title.
+    assert "## 1. [[arxiv_0001.0001|A Foundation Model for Vision Language Tasks]]" in ob_text
     assert "[[vlm]]" in ob_text
     # Obsidian-flavored output adds the obsidian tag.
     assert "obsidian" in ob_text

@@ -56,8 +56,17 @@ def title_to_wikilink_target(title: str) -> str:
 def render_obsidian_digest(
     recommendations: list[Recommendation],
     ctx: RunContext,
+    *,
+    vault_path: Path | None = None,
 ) -> str:
-    """Render an Obsidian-flavored Markdown digest string."""
+    """Render an Obsidian-flavored Markdown digest string.
+
+    ``vault_path`` is used to detect already-extracted figures under
+    ``Wiki/sources/<id>/images/`` so the daily entry can inline a
+    teaser. When ``None`` (e.g., the markdown reporter or a unit test
+    that doesn't write a vault), the figure-embed slot is silently
+    skipped.
+    """
     target_date = ctx.target_date.strftime("%Y-%m-%d")
 
     parts: list[str] = []
@@ -69,13 +78,24 @@ def render_obsidian_digest(
         return "\n".join(parts)
 
     parts.append(f"{len(recommendations)} recommendations from the configured pipeline.\n")
+    parts.append(_render_overview_callout())
     parts.append("---\n")
 
     for index, rec in enumerate(recommendations, start=1):
-        parts.append(_render_recommendation(index, rec))
+        parts.append(_render_recommendation(index, rec, vault_path=vault_path))
         parts.append("---\n")
 
     return "\n".join(parts)
+
+
+def _render_overview_callout() -> str:
+    """Top-of-digest synthesis placeholder (Claude side fills it in)."""
+    return (
+        "> [!summary] Today's Overview\n"
+        "> _Run `/paperwiki:digest` SKILL after this runner to fill in the\n"
+        "> cross-paper synthesis here — overall trends, quality distribution,\n"
+        "> research hotspots, suggested reading order._\n"
+    )
 
 
 def _render_frontmatter(target_date: str, count: int) -> str:
@@ -92,42 +112,106 @@ def _render_frontmatter(target_date: str, count: int) -> str:
     )
 
 
-def _render_recommendation(index: int, rec: Recommendation) -> str:
+def _render_recommendation(
+    index: int,
+    rec: Recommendation,
+    *,
+    vault_path: Path | None = None,
+) -> str:
+    """Render one recommendation as a section-organized Obsidian block.
+
+    Layout:
+
+    1. ``## N. [[arxiv_<id>|Title]]`` — clicks straight through to the
+       rich source stub under ``Wiki/sources/`` instead of a free-form
+       title-derived target (which Obsidian would treat as a brand new
+       note).
+    2. ``> [!info]`` callout for compact metadata.
+    3. Inline teaser figure when ``Wiki/sources/<id>/images/`` already
+       has files (extract-images was run for this paper).
+    4. ``### Abstract`` — abstract under a proper heading so Obsidian's
+       outline pane shows it as a collapsible block.
+    5. ``### Detailed report`` — pointer at ``/paperwiki:analyze`` for
+       a six-section deep-dive note in ``Sources/``.
+    """
     paper = rec.paper
     score = rec.score
 
-    target = title_to_wikilink_target(paper.title)
-    title_link = f"[[{target}|{paper.title}]]"
+    canonical_id = paper.canonical_id
+    source_filename = canonical_id.replace(":", "_")
+    title_link = f"[[{source_filename}|{paper.title}]]"
 
     author_names = ", ".join(a.name for a in paper.authors)
     published = paper.published_at.strftime("%Y-%m-%d")
-
-    source_line = (
-        f"[{paper.canonical_id}]({paper.landing_url})" if paper.landing_url else paper.canonical_id
-    )
-    score_line = (
-        f"**Score**: {score.composite:.2f} "
-        f"(relevance {score.relevance:.2f}, novelty {score.novelty:.2f}, "
-        f"momentum {score.momentum:.2f}, rigor {score.rigor:.2f})"
-    )
+    citations = str(paper.citation_count) if paper.citation_count is not None else "—"
+    landing_link = f"[arXiv]({paper.landing_url})" if paper.landing_url else "—"
+    pdf_link = f"[PDF](<{paper.pdf_url}>)" if paper.pdf_url else ""
+    links_pieces = [landing_link]
+    if pdf_link:
+        links_pieces.append(pdf_link)
+    links_line = " · ".join(links_pieces)
     topic_links = ", ".join(f"[[{t}]]" for t in rec.matched_topics) if rec.matched_topics else "—"
-    citation_line = f"{paper.citation_count}" if paper.citation_count is not None else "—"
+    score_line = (
+        f"{score.composite:.2f} (relevance {score.relevance:.2f} · "
+        f"novelty {score.novelty:.2f} · momentum {score.momentum:.2f} · "
+        f"rigor {score.rigor:.2f})"
+    )
 
-    body_lines = [
+    callout = "\n".join(
+        [
+            "> [!info] Metadata",
+            f"> - **Authors**: {author_names}",
+            f"> - **Published**: {published} · **Citations**: {citations}",
+            f"> - **Score**: {score_line}",
+            f"> - **Matched topics**: {topic_links}",
+            f"> - **Links**: {links_line}",
+        ]
+    )
+
+    figure_block = _try_inline_teaser(canonical_id, source_filename, vault_path)
+
+    abstract_block = "### Abstract\n\n" + paper.abstract.strip()
+
+    detailed = (
+        "### Detailed report\n\n"
+        f"_Run `/paperwiki:analyze {canonical_id}` for a six-section deep-dive "
+        f"in ``Sources/``, or click [[{source_filename}]] to jump to the "
+        "wiki source stub (which holds figures, abstract, and your notes)._"
+    )
+
+    blocks = [
         f"## {index}. {title_link}\n",
-        f"- **Authors**: {author_names}",
-        f"- **Published**: {published}",
-        f"- **Source**: {source_line}",
-        f"- **Citations**: {citation_line}",
-        f"- {score_line}",
-        f"- **Matched topics**: {topic_links}",
-        "",
-        paper.abstract.strip(),
+        callout,
         "",
     ]
-    if paper.pdf_url:
-        body_lines.insert(4, f"- **PDF**: <{paper.pdf_url}>")
-    return "\n".join(body_lines)
+    if figure_block:
+        blocks.append(figure_block)
+    blocks.extend([abstract_block, "", detailed, ""])
+    return "\n".join(blocks)
+
+
+def _try_inline_teaser(
+    canonical_id: str,
+    source_filename: str,
+    vault_path: Path | None,
+) -> str:
+    """Embed the first extracted figure as a teaser if one exists on disk."""
+    if vault_path is None:
+        return ""
+    images_dir = vault_path / "Wiki" / "sources" / source_filename / "images"
+    if not images_dir.is_dir():
+        return ""
+    candidates = sorted(images_dir.iterdir())
+    image = next(
+        (p for p in candidates if p.is_file() and p.suffix.lower() in _FIGURE_EXTS),
+        None,
+    )
+    if image is None:
+        return ""
+    return f"![[{source_filename}/images/{image.name}|700]]\n"
+
+
+_FIGURE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}
 
 
 class ObsidianReporter:
@@ -172,7 +256,7 @@ class ObsidianReporter:
 
         target_dir = self.vault_path / self.daily_subdir
         target_dir.mkdir(parents=True, exist_ok=True)
-        rendered = render_obsidian_digest(recs, ctx)
+        rendered = render_obsidian_digest(recs, ctx, vault_path=self.vault_path)
         path = target_dir / filename
         async with aiofiles.open(path, "w", encoding="utf-8") as fh:
             await fh.write(rendered)
