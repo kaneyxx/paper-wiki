@@ -9,6 +9,20 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-26
+
+### Documentation
+
+- **README rewritten for v0.3.x reality.** Slash-command namespace corrected
+  to `/paper-wiki:` throughout (was `/paperwiki:` in 13 places). First-run
+  walkthrough now leads with the interactive setup wizard (rather than the
+  v0.2-era manual bash flow). Added paperclip MCP user-scope + OAuth setup,
+  advanced `PAPERWIKI_CONFIG_DIR` note promoted to Install section, rich digest
+  output description (`### Detailed report`, inline figures, Obsidian callouts),
+  `auto_ingest_top` chaining note in SKILLs table, and operational
+  troubleshooting table for plugin cache mismatches, MCP hot-reload, and
+  pre-v0.3.4 wizard schema bugs.
+
 ## [0.3.4] - 2026-04-26
 
 ### Fixed

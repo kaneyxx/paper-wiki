@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.4"
+    assert data["version"] == "0.3.5"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -377,7 +377,9 @@ def test_bio_search_slash_command_exists() -> None:
 def test_readme_documents_bio_search_as_optional() -> None:
     """README must surface bio-search in Quick Start as an optional advanced feature."""
     body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "/paperwiki:bio-search" in body, "README must list /paperwiki:bio-search in Quick Start"
+    assert "/paper-wiki:bio-search" in body, (
+        "README must list /paper-wiki:bio-search in Quick Start"
+    )
     # Position it as optional / opt-in rather than a default surface.
     assert "paperclip" in body, "README must mention paperclip dependency"
     assert "optional" in body.lower(), (
@@ -391,8 +393,20 @@ def test_readme_lists_all_shipped_skills() -> None:
     for skill_dir in (REPO_ROOT / "skills").iterdir():
         if not skill_dir.is_dir():
             continue
-        slash_command = f"/paperwiki:{skill_dir.name}"
+        slash_command = f"/paper-wiki:{skill_dir.name}"
         assert slash_command in body, f"README must document the {slash_command} SKILL"
+
+
+def test_readme_uses_correct_slash_command_namespace() -> None:
+    """README must use /paper-wiki: namespace throughout — never /paperwiki:."""
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    import re
+
+    stale = re.findall(r"/paperwiki:\w+", body)
+    assert not stale, (
+        f"README contains {len(stale)} stale /paperwiki: reference(s); "
+        f"all must use /paper-wiki: instead. Found: {stale}"
+    )
 
 
 def test_readme_documents_s2_api_key_setup() -> None:

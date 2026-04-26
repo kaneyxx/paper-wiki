@@ -17,13 +17,17 @@ together — all from inside Claude Code.
 - **Python ≥ 3.11**. The plugin self-installs its `.venv` on first
   Claude Code session via `hooks/ensure-env.sh`. `uv` is preferred and
   used automatically when on PATH; otherwise `python3 -m venv` + `pip`.
-- **Claude Code CLI** — paper-wiki *is* a Claude Code plugin; SKILLs
-  run inside Claude Code, not standalone.
+- **Claude Code CLI ≥ 2.1.119** — paper-wiki *is* a Claude Code plugin;
+  SKILLs run inside Claude Code, not standalone. v0.3.4's setup wizard
+  depends on `AskUserQuestion`'s `header` field which versions older
+  than 2.1.119 do not render correctly (earlier versions auto-truncate
+  the label).
 - **Optional**: a [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key-form)
   (free) — bumps the rate limit from ~1 req/s to 100 req/s and is
   strongly recommended for any non-trivial use.
-- **Optional**: [paperclip CLI](https://gxl.ai/blog/paperclip) for
-  biomedical literature; see [`docs/paperclip-setup.md`](docs/paperclip-setup.md).
+- **Optional**: [paperclip](https://gxl.ai/blog/paperclip) for
+  biomedical literature; see [Optional: biomedical literature](#optional-biomedical-literature)
+  below for details on the CLI vs MCP paths.
 
 ## Install
 
@@ -37,47 +41,87 @@ In Claude Code:
 The plugin self-installs its Python environment on first session — no
 manual setup required.
 
+### Advanced: custom config location (dotfiles users)
+
+By default paper-wiki stores your personal recipe and secrets under
+`~/.config/paper-wiki/`. If you keep your config under a custom path
+(e.g. `~/dotfiles/paper-wiki/`), set the `PAPERWIKI_CONFIG_DIR`
+environment variable **before** running the setup wizard and paper-wiki
+will use that directory instead. Resolution priority:
+
+```
+1. $PAPERWIKI_CONFIG_DIR          (if set)
+2. $XDG_CONFIG_HOME/paper-wiki    (if XDG_CONFIG_HOME is set)
+3. ~/.config/paper-wiki           (default)
+```
+
 ## First-run walkthrough
 
-### 1. Verify environment
+### 1. Install
 
 ```text
-/paperwiki:setup
+/plugin marketplace add kaneyxx/paper-wiki
+/plugin install paper-wiki@paper-wiki
 ```
 
-This runs `hooks/ensure-env.sh`, surfaces missing config, and reports
-which optional MCP servers (e.g. paperclip) are registered. It does
-**not** create any files in your vault yet.
+### 2. Run the setup wizard
 
-### 2. Pick a vault
+```text
+/paper-wiki:setup
+```
 
-paper-wiki writes into a single directory of your choice — typically
-an Obsidian vault. Pick one (or create a fresh one):
+The wizard asks 5–8 questions (vault path, topics, Semantic Scholar API
+key, auto-ingest depth, paperclip availability) and writes:
+
+- `~/.config/paper-wiki/recipes/daily.yaml` — your personal recipe
+- `~/.config/paper-wiki/secrets.env` — API keys (chmod 600)
+
+Re-running the wizard against an existing config offers
+**Keep / Reconfigure all / Edit one piece** — non-destructive by
+default.
+
+### 3. Generate your first digest
+
+```text
+/paper-wiki:digest daily
+```
+
+Pulls papers from arXiv + Semantic Scholar, scores them against your
+topics, and writes `~/Documents/<your-vault>/Daily/<YYYY-MM-DD>.md`
+with Obsidian callouts, inline teaser figures, and `### Detailed report`
+sub-headings per paper.
+
+If your recipe has `auto_ingest_top: 3`, the top 3 papers are
+automatically folded into the wiki concept articles via
+`/paper-wiki:wiki-ingest` at the end of the digest run.
+
+### 4. Browse and query
+
+```text
+/paper-wiki:wiki-query "vision-language pathology"
+```
+
+Keyword + tag search across `Wiki/concepts/` and `Wiki/sources/`, with
+Claude synthesizing a cited answer.
+
+### Manual setup (fallback)
+
+If you prefer to bypass the wizard and configure by hand, the recipes
+under `recipes/*.yaml` are templates. Copy one as a starting point:
 
 ```bash
-mkdir -p ~/Documents/Paper-Wiki
+mkdir -p ~/.config/paper-wiki/recipes
+cp recipes/daily-arxiv.yaml ~/.config/paper-wiki/recipes/daily.yaml
 ```
 
-The default subdirs paper-wiki creates inside it are:
+Then edit `~/.config/paper-wiki/recipes/daily.yaml`:
 
-```text
-~/Documents/Paper-Wiki/
-├── Daily/      # daily digest output (one .md per day)
-├── Sources/    # per-paper notes (created by /paperwiki:analyze)
-└── Wiki/       # synthesized concept articles + per-paper source stubs
-    ├── sources/
-    ├── concepts/
-    └── index.md
-```
+- Change every `vault_path` and `vault_paths` reference to your vault
+- Change the `topics` to keywords you actually read about
+- Add `api_key_env: PAPERWIKI_S2_API_KEY` to the `semantic_scholar`
+  source if you have a key (recommended)
 
-The defaults are deliberately friendly. If you use
-[Johnny.Decimal](https://johnnydecimal.com/) or
-[PARA](https://fortelabs.com/blog/para/), every subdir is configurable
-per recipe — for example `daily_subdir: 10_Daily`. paper-wiki neither
-requires nor blocks those conventions; see
-[`docs/example-recipes/personal-johnny-decimal.yaml`](docs/example-recipes/personal-johnny-decimal.yaml).
-
-### 3. Set up your secrets
+Store the API key securely:
 
 ```bash
 mkdir -p ~/.config/paper-wiki
@@ -92,95 +136,60 @@ via `api_key_env: PAPERWIKI_S2_API_KEY`; the recipe loader resolves
 the env var at pipeline-build time, so the secret stays out of any
 YAML file.
 
-### 4. Author a personal recipe
-
-The recipes under `recipes/*.yaml` are **templates**. Your personal
-recipe lives outside the plugin tree at:
+The vault subdirectory layout paper-wiki creates by default:
 
 ```text
-~/.config/paper-wiki/recipes/<name>.yaml
+~/Documents/Paper-Wiki/
+├── Daily/      # daily digest output (one .md per day)
+├── Sources/    # per-paper notes (created by /paper-wiki:analyze)
+└── Wiki/       # synthesized concept articles + per-paper source stubs
+    ├── sources/
+    ├── concepts/
+    └── index.md
 ```
 
-Copy a template as a starting point:
-
-```bash
-mkdir -p ~/.config/paper-wiki/recipes
-cp recipes/daily-arxiv.yaml ~/.config/paper-wiki/recipes/daily.yaml
-```
-
-Then edit `~/.config/paper-wiki/recipes/daily.yaml`:
-
-- Change every `vault_path` and `vault_paths` reference to your vault
-- Change the `topics` to keywords you actually read about
-- Add `api_key_env: PAPERWIKI_S2_API_KEY` to the `semantic_scholar`
-  source if you have a key (recommended)
-
-**Dotfiles / non-standard config location**: if you keep your config
-under a custom path (e.g. `~/dotfiles/paper-wiki/`), set the
-`PAPERWIKI_CONFIG_DIR` environment variable and paper-wiki will use that
-directory instead of `~/.config/paper-wiki/`. Resolution priority:
-
-```
-1. $PAPERWIKI_CONFIG_DIR          (if set)
-2. $XDG_CONFIG_HOME/paper-wiki    (if XDG_CONFIG_HOME is set)
-3. ~/.config/paper-wiki           (default)
-```
-
-### 5. Run your first digest
-
-```bash
-source ~/.config/paper-wiki/secrets.env
-.venv/bin/python -m paperwiki.runners.digest \
-    ~/.config/paper-wiki/recipes/daily.yaml
-```
-
-You should see ~10 paper recommendations land at:
-
-- `<vault>/Daily/<YYYY-MM-DD>-paper-digest.md` — the human-readable
-  digest with Obsidian wikilinks
-- `<vault>/Wiki/sources/<id>.md` — one-per-paper source stub (when
-  `wiki_backend: true` is set on the obsidian reporter)
-
-### 6. Build the wiki
-
-After your first digest, fold the new sources into concept articles:
-
-```text
-/paperwiki:wiki-ingest <canonical-id>
-```
-
-Claude reads the source, decides which concept articles to update or
-create, and writes them under `<vault>/Wiki/concepts/`.
+Every subdir is configurable per recipe — for example
+`daily_subdir: 10_Daily`. See
+[`docs/example-recipes/personal-johnny-decimal.yaml`](docs/example-recipes/personal-johnny-decimal.yaml).
 
 ## SKILLs
 
-| SKILL                         | Purpose                                                                                |
-|-------------------------------|----------------------------------------------------------------------------------------|
-| `/paperwiki:setup`            | Verify environment, surface missing config / MCP servers, walk first-time setup.        |
-| `/paperwiki:digest`           | Run a recipe end-to-end → arXiv / S2 / paperclip → filter → score → write to vault.    |
-| `/paperwiki:analyze`          | Deep-analyze one paper into a six-section note in `Sources/`, then chain wiki-ingest.   |
-| `/paperwiki:extract-images`   | Pull real figures from an arXiv source tarball into `Wiki/sources/<id>/images/`.        |
-| `/paperwiki:wiki-ingest`      | Fold a source into the user's concept articles (Karpathy LLM-Wiki ingest loop).         |
-| `/paperwiki:wiki-query`       | Keyword search across `Wiki/concepts/` and `Wiki/sources/` with Claude-synthesized answer. |
-| `/paperwiki:wiki-lint`        | Health-check: orphan concepts, stale entries, broken wikilinks, dangling sources.       |
-| `/paperwiki:wiki-compile`     | Deterministic rebuild of `Wiki/index.md` from frontmatter.                              |
-| `/paperwiki:migrate-sources`  | Upgrade legacy `Wiki/sources/<id>.md` files to the current section-organized format.    |
-| `/paperwiki:bio-search`       | (Optional) Search bioRxiv / medRxiv / PMC via paperclip MCP, save hits as wiki sources. |
+| SKILL                           | Purpose                                                                                |
+|---------------------------------|----------------------------------------------------------------------------------------|
+| `/paper-wiki:setup`             | Interactive wizard (5–8 AskUserQuestion prompts) that writes your personal recipe and secrets file. Re-run to keep / reconfigure / edit one piece. |
+| `/paper-wiki:digest`            | Run a recipe end-to-end → arXiv / S2 / paperclip → filter → score → write Obsidian callouts, inline figures, and `### Detailed report` sub-headings. When `auto_ingest_top: N` is set, chains `/paper-wiki:wiki-ingest` for the top N papers automatically. |
+| `/paper-wiki:analyze`           | Deep-analyze one paper into a six-section note in `Sources/`, then chain wiki-ingest.   |
+| `/paper-wiki:extract-images`    | Pull real figures from an arXiv source tarball into `Wiki/sources/<id>/images/`.        |
+| `/paper-wiki:wiki-ingest`       | Fold a source into the user's concept articles (Karpathy LLM-Wiki ingest loop).         |
+| `/paper-wiki:wiki-query`        | Keyword search across `Wiki/concepts/` and `Wiki/sources/` with Claude-synthesized answer. |
+| `/paper-wiki:wiki-lint`         | Health-check: orphan concepts, stale entries, broken wikilinks, dangling sources.       |
+| `/paper-wiki:wiki-compile`      | Deterministic rebuild of `Wiki/index.md` from frontmatter.                              |
+| `/paper-wiki:migrate-sources`   | Upgrade legacy `Wiki/sources/<id>.md` files to the current section-organized format.    |
+| `/paper-wiki:bio-search`        | (Optional) Search bioRxiv / medRxiv / PMC via paperclip MCP, save hits as wiki sources. |
 
 ### Optional: biomedical literature
 
 If you work in life sciences, paper-wiki integrates with
 [paperclip](https://gxl.ai/blog/paperclip) (8M+ papers across bioRxiv,
-medRxiv, PubMed Central):
+medRxiv, PubMed Central). There are two separate paths:
 
-- `/paperwiki:bio-search <query>` — search via paperclip MCP, with
-  optional handoff to `/paperwiki:wiki-ingest`.
-- `recipes/biomedical-weekly.yaml` — bundled recipe that uses the
-  paperclip CLI as a source plugin (no MCP required).
+**paperclip CLI** — a local executable used by `PaperclipSource` plugin
+and the `biomedical-weekly.yaml` bundled recipe. No auth flow inside
+Claude Code. Install it per the [paperclip docs](https://gxl.ai/blog/paperclip).
+
+**paperclip MCP** — an HTTP MCP server used by `/paper-wiki:bio-search`.
+Register it once with user scope:
+
+```bash
+claude mcp add --transport http --scope user paperclip https://paperclip.gxl.ai/mcp
+```
+
+Then inside a Claude Code session: `/mcp` → highlight `paperclip` →
+**Authenticate** → OAuth flow opens a browser to complete login.
 
 paperclip is **opt-in**: paper-wiki's other SKILLs work without it.
-See [`docs/paperclip-setup.md`](docs/paperclip-setup.md) for one-time
-install + MCP registration steps.
+See [`docs/paperclip-setup.md`](docs/paperclip-setup.md) for full
+install, authentication, and troubleshooting steps.
 
 ## How it works
 
@@ -205,12 +214,12 @@ contradictions and stale entries.
 
 ## Bundled recipes
 
-| Recipe                         | What it does                                                  |
-|--------------------------------|---------------------------------------------------------------|
-| `recipes/daily-arxiv.yaml`     | Daily arXiv pull (cs.AI/LG/CL/CV) + dedup + Obsidian digest. |
-| `recipes/weekly-deep-dive.yaml`| Weekly cadence with broader window for deeper review.        |
-| `recipes/sources-only.yaml`    | Source stage only — useful for plugin development / debug.   |
-| `recipes/biomedical-weekly.yaml`| paperclip CLI + dedup + wiki backend for biomedical preprints.|
+| Recipe                           | What it does                                                  |
+|----------------------------------|---------------------------------------------------------------|
+| `recipes/daily-arxiv.yaml`       | Daily arXiv pull (cs.AI/LG/CL/CV) + dedup + Obsidian digest. `auto_ingest_top` is configurable in your personal copy. |
+| `recipes/weekly-deep-dive.yaml`  | Weekly cadence with broader window for deeper review.        |
+| `recipes/sources-only.yaml`      | Source stage only — useful for plugin development / debug.   |
+| `recipes/biomedical-weekly.yaml` | paperclip CLI (not MCP) + dedup + wiki backend for biomedical preprints. |
 
 ## Troubleshooting
 
@@ -222,6 +231,9 @@ contradictions and stale entries.
 | `dedup.vault.missing` warnings | Recipe references vault subdirs that don't exist yet | Harmless; goes away on second run after vault is populated |
 | S2 query with `OR` returns 0 | S2 doesn't support boolean operators in `query` | Use a single keyword/phrase, or stack multiple `semantic_scholar` source entries with different queries |
 | Recency filter drops everything | `recency.max_days` < `source.lookback_days` | Make `recency.max_days >= max(lookback_days)` across all sources |
+| `/plugin install` says "already installed" but `/paper-wiki:setup` says "Unknown command" | Cache directory missing while `installed_plugins.json` still tracks the install (happens after manual cache cleanup or interrupted update) | Remove `paper-wiki@paper-wiki` from `~/.claude/plugins/installed_plugins.json` (back up first), then `/plugin install paper-wiki@paper-wiki` from a fresh session. Restart session after install. |
+| MCP servers added via `claude mcp add` don't show in `/mcp` UI | Active session loaded MCP config at startup; doesn't hot-reload | Fully `/exit` and start a new `claude` session |
+| Setup wizard shows weird "Topics (1)/(2)" tabs or "Custom kw" labels | Pre-v0.3.4 setup SKILL violated AskUserQuestion 4-option/header schema | Upgrade plugin: `/plugin update paper-wiki` (then nuke cache + reinstall if update doesn't take) |
 
 ## Architecture and contributing
 
@@ -234,7 +246,7 @@ contradictions and stale entries.
   not import this directly — SKILLs invoke it through `python -m
   paperwiki.runners.<name>`.
 
-Tests: `pytest -q` (393 currently). Type-check: `mypy --strict src`.
+Tests: `pytest -q` (450+ tests). Type-check: `mypy --strict src`.
 Lint: `ruff check src tests` + `ruff format --check src tests`.
 Plugin manifest: `claude plugin validate .`.
 
