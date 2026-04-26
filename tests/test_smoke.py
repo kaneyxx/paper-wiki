@@ -207,6 +207,42 @@ def test_digest_skill_resolves_personal_recipes_and_sources_secrets() -> None:
     )
 
 
+def test_bundled_assets_are_english_only() -> None:
+    """Per project rule: bundled SKILLs / recipes / docs ship English-only.
+
+    Chinese (and other CJK) examples belong under ``locales/zh/`` (TBD),
+    never inlined in trigger phrases or prompt copy. This guard catches
+    accidental leaks during development. Code blocks and the user's
+    ``~/.config/paperwiki/`` files are out of scope — the rule is for
+    things that ship in the plugin tarball.
+    """
+    cjk = re.compile(r"[　-〿一-鿿＀-￯]")
+    bundled_roots = ("src", "skills", "recipes", "docs")
+    bundled_files = ("README.md", "SPEC.md", "CLAUDE.md", "AGENTS.md")
+    suffixes = {".py", ".md", ".yaml", ".yml", ".toml"}
+
+    leaks: list[tuple[str, str]] = []
+    for root_name in bundled_roots:
+        root = REPO_ROOT / root_name
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in suffixes:
+                text = path.read_text(encoding="utf-8")
+                hits = cjk.findall(text)
+                if hits:
+                    leaks.append((str(path.relative_to(REPO_ROOT)), "".join(hits[:5])))
+    for name in bundled_files:
+        path = REPO_ROOT / name
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            hits = cjk.findall(text)
+            if hits:
+                leaks.append((name, "".join(hits[:5])))
+
+    assert not leaks, "bundled assets must be English-only; CJK leaked in:\n  " + "\n  ".join(
+        f"{p}: {sample!r}" for p, sample in leaks
+    )
+
+
 def test_setup_skill_walks_first_run_wizard() -> None:
     """First-run UX: the setup SKILL must lead users through a five-question
     wizard that produces a personal recipe + secrets file. Pin the contract

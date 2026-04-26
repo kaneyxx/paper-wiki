@@ -31,7 +31,7 @@ concept articles.
 - The user reports broken Python imports inside
   `${CLAUDE_PLUGIN_ROOT}/.venv`.
 - The user asks "how do I configure paper-wiki?", "where do I point
-  it at my vault?", "do I need an API key?", "怎麼設定 paper-wiki?".
+  it at my vault?", "do I need an API key?", "walk me through setup".
 
 **Do not use** when the user is asking about a specific recipe, a
 specific paper, or pipeline output — those route to other SKILLs.

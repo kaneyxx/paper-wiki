@@ -29,7 +29,7 @@ current format are skipped (no-op).
   follow-up; until that lands, look for missing ``## Core
   Information`` headings as the visual cue).
 - The user asks "can I update my old papers to the new format?" /
-  "把以前的筆記也升級到新格式".
+  "upgrade existing source files" / "rewrite legacy stubs".
 
 **Do not use** for fresh vaults (the runner's a no-op there) or for
 non-source files (concept articles under ``Wiki/concepts/`` are not
