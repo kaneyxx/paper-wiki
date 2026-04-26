@@ -169,6 +169,15 @@ class TestBuildQuery:
         for required in ("title", "abstract", "authors", "publicationDate", "externalIds"):
             assert required in params["fields"]
 
+    def test_query_explicitly_requests_author_names(self) -> None:
+        """S2 returns ``authors`` with only ``authorId + affiliations`` unless
+        ``authors.name`` is named explicitly in the ``fields`` param. Without
+        the name, our parser drops every paper as "no authors".
+        """
+        src = SemanticScholarSource(query="x")
+        params = src._build_query_params(target_date=datetime(2026, 4, 25, tzinfo=UTC))
+        assert "authors.name" in params["fields"]
+
     def test_limit_is_passed_through(self) -> None:
         src = SemanticScholarSource(query="x", limit=33)
         params = src._build_query_params(target_date=datetime(2026, 4, 25, tzinfo=UTC))

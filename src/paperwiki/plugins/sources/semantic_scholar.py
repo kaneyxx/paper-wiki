@@ -44,7 +44,15 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
-_FIELDS = "title,abstract,authors,authors.affiliations,publicationDate,citationCount,externalIds"
+# NB: ``authors.name`` MUST be listed explicitly. Without it, S2 returns
+# author objects shaped like ``{authorId, affiliations}`` with NO ``name``
+# field, and our parser drops the entire paper as "no authors". Verified
+# against the live API on 2026-04-25.
+_FIELDS = (
+    "title,abstract,"
+    "authors,authors.name,authors.affiliations,"
+    "publicationDate,citationCount,externalIds"
+)
 _DATE_FORMATS = ("%Y-%m-%d", "%Y-%m", "%Y")
 
 
