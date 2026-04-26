@@ -32,24 +32,37 @@ to `paperwiki:setup`.
 
 ## Process
 
-1. **Locate the recipe.** If the user named one (e.g. "weekly digest"),
-   pick the matching `recipes/<name>.yaml` from the plugin root. If
-   they did not, default to `recipes/daily-arxiv.yaml`. Confirm the
-   file exists; if not, surface a clear error and offer to run setup.
-2. **Confirm the environment.** Verify
+1. **Locate the recipe.** Resolution order:
+   1. **Personal recipe** at `~/.config/paperwiki/recipes/<name>.yaml`
+      (the user's editable copy with their topics, vault paths, and
+      ``auto_ingest_top`` preference).
+   2. **Bundled template** at `${CLAUDE_PLUGIN_ROOT}/recipes/<name>.yaml`.
+
+   Default ``<name>`` is ``daily``. If the user said "weekly", default
+   to ``weekly-deep-dive``; if "biomedical" / "bio", default to
+   ``biomedical-weekly``. Confirm the resolved path exists; if not,
+   surface a clear error and offer to run ``/paperwiki:setup``.
+2. **Source secrets if present.** If
+   ``~/.config/paperwiki/secrets.env`` exists, source it (or ``export``
+   each ``KEY=value`` line) before the runner so any
+   ``api_key_env: PAPERWIKI_S2_API_KEY`` indirection in the recipe
+   resolves cleanly. The recipe loader raises ``UserError`` with a
+   pointer at this file when the env var is missing — you'll see it
+   in the runner's stderr.
+3. **Confirm the environment.** Verify
    `${CLAUDE_PLUGIN_ROOT}/.venv/.installed` exists. If missing, run
    `bash ${CLAUDE_PLUGIN_ROOT}/hooks/ensure-env.sh` and re-check.
-3. **Run the digest.** Invoke
+4. **Run the digest.** Invoke
    `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.digest <recipe-path>`
    with an optional `--target-date YYYY-MM-DD` if the user gave one.
-4. **Inspect the exit code.** 0 = success, 1 = user error
+5. **Inspect the exit code.** 0 = success, 1 = user error
    (bad recipe / bad config), 2 = system error (network, plugin
    contract). On non-zero, surface the structured log line and offer
    the next concrete step.
-5. **Summarize the outcome.** Read the reporter output paths from the
+6. **Summarize the outcome.** Read the reporter output paths from the
    recipe and report: how many recommendations were emitted, where
    they were written, and the titles + composite scores of the top 3.
-6. **Auto-chain wiki-ingest when configured.** Read the recipe's
+7. **Auto-chain wiki-ingest when configured.** Read the recipe's
    `auto_ingest_top` field. If `> 0`, take the top
    `min(auto_ingest_top, top_k)` papers from the digest and chain
    `/paperwiki:wiki-ingest <canonical-id>` for each, in score order.
@@ -59,7 +72,7 @@ to `paperwiki:setup`.
    user — they should see "ingesting paper #1 → updated 2 concepts,
    suggested 1 new concept" rather than a silent block of activity.
    When `auto_ingest_top` is `0` (the default), skip this step.
-7. **Suggest a follow-up.** If the user has not configured a vault,
+8. **Suggest a follow-up.** If the user has not configured a vault,
    suggest `/paperwiki:setup`. If a paper looks interesting and was
    not auto-ingested, suggest `/paperwiki:analyze <paper-id>` for a
    deeper dive or `/paperwiki:wiki-ingest <paper-id>` to fold it

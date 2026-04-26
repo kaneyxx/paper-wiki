@@ -195,6 +195,18 @@ def test_digest_skill_describes_auto_ingest_top_chaining() -> None:
     )
 
 
+def test_digest_skill_resolves_personal_recipes_and_sources_secrets() -> None:
+    """Daily flow ergonomics: SKILL must look in ~/.config/paperwiki/recipes
+    first and source ~/.config/paperwiki/secrets.env before the runner."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    assert "~/.config/paperwiki/recipes" in body, (
+        "digest SKILL must check the personal-recipes dir before bundled templates"
+    )
+    assert "~/.config/paperwiki/secrets.env" in body, (
+        "digest SKILL must source the secrets file so api_key_env resolves"
+    )
+
+
 def test_analyze_skill_writes_to_sources_subdir() -> None:
     """The analyze SKILL must direct writes into the canonical ``Sources/``."""
     body = (REPO_ROOT / "skills" / "analyze" / "SKILL.md").read_text(encoding="utf-8")
