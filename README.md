@@ -148,6 +148,7 @@ create, and writes them under `<vault>/Wiki/concepts/`.
 | `/paperwiki:setup`            | Verify environment, surface missing config / MCP servers, walk first-time setup.        |
 | `/paperwiki:digest`           | Run a recipe end-to-end → arXiv / S2 / paperclip → filter → score → write to vault.    |
 | `/paperwiki:analyze`          | Deep-analyze one paper into a six-section note in `Sources/`, then chain wiki-ingest.   |
+| `/paperwiki:extract-images`   | Pull real figures from an arXiv source tarball into `Wiki/sources/<id>/images/`.        |
 | `/paperwiki:wiki-ingest`      | Fold a source into the user's concept articles (Karpathy LLM-Wiki ingest loop).         |
 | `/paperwiki:wiki-query`       | Keyword search across `Wiki/concepts/` and `Wiki/sources/` with Claude-synthesized answer. |
 | `/paperwiki:wiki-lint`        | Health-check: orphan concepts, stale entries, broken wikilinks, dangling sources.       |
