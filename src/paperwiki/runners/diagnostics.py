@@ -167,16 +167,32 @@ def _detect_mcp_servers(issues: list[str]) -> list[str]:
     return servers
 
 
+def _config_dir() -> Path:
+    """Return the paper-wiki configuration directory.
+
+    Resolution priority:
+
+    1. ``$PAPERWIKI_CONFIG_DIR`` — if set, use as-is (power-user / dotfiles
+       override).
+    2. ``$XDG_CONFIG_HOME/paper-wiki`` — if ``XDG_CONFIG_HOME`` is set.
+    3. ``~/.config/paper-wiki`` — XDG default fallback.
+    """
+    override = os.environ.get("PAPERWIKI_CONFIG_DIR")
+    if override:
+        return Path(override)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / "paper-wiki"
+    return Path.home() / ".config" / "paper-wiki"
+
+
 def _resolve_config_path() -> Path:
     """Return the path to the user's paper-wiki config.toml.
 
-    Honors ``XDG_CONFIG_HOME`` if set; otherwise falls back to
-    ``~/.config/paperwiki/config.toml``.
+    Delegates directory resolution to :func:`_config_dir`, then appends
+    ``config.toml``.
     """
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg:
-        return Path(xdg) / "paperwiki" / "config.toml"
-    return Path.home() / ".config" / "paperwiki" / "config.toml"
+    return _config_dir() / "config.toml"
 
 
 @app.callback()

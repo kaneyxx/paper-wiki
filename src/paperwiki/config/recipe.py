@@ -161,7 +161,7 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
         msg = (
             f"semantic_scholar source: env var {env_name!r} is unset or "
             "empty. Either export it (e.g. via "
-            "`source ~/.config/paperwiki/secrets.env`) or set "
+            "`source ~/.config/paper-wiki/secrets.env`) or set "
             "``api_key`` inline."
         )
         raise UserError(msg)

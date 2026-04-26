@@ -82,26 +82,38 @@ class TestBuildReport:
         assert all(name.endswith(".yaml") for name in report.bundled_recipes)
 
     def test_config_path_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Without XDG_CONFIG_HOME, fall back to ~/.config/paperwiki
+        # Without XDG_CONFIG_HOME or PAPERWIKI_CONFIG_DIR, fall back to ~/.config/paper-wiki
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.delenv("PAPERWIKI_CONFIG_DIR", raising=False)
         report = diagnostics_runner.build_report()
-        assert report.config_path.endswith(".config/paperwiki/config.toml")
+        assert report.config_path.endswith(".config/paper-wiki/config.toml")
 
     def test_config_path_uses_xdg(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PAPERWIKI_CONFIG_DIR", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
         report = diagnostics_runner.build_report()
-        assert report.config_path == str(tmp_path / "paperwiki" / "config.toml")
+        assert report.config_path == str(tmp_path / "paper-wiki" / "config.toml")
         assert report.config_exists is False
 
     def test_config_existence_detected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        cfg_dir = tmp_path / "paperwiki"
+        cfg_dir = tmp_path / "paper-wiki"
         cfg_dir.mkdir()
         (cfg_dir / "config.toml").write_text("vault_path = '/tmp'\n")
+        monkeypatch.delenv("PAPERWIKI_CONFIG_DIR", raising=False)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
         report = diagnostics_runner.build_report()
         assert report.config_exists is True
+
+    def test_config_dir_honors_paperwiki_config_dir_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """$PAPERWIKI_CONFIG_DIR overrides XDG and default fallback."""
+        monkeypatch.setenv("PAPERWIKI_CONFIG_DIR", str(tmp_path / "custom-cfg"))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        report = diagnostics_runner.build_report()
+        assert report.config_path == str(tmp_path / "custom-cfg" / "config.toml")
 
 
 # ---------------------------------------------------------------------------
