@@ -321,3 +321,39 @@ class TestPipelineRun:
 
         assert result.recommendations == []
         assert reporter.collected == []
+
+    async def test_failing_source_does_not_break_other_sources(self) -> None:
+        """One source raising IntegrationError must not abort the whole digest.
+
+        Real-world driver: ``semantic_scholar`` 429-rate-limits while
+        ``arxiv`` is healthy. The user wants the arxiv-side digest, not
+        a hard failure that loses the day's recommendations.
+        """
+        from paperwiki.core.errors import IntegrationError
+
+        good_papers = [_make_paper("arxiv:1111.1111", title="Survives")]
+
+        class FlakyS2Source:
+            name = "semantic_scholar"
+
+            async def fetch(self, ctx: RunContext) -> AsyncIterator[Paper]:
+                msg = "S2 returned HTTP 429"
+                raise IntegrationError(msg)
+                yield  # pragma: no cover - unreachable, here for typing
+
+        reporter = CollectingReporter()
+        ctx = _make_ctx()
+        pipeline = Pipeline(
+            sources=[StaticSource("arxiv", good_papers), FlakyS2Source()],
+            filters=[],
+            scorer=ConstantScorer(ScoreBreakdown()),
+            reporters=[reporter],
+        )
+
+        result = await pipeline.run(ctx)
+
+        # The healthy source's papers still flow through to the reporter.
+        assert len(result.recommendations) == 1
+        assert result.recommendations[0].paper.title == "Survives"
+        # The failure is surfaced as a counter for runners/SKILLs to read.
+        assert ctx.counters["source.semantic_scholar.errors"] == 1

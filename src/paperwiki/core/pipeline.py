@@ -8,6 +8,8 @@ here so individual plugins stay focused on their stage.
 The current implementation:
 
 * fans in sources sequentially (one source drained before the next),
+* isolates per-source ``IntegrationError``s so one rate-limited or
+  flaky source does not abort the whole digest,
 * chains filters in declaration order,
 * delegates scoring to a single scorer,
 * sorts the resulting :class:`Recommendation` list by ``score.composite``
@@ -26,6 +28,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from loguru import logger
+
+from paperwiki.core.errors import IntegrationError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -116,12 +122,24 @@ class Pipeline:
         """Yield papers from every source in declaration order.
 
         Each fetched paper increments ``source.<name>.fetched`` on the run
-        context, giving observability for runners and tests.
+        context. ``IntegrationError`` from a single source (network
+        timeout, 429, 503, etc.) is caught and counted as
+        ``source.<name>.errors`` rather than aborting the whole run —
+        a digest with three sources should still emit a useful result
+        when one source is down.
         """
         for src in self.sources:
-            async for paper in src.fetch(ctx):
-                ctx.increment(f"source.{src.name}.fetched")
-                yield paper
+            try:
+                async for paper in src.fetch(ctx):
+                    ctx.increment(f"source.{src.name}.fetched")
+                    yield paper
+            except IntegrationError as exc:
+                ctx.increment(f"source.{src.name}.errors")
+                logger.warning(
+                    "pipeline.source.failed",
+                    source=src.name,
+                    error=str(exc),
+                )
 
 
 __all__ = [
