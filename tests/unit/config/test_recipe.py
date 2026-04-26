@@ -79,6 +79,30 @@ class TestRecipeSchema:
         spec = PluginSpec(name="recency")
         assert spec.config == {}
 
+    def test_auto_ingest_top_defaults_to_zero(self) -> None:
+        """Default behavior: no auto-ingest. The digest SKILL only chains
+        wiki-ingest when the recipe explicitly opts in."""
+        recipe = RecipeSchema.model_validate(_VALID_RECIPE)
+        assert recipe.auto_ingest_top == 0
+
+    def test_auto_ingest_top_accepts_positive_integers(self) -> None:
+        recipe = RecipeSchema.model_validate({**_VALID_RECIPE, "auto_ingest_top": 3})
+        assert recipe.auto_ingest_top == 3
+
+    def test_auto_ingest_top_rejects_negative(self) -> None:
+        with pytest.raises(ValueError, match="auto_ingest_top"):
+            RecipeSchema.model_validate({**_VALID_RECIPE, "auto_ingest_top": -1})
+
+    def test_auto_ingest_top_capped_at_top_k(self) -> None:
+        """Logically a user cannot auto-ingest more papers than they
+        actually rank into the top-K. Schema accepts up to 20 for
+        future-proofing; SKILL clamps to ``min(auto_ingest_top, top_k)``."""
+        # Schema-level upper bound is 20.
+        recipe = RecipeSchema.model_validate({**_VALID_RECIPE, "auto_ingest_top": 20})
+        assert recipe.auto_ingest_top == 20
+        with pytest.raises(ValueError, match="auto_ingest_top"):
+            RecipeSchema.model_validate({**_VALID_RECIPE, "auto_ingest_top": 21})
+
 
 # ---------------------------------------------------------------------------
 # load_recipe

@@ -49,9 +49,21 @@ to `paperwiki:setup`.
 5. **Summarize the outcome.** Read the reporter output paths from the
    recipe and report: how many recommendations were emitted, where
    they were written, and the titles + composite scores of the top 3.
-6. **Suggest a follow-up.** If the user has not configured a vault,
-   suggest `/paperwiki:setup`. If a paper looks interesting, suggest
-   `/paperwiki:analyze <paper-id>` (Phase 6).
+6. **Auto-chain wiki-ingest when configured.** Read the recipe's
+   `auto_ingest_top` field. If `> 0`, take the top
+   `min(auto_ingest_top, top_k)` papers from the digest and chain
+   `/paperwiki:wiki-ingest <canonical-id>` for each, in score order.
+   The wiki-ingest SKILL handles its own idempotence (no-op when a
+   source is already folded into all relevant concepts), so safe to
+   run on every digest. Surface the per-paper outcome briefly to the
+   user — they should see "ingesting paper #1 → updated 2 concepts,
+   suggested 1 new concept" rather than a silent block of activity.
+   When `auto_ingest_top` is `0` (the default), skip this step.
+7. **Suggest a follow-up.** If the user has not configured a vault,
+   suggest `/paperwiki:setup`. If a paper looks interesting and was
+   not auto-ingested, suggest `/paperwiki:analyze <paper-id>` for a
+   deeper dive or `/paperwiki:wiki-ingest <paper-id>` to fold it
+   into concept articles.
 
 ## Common Rationalizations
 

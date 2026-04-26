@@ -93,3 +93,10 @@ reporters:
       # wiki_backend: true
 
 top_k: 10
+# Auto-chain ``/paperwiki:wiki-ingest`` for the top-N papers right
+# after the digest finishes. ``0`` (the default) means no chaining
+# — invoke wiki-ingest manually per-paper. Set to 3 to fold the
+# top-3 ranked papers into your concept articles every morning;
+# the wiki-ingest step is idempotent so safe to re-run on the
+# same recommendations. Hard upper bound is 20.
+# auto_ingest_top: 3

@@ -185,6 +185,16 @@ def test_slash_command_has_description(cmd_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_digest_skill_describes_auto_ingest_top_chaining() -> None:
+    """When ``auto_ingest_top`` is set, the digest SKILL must auto-chain
+    ``/paperwiki:wiki-ingest`` for the top-N papers — pin the contract."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    assert "auto_ingest_top" in body, "digest SKILL must reference the auto_ingest_top recipe field"
+    assert "/paperwiki:wiki-ingest" in body, (
+        "digest SKILL must call out the chained wiki-ingest invocation"
+    )
+
+
 def test_analyze_skill_writes_to_sources_subdir() -> None:
     """The analyze SKILL must direct writes into the canonical ``Sources/``."""
     body = (REPO_ROOT / "skills" / "analyze" / "SKILL.md").read_text(encoding="utf-8")
