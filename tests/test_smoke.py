@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.3"
+    assert data["version"] == "0.3.4"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -449,3 +449,76 @@ def test_required_top_level_files_exist() -> None:
     for name in expected:
         path = REPO_ROOT / name
         assert path.is_file(), f"missing top-level file: {name}"
+
+
+# ---------------------------------------------------------------------------
+# AskUserQuestion schema compliance (v0.3.4)
+# ---------------------------------------------------------------------------
+
+
+def test_setup_skill_specifies_header_for_every_askuserquestion() -> None:
+    """Every AskUserQuestion call in the setup SKILL must specify a header field.
+
+    The header field is REQUIRED by the AskUserQuestion schema (max 12 chars).
+    Omitting it causes Claude Code to truncate the question text into a garbage
+    chip label (e.g. "Custom kw"). We pin at least 8 occurrences — one per branch.
+    """
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    header_count = body.count("header:")
+    assert header_count >= 8, (
+        f"setup SKILL must specify 'header:' at least 8 times (one per branch), "
+        f"found {header_count}. Missing header causes garbage chip labels in the UI."
+    )
+
+
+def test_setup_skill_uses_multiselect_for_topics() -> None:
+    """The topics question (Q2/Branch 4) must use multiSelect: true.
+
+    Using repeated single-select prompts to fake multi-select violates the
+    AskUserQuestion API. The correct approach is multiSelect: true so users
+    can select multiple themes in a single interaction.
+    """
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    # Verify multiSelect: true appears in the SKILL (topics question)
+    assert "multiSelect: true" in body, (
+        "setup SKILL must use 'multiSelect: true' for the topics question (Q2/Branch 4); "
+        "re-prompting until 'Done' fakes multi-select and violates the schema."
+    )
+    # Verify the topics section specifically contains multiSelect: true
+    # by checking that it appears near the Topics / Q2 context
+    topics_section_start = body.find("Q2")
+    topics_section_end = body.find("Q3", topics_section_start)
+    topics_section = body[topics_section_start:topics_section_end]
+    assert "multiSelect: true" in topics_section, (
+        "setup SKILL's Q2 (topics) section must specify 'multiSelect: true'; "
+        "found it elsewhere but not in the topics branch."
+    )
+
+
+def test_setup_skill_does_not_add_manual_other_or_cancel() -> None:
+    """setup SKILL must NOT manually add 'Other' or 'Cancel' options.
+
+    The AskUserQuestion schema documentation states: 'There should be no Other
+    option, that will be provided automatically' and Cancel is similarly
+    auto-provided. Manually adding these produces duplicate options and schema
+    violations that cause UI bugs.
+    """
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+
+    # Check for manual "Other (specify..." option labels — the old pattern
+    assert "Other (specify" not in body, (
+        "setup SKILL must NOT add a manual 'Other (specify...)' option; "
+        "Claude Code injects 'Other' automatically per the AskUserQuestion schema."
+    )
+
+    # Check that no option label is literally just "Cancel" — it should not
+    # appear as a label value in option definitions. Prose mentions of the word
+    # "Cancel" (describing auto-provided behavior) are fine.
+    # We look for the pattern used in option definitions: 'label: "Cancel"'
+    import re
+
+    cancel_label_pattern = re.compile(r'label:\s*["\']?Cancel["\']?', re.IGNORECASE)
+    assert not cancel_label_pattern.search(body), (
+        "setup SKILL must NOT add a manual Cancel option label in AskUserQuestion calls; "
+        "Claude Code injects Cancel automatically."
+    )

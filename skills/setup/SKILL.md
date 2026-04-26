@@ -57,13 +57,19 @@ Check whether `~/.config/paper-wiki/recipes/daily.yaml` already exists.
 
 **If it exists**, use AskUserQuestion to prompt:
 
-**Question:** "Paper-wiki is already configured. What would you like to do?"
+**AskUserQuestion call:**
+- question: "Paper-wiki is already configured. What would you like to do?"
+- header: "Setup mode"
+- multiSelect: false
+- options:
+  1. label: "Keep current config"
+     description: "Verify health (venv + diagnostics), then exit without changes."
+  2. label: "Reconfigure from scratch"
+     description: "Re-run the 5-question wizard and overwrite daily.yaml."
+  3. label: "Edit one piece"
+     description: "Drill into a specific field — vault path, topics, key, or auto-ingest."
 
-**Options:**
-1. Keep current config — verify health (venv + diagnostics), then exit
-2. Reconfigure from scratch — re-run the 5-question wizard, overwrite daily.yaml
-3. Edit one piece — pick a single field to change
-4. Cancel
+Note: Claude Code automatically appends a Cancel option — do NOT add one manually.
 
 If user chooses "Keep current config": run Step 0 + Step 1, confirm
 health, show a summary, and exit.
@@ -72,7 +78,7 @@ If user chooses "Reconfigure from scratch": proceed to Q1 wizard below.
 
 If user chooses "Edit one piece": go to Branch 2 (drill-down) below.
 
-If user chooses "Cancel": exit immediately without changes.
+If user chooses Cancel (auto-provided): exit immediately without changes.
 
 ---
 
@@ -80,20 +86,27 @@ If user chooses "Cancel": exit immediately without changes.
 
 Use AskUserQuestion to prompt:
 
-**Question:** "Which piece would you like to edit?"
+**AskUserQuestion call:**
+- question: "Which piece would you like to edit?"
+- header: "Edit field"
+- multiSelect: false
+- options:
+  1. label: "Vault path"
+     description: "Change the Obsidian vault directory location."
+  2. label: "Topics"
+     description: "Add or remove research areas used for filtering."
+  3. label: "S2 API key"
+     description: "Rotate or add your Semantic Scholar API key."
+  4. label: "Auto-ingest"
+     description: "Change how many top papers are auto-ingested after each digest."
 
-**Options:**
-1. Vault path
-2. Topics
-3. Semantic Scholar API key
-4. auto_ingest_top
-5. Cancel
+Note: Claude Code automatically appends a Cancel option — do NOT add one manually.
 
 For each option, collect only that field via the relevant wizard step
 (Q1 through Q4 below), then merge it into the existing `daily.yaml`
 and write. Show a confirmation summary after saving.
 
-If user chooses "Cancel": return to the previous menu (re-run Branch 1).
+If user chooses Cancel (auto-provided): return to the previous menu (re-run Branch 1).
 
 ---
 
@@ -106,13 +119,21 @@ ls -d ~/Documents/*Vault* ~/Documents/*Wiki* ~/Documents/Paper-Wiki ~/Obsidian* 
 
 Use AskUserQuestion to prompt:
 
-**Question:** "Where should paper-wiki put your Obsidian vault?"
+**AskUserQuestion call:**
+- question: "Where should paper-wiki put your Obsidian vault?"
+- header: "Vault"
+- multiSelect: false
+- options: (pre-populate with up to 3 paths found above; always include the creation option)
+  - label: "~/Documents/Paper-Wiki" (if that path exists)
+    description: "Existing folder detected at this location."
+  - label: "~/Documents/Obsidian-Vault" (if that path exists)
+    description: "Existing folder detected at this location."
+  - label: "Create new"
+    description: "Create a fresh vault at ~/Documents/Paper-Wiki/ with mkdir -p."
 
-**Options:** (pre-populate with any paths found above, one per option)
-- e.g. `~/Documents/Paper-Wiki`
-- e.g. `~/Obsidian/Research`
-- Other (specify path) — if chosen, follow up with a plain free-form
-  question: "Enter the vault path:" and accept the user's typed response.
+Cap at 4 total options. Claude Code automatically appends an Other option for
+custom paths — do NOT add a manual "Other" option. If the user selects the
+auto-provided Other, follow up with a free-form question to capture the path.
 
 Validate the path. If it does not exist, offer to `mkdir -p` it.
 Save as the vault path used throughout the recipe.
@@ -121,31 +142,58 @@ Save as the vault path used throughout the recipe.
 
 ### Q2 — Topics (Branch 4)
 
-Use AskUserQuestion to prompt (repeat until "Done" is selected, accumulating
-all picks — each round re-prompt with the same question, keeping track of
-what has been chosen so far):
+Use AskUserQuestion to prompt using `multiSelect: true`. The user can
+select multiple themes in a single interaction — there is no need to
+re-prompt until "Done". Claude Code automatically appends an Other option
+for custom keywords — do NOT add a manual "Other" option and do NOT add
+a "Done" option; multiSelect handles submission.
 
-**Question:** "Which research areas interest you? (Pick all that apply — I will re-prompt until you choose Done.)"
+**AskUserQuestion call:**
+- question: "Which research areas interest you? Select all that apply."
+- header: "Topics"
+- multiSelect: true
+- options:
+  1. label: "Vision & Multimodal"
+     description: "Vision-language, VLM, multimodal, VQA, diffusion models."
+  2. label: "Biomedical & Pathology"
+     description: "Pathology, WSI, foundation models for medicine, clinical AI."
+  3. label: "Agents & Reasoning"
+     description: "Tool use, planning, agents, reasoning, RL."
+  4. label: "NLP & Language"
+     description: "LLMs, language models, instruction tuning, alignment."
 
-**Options:**
-1. Vision-Language (VLM, foundation models)
-2. Pathology / Medical Imaging
-3. Multi-modality (cross-modal, VQA)
-4. Diffusion Models (DDPM, latent diffusion)
-5. Agents (tool use, reasoning)
-6. NLP / Language Models
-7. Computer Vision (general)
-8. Reinforcement Learning
-9. Other (specify keywords) — if chosen, follow up with a free-form
-   question: "Enter keywords (comma-separated):" and add them as a
-   custom topic.
-10. Done — proceed to next question
+If the user selects the auto-provided Other, treat the free-form text as
+custom keywords and create a 5th topic entry in the recipe.
 
-Keep calling AskUserQuestion until the user picks "Done", accumulating
-all selected topics. For each built-in topic, use the corresponding
-preset `keywords` and `categories` (default `cs.CV, cs.LG`). Custom
-keywords from option 9 are added as a topic named `custom` with
-`categories: cs.CV, cs.LG` as the default.
+#### Theme → keywords mapping
+
+When writing the recipe YAML, expand each selected theme using this table:
+
+```
+Vision & Multimodal:
+  keywords: [vision-language, vision language model, VLM, foundation model,
+             multimodal, multi-modal, cross-modal, VQA, visual question answering,
+             diffusion model, denoising diffusion, latent diffusion]
+  categories: [cs.CV, cs.LG, cs.MM]
+
+Biomedical & Pathology:
+  keywords: [pathology, histopathology, WSI, whole-slide image, whole slide image,
+             digital pathology, medical imaging, clinical AI, foundation model]
+  categories: [cs.CV, eess.IV, q-bio.QM]
+
+Agents & Reasoning:
+  keywords: [agent, tool use, reasoning, planning, ReAct, chain-of-thought,
+             reinforcement learning, RLHF]
+  categories: [cs.AI, cs.MA, cs.LG]
+
+NLP & Language:
+  keywords: [language model, LLM, large language model, instruction tuning,
+             alignment, RLHF, prompt engineering]
+  categories: [cs.CL, cs.LG]
+```
+
+If the user provided custom keywords via auto-Other, append them as a 5th
+topic with `categories: [cs.CV, cs.LG]` as the catch-all default.
 
 ---
 
@@ -153,19 +201,25 @@ keywords from option 9 are added as a topic named `custom` with
 
 Use AskUserQuestion to prompt:
 
-**Question:** "Add a Semantic Scholar API key now? (Bumps rate limit ~1 req/s → 100 req/s — strongly recommended.)"
+**AskUserQuestion call:**
+- question: "Add a Semantic Scholar API key now? (Bumps rate limit ~1 req/s → 100 req/s — strongly recommended.)"
+- header: "S2 API key"
+- multiSelect: false
+- options:
+  1. label: "Paste key now"
+     description: "Key saved to ~/.config/paper-wiki/secrets.env with mode 600."
+  2. label: "Skip — no key"
+     description: "Rate limited to ~1 req/s; OK for casual use."
+  3. label: "Show how to get one"
+     description: "Open API key signup URL: https://www.semanticscholar.org/product/api#api-key-form"
 
-**Options:**
-1. Yes — I'll paste the key (follow up with a free-form question to
-   capture it, then write to `~/.config/paper-wiki/secrets.env` as
-   `export PAPERWIKI_S2_API_KEY="<key>"` with `chmod 600`)
-2. Skip for now — use without a key (rate-limited)
-3. Help me get one — show URL `https://www.semanticscholar.org/product/api#api-key-form`
-   then re-prompt this same question
+If "Paste key now": follow up with a free-form question to capture it.
+Validate the key looks like a ~40 alphanumeric-char string before writing.
+Write to `~/.config/paper-wiki/secrets.env` as
+`export PAPERWIKI_S2_API_KEY="<key>"` with `chmod 600`.
+Flag malformed keys before writing — the wrong string causes silent 401s later.
 
-If "Yes": validate the key looks like a ~40 alphanumeric-char string
-before writing. Flag malformed keys before writing — the wrong string
-causes silent 401s later.
+If "Show how to get one": display the URL, then re-prompt this same question.
 
 ---
 
@@ -173,14 +227,21 @@ causes silent 401s later.
 
 Use AskUserQuestion to prompt:
 
-**Question:** "Auto-chain wiki-ingest for top-N papers after every digest?"
+**AskUserQuestion call:**
+- question: "Auto-chain wiki-ingest for top-N papers after every digest?"
+- header: "Auto-ingest"
+- multiSelect: false
+- options:
+  1. label: "None"
+     description: "Digest only — no auto wiki-ingest."
+  2. label: "Top 3 (recommended)"
+     description: "Ingest top 3 papers after each digest."
+  3. label: "Top 5"
+     description: "Ingest top 5 — heavier compute."
 
-**Options:**
-1. None (0) — just produce the digest, no auto-ingest
-2. Top 3 (recommended for daily use)
-3. Top 5
-4. Custom (enter integer 1-20) — follow up with a free-form question
-   to capture the integer
+Claude Code automatically appends an Other option for custom values — do NOT
+add a manual "Custom" option. If the user selects auto-Other, follow up with
+a free-form question to capture an integer (1-20).
 
 Save the result as `auto_ingest_top: <n>` in the recipe. Default 3.
 
@@ -192,17 +253,23 @@ Consult the `mcp_servers` field from diagnostics (Step 1).
 
 Use AskUserQuestion to prompt:
 
-**Question:** "Do you have paperclip CLI installed for biomedical search?"
+**AskUserQuestion call:**
+- question: "Do you have paperclip CLI installed for biomedical search?"
+- header: "Paperclip"
+- multiSelect: false
+- options:
+  1. label: "Yes — installed"
+     description: "paperclip is on PATH and logged in; biomedical recipe will be written."
+  2. label: "Skip"
+     description: "No biomedical sources; skip this step."
+  3. label: "How to install"
+     description: "Show docs/paperclip-setup.md and the registration command verbatim."
 
-**Options:**
-1. Yes — `paperclip` is on $PATH and logged in (write
-   `recipes/biomedical-weekly.yaml`)
-2. Skip — not interested in biomedical sources
-3. How do I install it — show `docs/paperclip-setup.md` and the
-   registration command verbatim:
-   `claude mcp add --transport http paperclip https://paperclip.gxl.ai/mcp`
-   Do NOT auto-run this command — emit it for the user to run themselves.
-   Auth is sensitive. Then re-prompt this question.
+If "How to install": show `docs/paperclip-setup.md` and the
+registration command verbatim:
+`claude mcp add --transport http paperclip https://paperclip.gxl.ai/mcp`
+Do NOT auto-run this command — emit it for the user to run themselves.
+Auth is sensitive. Then re-prompt this question.
 
 If `paperclip` is already listed in `mcp_servers`: confirm cheerfully
 that paperclip MCP is registered, mention
@@ -222,15 +289,24 @@ Display a summary of all values collected:
 
 Then use AskUserQuestion to prompt:
 
-**Question:** "Ready to save? Here's what I'll write to ~/.config/paper-wiki/:"
+**AskUserQuestion call:**
+- question: "Ready to save? Here's what I'll write to ~/.config/paper-wiki/:"
+- header: "Save?"
+- multiSelect: false
+- options:
+  1. label: "Save and exit"
+     description: "Write the recipe and secrets files, then show next steps."
+  2. label: "Edit before save"
+     description: "Go back to Branch 2 to change a specific field."
 
-**Options:**
-1. Save and exit
-2. Edit a value before saving (returns to Branch 2 — Edit one piece)
-3. Cancel without saving
+Note: Claude Code automatically appends a Cancel option — do NOT add one manually.
 
 If "Save and exit": write the recipe (Step 9) and show the next-step
 suggestion.
+
+If "Edit before save": return to Branch 2 — Edit one piece.
+
+If Cancel (auto-provided): exit without saving.
 
 ---
 
@@ -283,6 +359,9 @@ Then suggest: `/paperwiki:digest` to run their first morning digest.
 | "All five questions in one message — fast for the user!" | Walk through them one at a time using AskUserQuestion. Multi-question prompts get half-answered and the SKILL ends up guessing the rest. |
 | "Default everything; the user can edit later." | The user came to setup specifically to make decisions. Defaults are a fallback for "I don't know", not a substitute for asking. |
 | "I can just render the options as markdown bullet points." | Use AskUserQuestion for every choice point. Rendering options as prose leaves Claude to guess which one the user picked; AskUserQuestion gives a structured selection UI. |
+| "I should add an 'Other' or 'Cancel' option myself." | Claude Code injects these automatically. Manually adding them violates the AskUserQuestion schema and causes UI bugs like duplicate options or split tabs. |
+| "Topics need 10 fine-grained options." | AskUserQuestion hard-caps at 4 options; exceeding this causes Claude Code to auto-split them into multiple tabs (the 'Topics (1)/(2)' bug). Use 4 themed buckets with multiSelect: true instead. |
+| "I'll skip the header field — the question text is clear enough." | The header field is REQUIRED. Omitting it causes Claude Code to truncate the question text into a garbage label like 'Custom kw'. Always provide header (max 12 chars). |
 
 ## Red Flags
 
@@ -310,6 +389,16 @@ Then suggest: `/paperwiki:digest` to run their first morning digest.
 - Claude renders choice options as markdown prose instead of calling
   AskUserQuestion — this breaks the structured selection UI and is the
   primary failure mode this SKILL is designed to prevent.
+- An AskUserQuestion call is missing a `header` field — Claude Code
+  truncates the question text into a garbage chip label. Every call
+  must specify `header` (≤ 12 chars).
+- An AskUserQuestion call has more than 4 options — Claude Code
+  auto-splits them across tabs (producing "Topics (1)" / "Topics (2)"
+  style bugs). Hard cap is 4 options; use multiSelect: true + themed
+  buckets for multi-pick scenarios.
+- A manual "Other", "Cancel", or "Done" option was added to an
+  AskUserQuestion call — Claude Code injects these automatically.
+  Adding them manually produces duplicates and schema violations.
 
 ## Verification
 
@@ -323,6 +412,12 @@ Then suggest: `/paperwiki:digest` to run their first morning digest.
   than rendering options as markdown bullet points. If options appear
   only as prose with no AskUserQuestion call, the SKILL has failed its
   primary UX contract.
+- Every AskUserQuestion call includes a `header` field (≤ 12 chars).
+- No AskUserQuestion call has more than 4 options.
+- No AskUserQuestion call includes a manually-added "Other", "Cancel",
+  or "Done" option — Claude Code provides these automatically.
+- The topics question uses `multiSelect: true` so users can select
+  multiple themes in a single interaction without re-prompting.
 - `/paperwiki:digest` (the next-step command) loads the recipe
   successfully — confirm by running it once at the end of setup if
   the user is willing.
