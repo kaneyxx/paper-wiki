@@ -112,6 +112,69 @@ class TestUpsertSource:
         assert isinstance(related, list)
         assert any("vision-language" in s for s in related)
 
+    async def test_source_frontmatter_includes_publication_metadata(self, tmp_path: Path) -> None:
+        """Frontmatter must carry enough metadata for downstream tools (lint,
+        compile, search) to surface the paper without re-reading the body."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        assert fm["published_at"] == "2026-04-20"
+        assert fm["landing_url"] == "https://arxiv.org/abs/2506.13063"
+        assert fm["citation_count"] == 42
+        # Domain inferred from arxiv categories.
+        assert fm["domain"]  # non-empty heuristic, e.g. "Computer Vision"
+        # Score breakdown is present so users can see why the paper ranked.
+        score = fm["score_breakdown"]
+        assert isinstance(score, dict)
+        assert score["composite"] == 0.78
+        assert score["relevance"] == 0.9
+
+    async def test_source_body_uses_structured_sections(self, tmp_path: Path) -> None:
+        """Body must be section-organized so Obsidian's outline pane is useful
+        and downstream tools can target individual sections."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Drop the frontmatter for body assertions.
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+
+        for section in (
+            "## Core Information",
+            "## Abstract",
+            "## Key Takeaways",
+            "## Figures",
+            "## Notes",
+        ):
+            assert section in body, f"missing section: {section!r}"
+
+    async def test_source_body_has_takeaways_and_figures_placeholders(self, tmp_path: Path) -> None:
+        """Empty sections must point users at the SKILLs that fill them."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Key Takeaways block points at wiki-ingest.
+        assert "/paperwiki:wiki-ingest" in body
+        # Figures block points at the (forthcoming) extract-images workflow.
+        body_lower = body.lower()
+        assert "extract" in body_lower
+        assert "image" in body_lower
+
+    async def test_source_core_information_section_lists_links(self, tmp_path: Path) -> None:
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        rec = _make_recommendation()
+        await backend.upsert_paper(rec)
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Core Information renders authors, published date, both links, and citations.
+        assert "Jane Doe" in body
+        assert "2026-04-20" in body
+        assert "https://arxiv.org/abs/2506.13063" in body
+        assert "42" in body  # citation count
+
     async def test_upsert_is_idempotent(self, tmp_path: Path) -> None:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         rec = _make_recommendation()

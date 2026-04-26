@@ -95,12 +95,14 @@ class MarkdownWikiBackend:
     async def upsert_paper(self, rec: Recommendation) -> Path:
         """Write or refresh a per-paper source file under ``sources/``.
 
-        The file's frontmatter mirrors the recommendation: ``canonical_id``
-        and ``title`` are stable; ``confidence`` is initialized from the
-        composite score; ``tags`` carry over the paper's categories;
-        ``related_concepts`` is seeded from ``matched_topics`` (each
-        becomes a wikilink). The body is intentionally minimal — SKILLs
-        regenerate it during ingest.
+        The frontmatter carries everything downstream tools need to surface
+        the paper without re-reading the body: identifiers (``canonical_id``,
+        ``landing_url``, ``pdf_url``), publication metadata
+        (``published_at``, ``citation_count``, ``domain``), the full
+        ``score_breakdown``, and the live ``status`` / ``confidence`` /
+        ``last_synthesized`` triple. The body is section-organized so
+        Obsidian's outline pane is useful and SKILLs can target individual
+        sections during ingest / extract / analyze.
         """
         paper = rec.paper
         score = rec.score
@@ -111,7 +113,19 @@ class MarkdownWikiBackend:
             "title": paper.title,
             "status": "draft",
             "confidence": round(score.composite, 4),
+            "domain": _infer_domain(paper.categories),
             "tags": list(paper.categories),
+            "published_at": paper.published_at.strftime("%Y-%m-%d"),
+            "landing_url": paper.landing_url or "",
+            "pdf_url": paper.pdf_url or "",
+            "citation_count": (paper.citation_count if paper.citation_count is not None else 0),
+            "score_breakdown": {
+                "composite": round(score.composite, 4),
+                "relevance": round(score.relevance, 4),
+                "novelty": round(score.novelty, 4),
+                "momentum": round(score.momentum, 4),
+                "rigor": round(score.rigor, 4),
+            },
             "related_concepts": related,
             "last_synthesized": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
@@ -255,14 +269,61 @@ class MarkdownWikiBackend:
 
     @staticmethod
     def _default_source_body(rec: Recommendation) -> str:
+        """Render the section-organized body for a fresh source stub.
+
+        The five sections are stable so SKILLs (analyze, wiki-ingest,
+        extract-images) can target them deterministically. Empty
+        sections include "(Run /paperwiki:<skill>)" hints so users know
+        what fills them.
+        """
         paper = rec.paper
-        author_names = ", ".join(a.name for a in paper.authors)
-        link = paper.landing_url or paper.canonical_id
+        score = rec.score
+        author_names = ", ".join(a.name for a in paper.authors) or "(unknown)"
+        published = paper.published_at.strftime("%Y-%m-%d")
+        landing = paper.landing_url or paper.canonical_id
+        pdf_line = f"- **PDF**: <{paper.pdf_url}>\n" if paper.pdf_url else ""
+        citation_line = (
+            f"- **Citations**: {paper.citation_count}\n"
+            if paper.citation_count is not None
+            else "- **Citations**: —\n"
+        )
+
         return (
-            f"# {paper.title}\n\n"
+            f"# {paper.title}\n"
+            "\n"
+            "## Core Information\n"
+            "\n"
             f"- **Authors**: {author_names}\n"
-            f"- **Source**: {link}\n\n"
+            f"- **Published**: {published}\n"
+            f"- **Source**: {landing}\n"
+            + pdf_line
+            + citation_line
+            + (
+                f"- **Score**: {score.composite:.2f} "
+                f"(relevance {score.relevance:.2f}, novelty {score.novelty:.2f}, "
+                f"momentum {score.momentum:.2f}, rigor {score.rigor:.2f})\n"
+            )
+            + "\n"
+            "## Abstract\n"
+            "\n"
             f"{paper.abstract.strip()}\n"
+            "\n"
+            "## Key Takeaways\n"
+            "\n"
+            "_Run `/paperwiki:wiki-ingest "
+            f"{paper.canonical_id}` to fold this paper into concept articles "
+            "and replace this placeholder with synthesized takeaways._\n"
+            "\n"
+            "## Figures\n"
+            "\n"
+            "_Run `/paperwiki:extract-images "
+            f"{paper.canonical_id}` to download the arXiv source tarball "
+            "and embed real paper figures here._\n"
+            "\n"
+            "## Notes\n"
+            "\n"
+            "_Your annotations and follow-up questions go here. Survives "
+            "re-ingest because SKILLs only rewrite the sections above._\n"
         )
 
     @staticmethod
@@ -309,6 +370,40 @@ def _concept_name_to_filename(name: str) -> str:
     safe = _FILENAME_UNSAFE_RE.sub("_", name)
     safe = _RUN_OF_UNDERSCORE_OR_WHITESPACE.sub("_", safe)
     return safe.strip("_") or "untitled"
+
+
+_DOMAIN_LABELS: dict[str, str] = {
+    # CS
+    "cs.AI": "Artificial Intelligence",
+    "cs.LG": "Machine Learning",
+    "cs.CL": "NLP",
+    "cs.CV": "Computer Vision",
+    "cs.MA": "Multi-Agent Systems",
+    "cs.MM": "Multimedia",
+    "cs.RO": "Robotics",
+    # EE
+    "eess.IV": "Image / Video Processing",
+    # Q-bio
+    "q-bio.QM": "Quantitative Biology",
+    "q-bio.BM": "Biomolecules",
+    "q-bio.GN": "Genomics",
+    # Stat
+    "stat.ML": "Statistics / Machine Learning",
+}
+
+
+def _infer_domain(categories: list[str]) -> str:
+    """Pick a human-readable domain label from arxiv-style categories.
+
+    Heuristic: first match in a curated translation table; falls back
+    to the first category verbatim, or ``"unknown"`` if the list is
+    empty. The result is for display only — the original category
+    list still lives in ``tags`` frontmatter.
+    """
+    for cat in categories:
+        if cat in _DOMAIN_LABELS:
+            return _DOMAIN_LABELS[cat]
+    return categories[0] if categories else "unknown"
 
 
 def _str_list(value: object) -> list[str]:
