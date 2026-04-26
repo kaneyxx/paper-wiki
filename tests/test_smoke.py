@@ -280,6 +280,45 @@ def test_readme_documents_bio_search_as_optional() -> None:
     )
 
 
+def test_readme_lists_all_shipped_skills() -> None:
+    """Every SKILL under skills/ must be documented in README."""
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    for skill_dir in (REPO_ROOT / "skills").iterdir():
+        if not skill_dir.is_dir():
+            continue
+        slash_command = f"/paperwiki:{skill_dir.name}"
+        assert slash_command in body, f"README must document the {slash_command} SKILL"
+
+
+def test_readme_documents_s2_api_key_setup() -> None:
+    """S2 API-key indirection is the most common first-run friction."""
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "PAPERWIKI_S2_API_KEY" in body, "README must document the S2 API key env var name"
+    assert "api_key_env" in body, "README must show the recipe-side indirection"
+    assert "secrets.env" in body or "secrets.toml" in body, (
+        "README must point users at a secure storage location for the key"
+    )
+
+
+def test_readme_status_reflects_current_minor_version() -> None:
+    """README's Status section must not be wildly out-of-date."""
+    from paperwiki import __version__
+
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    major_minor = ".".join(__version__.split(".")[:2])  # "0.3"
+    assert major_minor in body, (
+        f"README status must mention the current minor version ({major_minor}.x)"
+    )
+
+
+def test_readme_documents_personal_recipe_directory() -> None:
+    """Users need to know recipes ship as templates and personal recipes live elsewhere."""
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "~/.config/paperwiki" in body, (
+        "README must point users at the personal recipe / config dir"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level project files
 # ---------------------------------------------------------------------------
