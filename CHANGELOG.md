@@ -9,6 +9,27 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-26
+
+### Fixed
+
+- **setup SKILL was violating the AskUserQuestion schema in multiple ways** — too
+  many options (auto-split into "Topics (1)/(2)" tabs), missing `header` field
+  (caused garbage chip labels like "Custom kw"), manually added redundant "Other"
+  / "Cancel" options (Claude Code injects these automatically), and faked
+  multi-select via re-prompting instead of using `multiSelect: true`. Each branch
+  now provides a fully-specified AskUserQuestion call with `header` (≤ 12 chars),
+  per-option `description`, and proper `multiSelect` flag where applicable.
+
+### Changed
+
+- **Topic selection collapsed from 10 fine-grained options to 4 themed buckets**
+  (Vision & Multimodal / Biomedical & Pathology / Agents & Reasoning / NLP &
+  Language) with `multiSelect: true`. Custom keywords now go through Claude
+  Code's auto-provided "Other" input rather than a separate follow-up question.
+  Each bucket maps to a curated keyword list and arXiv category set in the
+  resulting recipe.
+
 ## [0.3.3] - 2026-04-26
 
 ### Changed
