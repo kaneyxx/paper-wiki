@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.2"
+    assert data["version"] == "0.3.3"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -263,6 +263,31 @@ def test_setup_skill_walks_first_run_wizard() -> None:
     assert "auto_ingest_top" in body, (
         "setup SKILL's wizard must capture auto_ingest_top during onboarding"
     )
+
+
+def test_setup_skill_invokes_askuserquestion_for_choice_points() -> None:
+    """setup SKILL must use AskUserQuestion at every branch (>= 7 calls)."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    count = body.count("AskUserQuestion")
+    assert count >= 7, (
+        f"setup SKILL must call AskUserQuestion at least 7 times (found {count}); "
+        "one per branch: already-configured, edit-one-piece, Q1 vault, Q2 topics, "
+        "Q3 S2 key, Q4 auto-ingest, Q5 paperclip, final confirmation"
+    )
+
+
+def test_setup_skill_documents_branch_options_for_already_configured() -> None:
+    """setup SKILL's already-configured branch must document all 4 options."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    for expected in (
+        "Keep current config",
+        "Reconfigure from scratch",
+        "Edit one piece",
+        "Cancel",
+    ):
+        assert expected in body, (
+            f"setup SKILL already-configured branch must list option: {expected!r}"
+        )
 
 
 def test_analyze_skill_writes_to_sources_subdir() -> None:

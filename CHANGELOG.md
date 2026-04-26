@@ -9,6 +9,18 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-04-26
+
+### Changed
+
+- **setup SKILL now uses Claude Code's AskUserQuestion tool for every choice** —
+  provides a structured selection UI instead of plain prose options. Eight
+  explicit call points cover: already-configured detection (4 options), edit-one-piece
+  drill-down (5 options), Q1 vault path (auto-detected candidates + Other),
+  Q2 topics multi-select (10 options, re-prompted until Done), Q3 S2 API key
+  (3 options), Q4 auto-ingest depth (4 options), Q5 paperclip (3 options),
+  and final save confirmation (3 options). Aligns with the OMC convention.
+
 ## [0.3.2] — 2026-04-26
 
 ### Changed (BREAKING for personal config)
