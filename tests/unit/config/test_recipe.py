@@ -206,6 +206,63 @@ class TestInstantiatePipeline:
         with pytest.raises(UserError, match="unknown source"):
             instantiate_pipeline(recipe)
 
+    def test_semantic_scholar_resolves_api_key_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Recipes can name an env var instead of inlining the API key.
+
+        Inline ``api_key: <hex>`` is brittle — it leaks into recipe
+        files that may be shared, version-controlled, or pasted into
+        tickets. ``api_key_env: PAPERWIKI_S2_API_KEY`` indirects through
+        the env so the secret stays in ``~/.config/paperwiki/secrets.env``
+        (which lives outside the repo).
+        """
+        from paperwiki.plugins.sources.semantic_scholar import SemanticScholarSource
+
+        monkeypatch.setenv("PAPERWIKI_S2_TEST_KEY", "the-real-key")
+
+        recipe = RecipeSchema.model_validate(
+            {
+                **_VALID_RECIPE,
+                "sources": [
+                    {
+                        "name": "semantic_scholar",
+                        "config": {
+                            "query": "vision-language",
+                            "lookback_days": 7,
+                            "api_key_env": "PAPERWIKI_S2_TEST_KEY",
+                        },
+                    }
+                ],
+            }
+        )
+        pipeline = instantiate_pipeline(recipe)
+        source = pipeline.sources[0]
+        assert isinstance(source, SemanticScholarSource)
+        assert source.api_key == "the-real-key"
+
+    def test_semantic_scholar_missing_env_var_raises_user_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Misconfigured env name surfaces a UserError, not silent ``None``."""
+        monkeypatch.delenv("PAPERWIKI_S2_NOT_SET", raising=False)
+
+        recipe = RecipeSchema.model_validate(
+            {
+                **_VALID_RECIPE,
+                "sources": [
+                    {
+                        "name": "semantic_scholar",
+                        "config": {
+                            "query": "x",
+                            "lookback_days": 7,
+                            "api_key_env": "PAPERWIKI_S2_NOT_SET",
+                        },
+                    }
+                ],
+            }
+        )
+        with pytest.raises(UserError, match="PAPERWIKI_S2_NOT_SET"):
+            instantiate_pipeline(recipe)
+
     def test_paperclip_source_builds(self) -> None:
         """Recipes can name ``paperclip`` like any other source plugin."""
         from paperwiki.plugins.sources.paperclip import PaperclipSource

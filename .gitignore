@@ -40,3 +40,17 @@ coverage.xml
 # Wiki drafts area (only matches a vault embedded in the repo; harmless
 # elsewhere). Pending-review concept articles should not be committed.
 Wiki/.drafts/
+
+# Secrets — defense in depth. The user's API keys live OUTSIDE the repo
+# at ~/.config/paperwiki/, but if someone ever drops a .env or
+# secrets.* into the project tree, we never want to commit it.
+.env
+.env.*
+*.env
+secrets/
+secrets.*
+*.secret
+.secrets/
+
+# Per-user paperwiki config (if anyone copies it into the project tree)
+.paperwiki/

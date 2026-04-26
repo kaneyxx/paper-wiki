@@ -18,6 +18,7 @@ giving recipe authors immediate feedback.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -116,11 +117,49 @@ def _build_source(spec: PluginSpec) -> Source:
     if spec.name == "arxiv":
         return ArxivSource(**spec.config)
     if spec.name == "semantic_scholar":
-        return SemanticScholarSource(**spec.config)
+        return SemanticScholarSource(**_resolve_s2_secrets(spec.config))
     if spec.name == "paperclip":
         return PaperclipSource(**spec.config)
     msg = f"unknown source plugin: {spec.name!r}"
     raise UserError(msg)
+
+
+def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve ``api_key_env`` indirection for the semantic_scholar source.
+
+    Recipe authors are encouraged to keep their S2 API key out of
+    version-controlled YAML by referencing an env var instead:
+
+    .. code-block:: yaml
+
+        - name: semantic_scholar
+          config:
+            api_key_env: PAPERWIKI_S2_API_KEY
+
+    The env var is resolved at pipeline-build time. A missing env var
+    raises :class:`UserError` so misconfiguration is loud, not silent.
+    """
+    config = dict(config)
+    env_name = config.pop("api_key_env", None)
+    if env_name is None:
+        return config
+    if "api_key" in config:
+        msg = (
+            "semantic_scholar source: ``api_key`` and ``api_key_env`` are "
+            "mutually exclusive. Pick one."
+        )
+        raise UserError(msg)
+    value = os.environ.get(env_name)
+    if not value:
+        msg = (
+            f"semantic_scholar source: env var {env_name!r} is unset or "
+            "empty. Either export it (e.g. via "
+            "`source ~/.config/paperwiki/secrets.env`) or set "
+            "``api_key`` inline."
+        )
+        raise UserError(msg)
+    config["api_key"] = value
+    return config
 
 
 def _build_filter(spec: PluginSpec) -> Filter:
