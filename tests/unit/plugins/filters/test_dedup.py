@@ -162,6 +162,38 @@ class TestDedupFilterPureLogic:
 
         assert isinstance(DedupFilter(loaders=[]), Filter)
 
+    async def test_drops_within_stream_duplicates_by_canonical_id(self) -> None:
+        """Two sources yielding the same canonical id → only the first survives.
+
+        Without this, a recipe with both ``arxiv`` and ``semantic_scholar``
+        would surface the same paper twice in the top-K, contaminating
+        the digest and the wiki-backend mirror.
+        """
+        flt = DedupFilter(loaders=[])
+        papers = [
+            _make_paper("arxiv:1111.1111", title="First copy"),
+            _make_paper("arxiv:1111.1111", title="Second copy"),
+            _make_paper("arxiv:2222.2222", title="Different paper"),
+        ]
+        ctx = _make_ctx()
+        kept = [p async for p in flt.apply(_stream(papers), ctx)]
+        assert {p.canonical_id for p in kept} == {"arxiv:1111.1111", "arxiv:2222.2222"}
+        assert len(kept) == 2
+        assert ctx.counters["filter.dedup.dropped"] == 1
+
+    async def test_stream_dedup_keeps_first_of_a_pair(self) -> None:
+        """First-wins ordering — recipe author controls priority via source order."""
+        flt = DedupFilter(loaders=[])
+        papers = [
+            _make_paper("arxiv:5555.5555", title="From arxiv (no citations)"),
+            _make_paper("arxiv:5555.5555", title="From S2 (with citations)"),
+        ]
+        ctx = _make_ctx()
+        kept = [p async for p in flt.apply(_stream(papers), ctx)]
+        assert len(kept) == 1
+        # First paper through wins — recipe authors order sources for priority.
+        assert kept[0].title == "From arxiv (no citations)"
+
 
 # ---------------------------------------------------------------------------
 # MarkdownVaultKeyLoader

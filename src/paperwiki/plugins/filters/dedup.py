@@ -82,11 +82,22 @@ class DedupFilter:
         ctx: RunContext,
     ) -> AsyncIterator[Paper]:
         arxiv_ids, title_keys = await self._load_keys(ctx)
+        # Stream-side dedup: when multiple sources are wired into the
+        # same recipe (e.g., arxiv + semantic_scholar), the same paper
+        # may be yielded twice with the same canonical id. Without this
+        # set, both copies survive into the top-K and the digest
+        # surfaces the paper twice. First yield wins; recipe authors
+        # control priority by source order.
+        seen_ids: set[str] = set()
 
         async for paper in papers:
             if self._is_duplicate(paper, arxiv_ids, title_keys):
                 ctx.increment("filter.dedup.dropped")
                 continue
+            if paper.canonical_id in seen_ids:
+                ctx.increment("filter.dedup.dropped")
+                continue
+            seen_ids.add(paper.canonical_id)
             yield paper
 
     async def _load_keys(self, ctx: RunContext) -> tuple[set[str], set[str]]:
