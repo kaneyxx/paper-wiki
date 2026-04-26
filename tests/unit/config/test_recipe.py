@@ -236,7 +236,7 @@ class TestInstantiatePipeline:
         Inline ``api_key: <hex>`` is brittle — it leaks into recipe
         files that may be shared, version-controlled, or pasted into
         tickets. ``api_key_env: PAPERWIKI_S2_API_KEY`` indirects through
-        the env so the secret stays in ``~/.config/paperwiki/secrets.env``
+        the env so the secret stays in ``~/.config/paper-wiki/secrets.env``
         (which lives outside the repo).
         """
         from paperwiki.plugins.sources.semantic_scholar import SemanticScholarSource

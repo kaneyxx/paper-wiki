@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.1"
+    assert data["version"] == "0.3.2"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -196,13 +196,13 @@ def test_digest_skill_describes_auto_ingest_top_chaining() -> None:
 
 
 def test_digest_skill_resolves_personal_recipes_and_sources_secrets() -> None:
-    """Daily flow ergonomics: SKILL must look in ~/.config/paperwiki/recipes
-    first and source ~/.config/paperwiki/secrets.env before the runner."""
+    """Daily flow ergonomics: SKILL must look in ~/.config/paper-wiki/recipes
+    first and source ~/.config/paper-wiki/secrets.env before the runner."""
     body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
-    assert "~/.config/paperwiki/recipes" in body, (
+    assert "~/.config/paper-wiki/recipes" in body, (
         "digest SKILL must check the personal-recipes dir before bundled templates"
     )
-    assert "~/.config/paperwiki/secrets.env" in body, (
+    assert "~/.config/paper-wiki/secrets.env" in body, (
         "digest SKILL must source the secrets file so api_key_env resolves"
     )
 
@@ -213,7 +213,7 @@ def test_bundled_assets_are_english_only() -> None:
     Chinese (and other CJK) examples belong under ``locales/zh/`` (TBD),
     never inlined in trigger phrases or prompt copy. This guard catches
     accidental leaks during development. Code blocks and the user's
-    ``~/.config/paperwiki/`` files are out of scope — the rule is for
+    ``~/.config/paper-wiki/`` files are out of scope — the rule is for
     things that ship in the plugin tarball.
     """
     cjk = re.compile(r"[　-〿一-鿿＀-￯]")
@@ -252,10 +252,10 @@ def test_setup_skill_walks_first_run_wizard() -> None:
     for marker in ("Q1", "Q2", "Q3", "Q4", "Q5"):
         assert marker in body, f"setup SKILL must include wizard {marker}"
     # The two output files are named so the SKILL writes the right paths.
-    assert "~/.config/paperwiki/recipes/daily.yaml" in body, (
+    assert "~/.config/paper-wiki/recipes/daily.yaml" in body, (
         "setup SKILL must write the personal recipe to the canonical path"
     )
-    assert "~/.config/paperwiki/secrets.env" in body, (
+    assert "~/.config/paper-wiki/secrets.env" in body, (
         "setup SKILL must store API keys in the gitignored secrets file"
     )
     # The auto-ingest knob is offered as a wizard question, not an
@@ -383,7 +383,7 @@ def test_readme_documents_s2_api_key_setup() -> None:
 def test_readme_documents_personal_recipe_directory() -> None:
     """Users need to know recipes ship as templates and personal recipes live elsewhere."""
     body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "~/.config/paperwiki" in body, (
+    assert "~/.config/paper-wiki" in body, (
         "README must point users at the personal recipe / config dir"
     )
 

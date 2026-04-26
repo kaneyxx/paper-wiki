@@ -33,9 +33,10 @@ to `paperwiki:setup`.
 ## Process
 
 1. **Locate the recipe.** Resolution order:
-   1. **Personal recipe** at `~/.config/paperwiki/recipes/<name>.yaml`
+   1. **Personal recipe** at `~/.config/paper-wiki/recipes/<name>.yaml`
       (the user's editable copy with their topics, vault paths, and
-      ``auto_ingest_top`` preference).
+      ``auto_ingest_top`` preference). If ``$PAPERWIKI_CONFIG_DIR`` is
+      set, look there instead of ``~/.config/paper-wiki/``.
    2. **Bundled template** at `${CLAUDE_PLUGIN_ROOT}/recipes/<name>.yaml`.
 
    Default ``<name>`` is ``daily``. If the user said "weekly", default
@@ -43,7 +44,7 @@ to `paperwiki:setup`.
    ``biomedical-weekly``. Confirm the resolved path exists; if not,
    surface a clear error and offer to run ``/paperwiki:setup``.
 2. **Source secrets if present.** If
-   ``~/.config/paperwiki/secrets.env`` exists, source it (or ``export``
+   ``~/.config/paper-wiki/secrets.env`` exists, source it (or ``export``
    each ``KEY=value`` line) before the runner so any
    ``api_key_env: PAPERWIKI_S2_API_KEY`` indirection in the recipe
    resolves cleanly. The recipe loader raises ``UserError`` with a

@@ -3,7 +3,7 @@
 # `10_Daily/`, `20_Research/Papers/`, etc.).
 #
 # Copy this to your own private location, e.g.:
-#   ~/.config/paperwiki/recipes/personal.yaml
+#   ~/.config/paper-wiki/recipes/personal.yaml
 # and edit the topics + paths to match your setup.
 #
 # Why a personal recipe (vs. tweaking the bundled ones):

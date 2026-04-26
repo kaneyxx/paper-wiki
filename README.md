@@ -80,11 +80,11 @@ requires nor blocks those conventions; see
 ### 3. Set up your secrets
 
 ```bash
-mkdir -p ~/.config/paperwiki
-cat > ~/.config/paperwiki/secrets.env <<'EOF'
+mkdir -p ~/.config/paper-wiki
+cat > ~/.config/paper-wiki/secrets.env <<'EOF'
 export PAPERWIKI_S2_API_KEY="<your-S2-key>"
 EOF
-chmod 600 ~/.config/paperwiki/secrets.env
+chmod 600 ~/.config/paper-wiki/secrets.env
 ```
 
 Bundled and personal recipes never inline the key. They reference it
@@ -98,29 +98,40 @@ The recipes under `recipes/*.yaml` are **templates**. Your personal
 recipe lives outside the plugin tree at:
 
 ```text
-~/.config/paperwiki/recipes/<name>.yaml
+~/.config/paper-wiki/recipes/<name>.yaml
 ```
 
 Copy a template as a starting point:
 
 ```bash
-mkdir -p ~/.config/paperwiki/recipes
-cp recipes/daily-arxiv.yaml ~/.config/paperwiki/recipes/daily.yaml
+mkdir -p ~/.config/paper-wiki/recipes
+cp recipes/daily-arxiv.yaml ~/.config/paper-wiki/recipes/daily.yaml
 ```
 
-Then edit `~/.config/paperwiki/recipes/daily.yaml`:
+Then edit `~/.config/paper-wiki/recipes/daily.yaml`:
 
 - Change every `vault_path` and `vault_paths` reference to your vault
 - Change the `topics` to keywords you actually read about
 - Add `api_key_env: PAPERWIKI_S2_API_KEY` to the `semantic_scholar`
   source if you have a key (recommended)
 
+**Dotfiles / non-standard config location**: if you keep your config
+under a custom path (e.g. `~/dotfiles/paper-wiki/`), set the
+`PAPERWIKI_CONFIG_DIR` environment variable and paper-wiki will use that
+directory instead of `~/.config/paper-wiki/`. Resolution priority:
+
+```
+1. $PAPERWIKI_CONFIG_DIR          (if set)
+2. $XDG_CONFIG_HOME/paper-wiki    (if XDG_CONFIG_HOME is set)
+3. ~/.config/paper-wiki           (default)
+```
+
 ### 5. Run your first digest
 
 ```bash
-source ~/.config/paperwiki/secrets.env
+source ~/.config/paper-wiki/secrets.env
 .venv/bin/python -m paperwiki.runners.digest \
-    ~/.config/paperwiki/recipes/daily.yaml
+    ~/.config/paper-wiki/recipes/daily.yaml
 ```
 
 You should see ~10 paper recommendations land at:

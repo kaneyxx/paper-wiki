@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Interactive first-run wizard. Verifies paper-wiki's Python environment, walks the user through five questions to build their personal recipe (vault path, topics, S2 API key, auto-ingest preference), writes the config files, and surfaces optional MCP servers. Use when the user invokes /paperwiki:setup, when no personal recipe exists yet at ~/.config/paperwiki/recipes/, or when downstream paperwiki SKILLs report missing config.
+description: Interactive first-run wizard. Verifies paper-wiki's Python environment, walks the user through five questions to build their personal recipe (vault path, topics, S2 API key, auto-ingest preference), writes the config files, and surfaces optional MCP servers. Use when the user invokes /paperwiki:setup, when no personal recipe exists yet at ~/.config/paper-wiki/recipes/, or when downstream paperwiki SKILLs report missing config.
 ---
 
 # paper-wiki Setup
@@ -15,8 +15,8 @@ Setup is the first-run onboarding wizard. It does three things:
    recipe — vault path, topics, S2 API key, auto-ingest depth, and
    whether to add paperclip.
 3. **Writes two files** that downstream SKILLs read:
-   - `~/.config/paperwiki/recipes/daily.yaml` — the personal recipe
-   - `~/.config/paperwiki/secrets.env` — the API keys (chmod 600)
+   - `~/.config/paper-wiki/recipes/daily.yaml` — the personal recipe
+   - `~/.config/paper-wiki/secrets.env` — the API keys (chmod 600)
 
 After setup, the user runs `/paperwiki:digest` and everything Just
 Works — Claude finds the personal recipe, sources the secrets, runs
@@ -27,7 +27,7 @@ concept articles.
 
 - The user types `/paperwiki:setup`.
 - A paper-wiki SKILL fails because no personal recipe exists at
-  `~/.config/paperwiki/recipes/daily.yaml`.
+  `~/.config/paper-wiki/recipes/daily.yaml`.
 - The user reports broken Python imports inside
   `${CLAUDE_PLUGIN_ROOT}/.venv`.
 - The user asks "how do I configure paper-wiki?", "where do I point
@@ -47,7 +47,7 @@ recipe; ask the user whether to reconfigure first.
    `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.diagnostics`
    and parse the JSON. Note the `mcp_servers` field for step 8.
 3. **Detect existing config.** If
-   `~/.config/paperwiki/recipes/daily.yaml` already exists, ask the
+   `~/.config/paper-wiki/recipes/daily.yaml` already exists, ask the
    user whether to **reconfigure** (overwrite), **edit by hand**
    (open the file in their editor), or **skip** (just confirm health
    and exit). Default to skip when in doubt.
@@ -78,13 +78,13 @@ recipe; ask the user whether to reconfigure first.
 6. **Wizard Q3 — Semantic Scholar API key.** Ask:
    > Do you have a Semantic Scholar API key? It's free and bumps the
    > rate limit from ~1 req/s to 100 req/s.
-   > 1. Yes — paste it now (saved to `~/.config/paperwiki/secrets.env`,
+   > 1. Yes — paste it now (saved to `~/.config/paper-wiki/secrets.env`,
    >    chmod 600, gitignored).
    > 2. No — I'll add a placeholder; you can paste later.
    > 3. Skip — run with arXiv only.
 
    If Yes: validate it looks like a 40-char hex string before saving;
-   write to `~/.config/paperwiki/secrets.env` as
+   write to `~/.config/paper-wiki/secrets.env` as
    `export PAPERWIKI_S2_API_KEY="<key>"`; `chmod 600` the file.
 7. **Wizard Q4 — auto-ingest depth.** Ask:
    > How many top papers should auto-fold into concept articles each
@@ -126,11 +126,13 @@ recipe; ask the user whether to reconfigure first.
    ```
 
    Use the `Write` tool to save it to
-   `~/.config/paperwiki/recipes/daily.yaml`. Create the dir first
-   (`mkdir -p`).
+   `~/.config/paper-wiki/recipes/daily.yaml` (or to
+   `$PAPERWIKI_CONFIG_DIR/recipes/daily.yaml` if the user has that env
+   var set — power users pointing at e.g. `~/dotfiles/paper-wiki/` get
+   that directory written instead). Create the dir first (`mkdir -p`).
 10. **Confirm + next step.** Show the user a summary:
-    - Recipe saved to `~/.config/paperwiki/recipes/daily.yaml`
-    - Secrets saved to `~/.config/paperwiki/secrets.env` (if any)
+    - Recipe saved to `~/.config/paper-wiki/recipes/daily.yaml`
+    - Secrets saved to `~/.config/paper-wiki/secrets.env` (if any)
     - paperclip MCP: registered / not registered / declined
 
     Then suggest: `/paperwiki:digest` to run their first morning
@@ -143,7 +145,7 @@ recipe; ask the user whether to reconfigure first.
 | "The user just wants to skip setup." | Without a personal recipe, every digest invocation falls back to bundled templates that point at the wrong vault. Walk through the five questions; it's three minutes. |
 | "I'll trust whatever the user says about their vault path." | Validate that the path exists and is writable; an invalid path silently breaks every later SKILL. Offer to `mkdir -p` it explicitly. |
 | "The venv is probably fine; no need to verify." | Stale or partial venvs are the most common silent failure. Run `ensure-env.sh` and confirm the `.installed` stamp every time. |
-| "The user gave me their API key — I'll just inline it in the recipe." | NEVER inline secrets in YAML files that may be shared. Always go through `api_key_env: PAPERWIKI_S2_API_KEY` + `~/.config/paperwiki/secrets.env`. The recipe stays shareable; the secret stays secret. |
+| "The user gave me their API key — I'll just inline it in the recipe." | NEVER inline secrets in YAML files that may be shared. Always go through `api_key_env: PAPERWIKI_S2_API_KEY` + `~/.config/paper-wiki/secrets.env`. The recipe stays shareable; the secret stays secret. |
 | "All five questions in one message — fast for the user!" | Walk through them one at a time. Multi-question prompts get half-answered and the SKILL ends up guessing the rest. |
 | "Default everything; the user can edit later." | The user came to setup specifically to make decisions. Defaults are a fallback for "I don't know", not a substitute for asking. |
 
@@ -154,7 +156,7 @@ recipe; ask the user whether to reconfigure first.
   asking any wizard question.
 - The diagnostics runner emits empty or non-JSON output — Python
   imports are broken; nuke `.venv` and rerun `ensure-env.sh`.
-- The user already has `~/.config/paperwiki/recipes/daily.yaml` and
+- The user already has `~/.config/paper-wiki/recipes/daily.yaml` and
   you are about to overwrite without asking — always confirm.
 - The user mentions Chinese vault paths or templates — surface the
   locales option but keep English as the default for the wizard.
@@ -172,10 +174,10 @@ recipe; ask the user whether to reconfigure first.
 ## Verification
 
 - `${CLAUDE_PLUGIN_ROOT}/.venv/.installed` exists.
-- `~/.config/paperwiki/recipes/daily.yaml` exists and parses as a
+- `~/.config/paper-wiki/recipes/daily.yaml` exists and parses as a
   valid `RecipeSchema` (the digest runner will reject it loudly if
   not).
-- `~/.config/paperwiki/secrets.env` exists with mode `600` when the
+- `~/.config/paper-wiki/secrets.env` exists with mode `600` when the
   user provided an API key.
 - `/paperwiki:digest` (the next-step command) loads the recipe
   successfully — confirm by running it once at the end of setup if
