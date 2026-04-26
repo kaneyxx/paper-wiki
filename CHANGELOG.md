@@ -9,6 +9,29 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-04-26
+
+### Changed (BREAKING for personal config)
+
+- **User config dir renamed** from `~/.config/paperwiki/` to
+  `~/.config/paper-wiki/` for XDG and plugin-name consistency (the
+  plugin is named `paper-wiki`, so the config dir now matches).
+  Migrate with:
+  ```bash
+  mv ~/.config/paperwiki ~/.config/paper-wiki
+  ```
+  This is a hard cut — no migration shim. paper-wiki is pre-1.0 with
+  effectively one user (the dev).
+
+### Added
+
+- **`PAPERWIKI_CONFIG_DIR` environment variable** — override the config
+  directory location; useful for dotfiles workflows or non-standard
+  setups (e.g. `~/dotfiles/paper-wiki/`). Resolution priority:
+  1. `$PAPERWIKI_CONFIG_DIR` — if set, use as-is
+  2. `$XDG_CONFIG_HOME/paper-wiki` — if `XDG_CONFIG_HOME` is set
+  3. `~/.config/paper-wiki` — default fallback
+
 ## [0.3.1] — 2026-04-25
 
 ### Fixed
