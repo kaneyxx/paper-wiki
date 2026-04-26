@@ -153,6 +153,7 @@ create, and writes them under `<vault>/Wiki/concepts/`.
 | `/paperwiki:wiki-query`       | Keyword search across `Wiki/concepts/` and `Wiki/sources/` with Claude-synthesized answer. |
 | `/paperwiki:wiki-lint`        | Health-check: orphan concepts, stale entries, broken wikilinks, dangling sources.       |
 | `/paperwiki:wiki-compile`     | Deterministic rebuild of `Wiki/index.md` from frontmatter.                              |
+| `/paperwiki:migrate-sources`  | Upgrade legacy `Wiki/sources/<id>.md` files to the current section-organized format.    |
 | `/paperwiki:bio-search`       | (Optional) Search bioRxiv / medRxiv / PMC via paperclip MCP, save hits as wiki sources. |
 
 ### Optional: biomedical literature
