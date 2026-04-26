@@ -12,19 +12,6 @@ filter and score them against your research interests; persist durable
 notes; and let Claude synthesize topic articles that link sources
 together — all from inside Claude Code.
 
-## Status
-
-Current version: **v0.3.x**. The plugin protocol is `@experimental`
-and may break in minor versions before v1.0. The four phases that
-have shipped:
-
-| Phase | Status | What landed |
-|-------|--------|-------------|
-| 0–5   | ✅     | Plugin scaffolding, async pipeline, source/filter/scorer/reporter plugins, recipes, runners, baseline SKILLs (setup / digest / analyze) |
-| 6     | ✅     | Wiki backend, four wiki SKILLs (ingest / query / lint / compile), Sources/Wiki layout |
-| 7     | ✅     | Optional paperclip integration (biomedical corpus) and bio-search SKILL |
-| 8     | 📋    | PDF download + text extraction (planned, see [`tasks/plan.md`](tasks/plan.md) §9) |
-
 ## Prerequisites
 
 - **Python ≥ 3.11**. The plugin self-installs its `.venv` on first

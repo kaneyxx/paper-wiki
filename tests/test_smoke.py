@@ -300,17 +300,6 @@ def test_readme_documents_s2_api_key_setup() -> None:
     )
 
 
-def test_readme_status_reflects_current_minor_version() -> None:
-    """README's Status section must not be wildly out-of-date."""
-    from paperwiki import __version__
-
-    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    major_minor = ".".join(__version__.split(".")[:2])  # "0.3"
-    assert major_minor in body, (
-        f"README status must mention the current minor version ({major_minor}.x)"
-    )
-
-
 def test_readme_documents_personal_recipe_directory() -> None:
     """Users need to know recipes ship as templates and personal recipes live elsewhere."""
     body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
