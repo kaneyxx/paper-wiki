@@ -207,6 +207,28 @@ def test_digest_skill_resolves_personal_recipes_and_sources_secrets() -> None:
     )
 
 
+def test_setup_skill_walks_first_run_wizard() -> None:
+    """First-run UX: the setup SKILL must lead users through a five-question
+    wizard that produces a personal recipe + secrets file. Pin the contract
+    so this UX cannot quietly regress to the env-check-only version."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    # The five wizard questions are visible in the SKILL.
+    for marker in ("Q1", "Q2", "Q3", "Q4", "Q5"):
+        assert marker in body, f"setup SKILL must include wizard {marker}"
+    # The two output files are named so the SKILL writes the right paths.
+    assert "~/.config/paperwiki/recipes/daily.yaml" in body, (
+        "setup SKILL must write the personal recipe to the canonical path"
+    )
+    assert "~/.config/paperwiki/secrets.env" in body, (
+        "setup SKILL must store API keys in the gitignored secrets file"
+    )
+    # The auto-ingest knob is offered as a wizard question, not an
+    # afterthought — it's the single biggest daily-experience lever.
+    assert "auto_ingest_top" in body, (
+        "setup SKILL's wizard must capture auto_ingest_top during onboarding"
+    )
+
+
 def test_analyze_skill_writes_to_sources_subdir() -> None:
     """The analyze SKILL must direct writes into the canonical ``Sources/``."""
     body = (REPO_ROOT / "skills" / "analyze" / "SKILL.md").read_text(encoding="utf-8")
