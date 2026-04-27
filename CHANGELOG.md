@@ -9,6 +9,40 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-04-27
+
+### Fixed
+
+- **4-minute hang in digest auto-chain.** Previously, after the runner created
+  stubs, the SKILL had to Read each pre-existing concept file and run `Edit` to
+  fold the source citation in — when this hit Edit's "File must be read first"
+  pre-condition and LLM retry loops, it could hang for minutes. The runner now
+  folds citations atomically as part of `--auto-bootstrap`, eliminating the
+  SKILL-side Edit dance.
+
+### Added
+
+- **`folded_citations: list[str]` field in `wiki_ingest_plan` JSON output.**
+  Lists concept names whose `sources:` list was updated with this source's
+  canonical_id (idempotent — no-op if already present).
+
+### Changed
+
+- **wiki-ingest SKILL Step 4 split into 4 (auto-bootstrap path) and 4b
+  (manual path).** Auto-bootstrap path: just report runner's
+  `folded_citations`, no LLM work. Manual path: existing
+  prose-synthesis flow (unchanged). Step 5 already had the
+  auto-bootstrap-skip clause from v0.3.11.
+
+### Tests
+
+- 7 new unit tests pin the citation-folding contract: append,
+  idempotence, body preservation, frontmatter preservation,
+  `last_synthesized` bump, empty-vault no-op, combined with
+  `created_stubs`.
+- 1 smoke test pins the SKILL contract that the auto-chain path no
+  longer Edits files.
+
 ## [0.3.12] - 2026-04-27
 
 ### Fixed
