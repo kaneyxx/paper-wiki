@@ -273,7 +273,6 @@ class TestCliAutoBootstrapFlag:
             [sys.executable, "-m", "paperwiki.runners.wiki_ingest_plan", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/fangyi/Projects/paper-wiki",
         )
         assert result.returncode == 0, result.stderr
         assert "--auto-bootstrap" in result.stdout, (
@@ -287,7 +286,6 @@ class TestCliAutoBootstrapFlag:
             [sys.executable, "-m", "paperwiki.runners.wiki_ingest_plan", "--help"],
             capture_output=True,
             text=True,
-            cwd="/Users/fangyi/Projects/paper-wiki",
         )
         assert result.returncode == 0, result.stderr
         assert flag_form in result.stdout
