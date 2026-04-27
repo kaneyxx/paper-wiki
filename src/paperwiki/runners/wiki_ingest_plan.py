@@ -73,6 +73,7 @@ class IngestPlan:
     affected_concepts: list[str] = field(default_factory=list)
     suggested_concepts: list[str] = field(default_factory=list)
     created_stubs: list[str] = field(default_factory=list)
+    folded_citations: list[str] = field(default_factory=list)
 
 
 async def plan_ingest(
@@ -124,6 +125,8 @@ async def plan_ingest(
 
     created_stubs: list[str] = []
 
+    folded_citations: list[str] = []
+
     if auto_bootstrap:
         # Compute all concept names the source hints at, whether or not
         # they already exist on disk.
@@ -141,6 +144,8 @@ async def plan_ingest(
 
         # Concepts in all_hinted that do NOT yet exist → stub them.
         missing = [n for n in all_hinted if n.lower() not in existing_names]
+        # Concepts in all_hinted that DO exist → fold the citation in atomically.
+        pre_existing = [n for n in all_hinted if n.lower() in existing_names]
 
         if missing:
             created_stubs = await _bootstrap_missing_concepts(
@@ -149,22 +154,16 @@ async def plan_ingest(
                 source_id=source_id,
             )
 
-        # Re-query so freshly-stubbed concepts appear in affected.
+        if pre_existing:
+            folded_citations = await _fold_citations(
+                backend=backend,
+                concept_names=pre_existing,
+                source_id=source_id,
+            )
+
+        # Re-query so freshly-stubbed and freshly-folded concepts appear in affected.
         concepts = await backend.list_concepts()
         affected = [c.title for c in concepts if source_id in c.sources]
-
-        # Also include pre-existing hinted concepts that don't yet cite
-        # the source — the SKILL's update loop will fold the citation in.
-        hinted_lower = {n.lower() for n in all_hinted}
-        affected_set = set(affected)
-        for concept in concepts:
-            if (
-                concept.title.lower() in hinted_lower
-                and source_id not in concept.sources
-                and concept.title not in affected_set
-            ):
-                affected.append(concept.title)
-                affected_set.add(concept.title)
 
     return IngestPlan(
         source_id=source_id,
@@ -172,7 +171,58 @@ async def plan_ingest(
         affected_concepts=sorted(affected),
         suggested_concepts=suggested,
         created_stubs=created_stubs,
+        folded_citations=sorted(folded_citations),
     )
+
+
+async def _read_concept(path: Path) -> tuple[dict[str, object], str]:
+    """Return (frontmatter_dict, body_str) for an existing concept file."""
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return {}, text
+    end_idx = text.index("\n---\n", 4)
+    fm_text = text[4:end_idx]
+    body = text[end_idx + 5 :]  # skip past "\n---\n"
+    return yaml.safe_load(fm_text) or {}, body
+
+
+async def _write_concept(path: Path, frontmatter: dict[str, object], body: str) -> None:
+    """Write back with frontmatter + body verbatim."""
+    rendered = (
+        "---\n" + yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True) + "---\n" + body
+    )
+    async with aiofiles.open(path, "w", encoding="utf-8") as fh:
+        await fh.write(rendered)
+
+
+async def _fold_citations(
+    *,
+    backend: MarkdownWikiBackend,
+    concept_names: list[str],
+    source_id: str,
+) -> list[str]:
+    """For each name in concept_names that EXISTS on disk, append source_id to
+    its ``sources`` list (idempotent) and bump ``last_synthesized`` to today.
+
+    Returns the list of concept names that were actually updated (i.e. source_id
+    was not already present).
+    """
+    folded: list[str] = []
+    for name in concept_names:
+        concept_path = backend._concept_path(name)
+        if not concept_path.exists():
+            continue
+        frontmatter, body = await _read_concept(concept_path)
+        raw_sources = frontmatter.get("sources")
+        sources: list[str] = [str(s) for s in (raw_sources if isinstance(raw_sources, list) else [])]
+        if source_id in sources:
+            continue  # idempotent — already present, skip
+        sources.append(source_id)
+        frontmatter["sources"] = sources
+        frontmatter["last_synthesized"] = _today_utc()
+        await _write_concept(concept_path, frontmatter, body)
+        folded.append(name)
+    return folded
 
 
 async def _bootstrap_missing_concepts(
