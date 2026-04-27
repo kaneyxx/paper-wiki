@@ -34,8 +34,8 @@ coverage.xml
 
 # Claude Code session artifacts (project-local)
 .claude/local/
-.omc/state/
-.omc/logs/
+.claude/worktrees/
+.omc/
 
 # Wiki drafts area (only matches a vault embedded in the repo; harmless
 # elsewhere). Pending-review concept articles should not be committed.
