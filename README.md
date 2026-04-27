@@ -41,6 +41,26 @@ In Claude Code:
 The plugin self-installs its Python environment on first session — no
 manual setup required.
 
+## Upgrading
+
+To pick up a new release:
+
+```text
+/plugin uninstall paper-wiki@paper-wiki
+/plugin install paper-wiki@paper-wiki
+```
+
+Then fully exit (`/exit` or Ctrl-D) and start a fresh session:
+
+```text
+claude
+/paper-wiki:setup     # optional health check
+```
+
+> **Note**: don't use `claude -c` after an upgrade — slash command and
+> SKILL changes only take effect in fresh sessions. This applies to all
+> Claude Code plugins, not just paper-wiki.
+
 ### Advanced: custom config location (dotfiles users)
 
 By default paper-wiki stores your personal recipe and secrets under
@@ -231,7 +251,7 @@ contradictions and stale entries.
 | `dedup.vault.missing` warnings | Recipe references vault subdirs that don't exist yet | Harmless; goes away on second run after vault is populated |
 | S2 query with `OR` returns 0 | S2 doesn't support boolean operators in `query` | Use a single keyword/phrase, or stack multiple `semantic_scholar` source entries with different queries |
 | Recency filter drops everything | `recency.max_days` < `source.lookback_days` | Make `recency.max_days >= max(lookback_days)` across all sources |
-| `/plugin install` says "already installed" but `/paper-wiki:setup` says "Unknown command" | Cache directory missing while `installed_plugins.json` still tracks the install (happens after manual cache cleanup or interrupted update) | Remove `paper-wiki@paper-wiki` from `~/.claude/plugins/installed_plugins.json` (back up first), then `/plugin install paper-wiki@paper-wiki` from a fresh session. Restart session after install. |
+| `/plugin install` says "already installed" but `/paper-wiki:setup` says "Unknown command" | Stale plugin state — cache and metadata are out of sync | Run `/plugin uninstall paper-wiki@paper-wiki`, then `/plugin install paper-wiki@paper-wiki`, then fully exit and start a fresh `claude` session (not `claude -c`). As a last resort, manually remove `paper-wiki@paper-wiki` from `~/.claude/plugins/installed_plugins.json` before reinstalling. |
 | MCP servers added via `claude mcp add` don't show in `/mcp` UI | Active session loaded MCP config at startup; doesn't hot-reload | Fully `/exit` and start a new `claude` session |
 | Setup wizard shows weird "Topics (1)/(2)" tabs or "Custom kw" labels | Pre-v0.3.4 setup SKILL violated AskUserQuestion 4-option/header schema | Upgrade plugin: `/plugin update paper-wiki` (then nuke cache + reinstall if update doesn't take) |
 
