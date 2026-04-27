@@ -1,7 +1,7 @@
 # Phase 6 + Phase 7 Plan
 
-**Date**: 2026-04-25
-**Status**: Draft
+**Date**: 2026-04-25 (original) · 2026-04-27 (Phase 9 added)
+**Status**: Phases 6.x + 7.x shipped (v0.3.5). Phase 8 candidate. Phase 9 active.
 **Companion files**: [`tasks/todo.md`](todo.md), [`.omc/plans/00-foundation-plan.md`](../.omc/plans/00-foundation-plan.md), [`SPEC.md`](../SPEC.md)
 
 This plan supersedes the old, undersized "Phase 6 — Wiki backend" entry in
@@ -16,6 +16,9 @@ the foundation plan. It combines three threads:
 3. **Paperclip integration** — wire the gxl.ai paperclip MCP + CLI in as
    an optional source for biomedical literature, opening up the medical
    research vertical without rewriting our pipeline.
+
+> **2026-04-27 update.** Phase 9 (digest quality) appended at the bottom.
+> Sections 1–8 unchanged from the v0.3.5 snapshot.
 
 ---
 
@@ -233,10 +236,10 @@ All follow the six-section anatomy.
 
 | SKILL | Slash command | Workflow |
 |-------|--------------|----------|
-| `wiki-ingest` | `/paperwiki:wiki-ingest <source-id>` | Run ingest_plan, fetch source content from Sources, regenerate each affected concept article via Claude synthesis, write back through `MarkdownWikiBackend.upsert_concept`. |
-| `wiki-query` | `/paperwiki:wiki-query <question>` | Run wiki_query, synthesize answer with citations to specific concept files, suggest follow-up queries. |
-| `wiki-lint` | `/paperwiki:wiki-lint` | Run wiki_lint, surface findings, offer to fix orphans/stale items in batch. |
-| `wiki-compile` | `/paperwiki:wiki-compile` | Run wiki_compile, then regenerate the natural-language summary at the top of `index.md` via Claude. |
+| `wiki-ingest` | `/paper-wiki:wiki-ingest <source-id>` | Run ingest_plan, fetch source content from Sources, regenerate each affected concept article via Claude synthesis, write back through `MarkdownWikiBackend.upsert_concept`. |
+| `wiki-query` | `/paper-wiki:wiki-query <question>` | Run wiki_query, synthesize answer with citations to specific concept files, suggest follow-up queries. |
+| `wiki-lint` | `/paper-wiki:wiki-lint` | Run wiki_lint, surface findings, offer to fix orphans/stale items in batch. |
+| `wiki-compile` | `/paper-wiki:wiki-compile` | Run wiki_compile, then regenerate the natural-language summary at the top of `index.md` via Claude. |
 
 #### 6.2.5 `index.md` shape
 
@@ -252,7 +255,7 @@ sources: 23
 
 # Wiki Index
 
-_Auto-generated. Edit at your own risk; `/paperwiki:wiki-compile` overwrites this file._
+_Auto-generated. Edit at your own risk; `/paper-wiki:wiki-compile` overwrites this file._
 
 ## Concepts
 
@@ -432,7 +435,7 @@ hands results to `wiki-ingest` to file them in the wiki.
 - **AC-7.3.2** SKILL fails gracefully with an actionable error when
   paperclip MCP is not registered.
 - **AC-7.3.3** Six-section anatomy passes the parametrized smoke test.
-- **AC-7.3.4** Slash command `/paperwiki:bio-search` lives in
+- **AC-7.3.4** Slash command `/paper-wiki:bio-search` lives in
   `.claude/commands/bio-search.md`.
 
 #### Verification
@@ -656,11 +659,11 @@ This stays inside SPEC §6 boundaries (no LLM in Python).
 
 ##### Acceptance
 - **AC-8.4.1** SKILL smoke test green.
-- **AC-8.4.2** Manual: running `/paperwiki:analyze arxiv:2506.13063`
+- **AC-8.4.2** Manual: running `/paper-wiki:analyze arxiv:2506.13063`
   produces a note that quotes from the *body* of the paper, not just
   the abstract. (Manual because the LLM half is human-judged.)
 
-#### 9.2.5 `/paperwiki:fetch-pdf` batch SKILL
+#### 9.2.5 `/paper-wiki:fetch-pdf` batch SKILL
 
 - **8.5.1** Add `skills/fetch-pdf/SKILL.md` (six-section anatomy) +
   `.claude/commands/fetch-pdf.md`. Workflow:
@@ -696,7 +699,7 @@ This stays inside SPEC §6 boundaries (no LLM in Python).
 - **8.7.1** When `ObsidianReporter.wiki_backend=True`, append a single
   hint line to each source's body:
   ```
-  > _Full text not yet fetched. Run `/paperwiki:fetch-pdf
+  > _Full text not yet fetched. Run `/paper-wiki:fetch-pdf
   > <canonical-id>` to deepen this entry._
   ```
   Removed automatically the next time the source is upserted with
@@ -727,6 +730,673 @@ This stays inside SPEC §6 boundaries (no LLM in Python).
 - Citation graph extraction from PDF body.
 - Image extraction (paperclip / `paper-analyze` covers this in their
   own ecosystems).
+
+---
+
+## 10. Phase 9 — Digest quality (active, targets v0.3.6 → v0.3.8)
+
+**Status**: Active. Targets a chain of three small releases that fix the
+quality regressions a user just observed in `digest daily` against a
+fresh vault on 2026-04-27.
+
+### 10.0 Problem statement
+
+The user ran `/paper-wiki:digest daily` and got an output digest at
+`~/Documents/Paper-Wiki/Daily/2026-04-27-paper-digest.md` with four
+distinct quality bugs. Each is rooted in a **placeholder pointing at a
+SKILL the user has to manually invoke** — but the SKILL is the thing
+that already invoked the runner, so nothing ever fills the placeholder.
+
+#### 10.0.1 Bug list (with evidence)
+
+1. **"Today's Overview" callout is a static placeholder, with the wrong
+   namespace.** `src/paperwiki/plugins/reporters/obsidian.py:91-98`:
+
+   ```python
+   def _render_overview_callout() -> str:
+       """Top-of-digest synthesis placeholder (Claude side fills it in)."""
+       return (
+           "> [!summary] Today's Overview\n"
+           "> _Run `/paperwiki:digest` SKILL after this runner to fill in the\n"
+           "> cross-paper synthesis here — overall trends, quality distribution,\n"
+           "> research hotspots, suggested reading order._\n"
+       )
+   ```
+   — stale `/paperwiki:` namespace and a self-referential instruction
+   ("run the SKILL after this runner" — but the SKILL *is* the caller).
+   The SKILL Process never goes back to fill it in, so every digest has
+   a permanent stub at the top.
+
+2. **Per-paper "Detailed report" is also a stub pointing at
+   `/paperwiki:analyze`** (`obsidian.py:175-180`):
+   ```python
+   detailed = (
+       "### Detailed report\n\n"
+       f"_Run `/paperwiki:analyze {canonical_id}` for a six-section deep-dive "
+       f"in ``Sources/``, or click [[{source_filename}]] to jump to the "
+       "wiki source stub (which holds figures, abstract, and your notes)._"
+   )
+   ```
+   Same architecture failure: the user has to invoke another SKILL per
+   paper to actually get a richer summary. Same `/paperwiki:` namespace
+   bug.
+
+3. **Inline figure teaser never fires.** `_try_inline_teaser`
+   (`obsidian.py:193-211`) probes `<vault>/Wiki/sources/<id>/images/` for
+   pre-extracted figures, but the digest runner never calls
+   `extract_paper_images`. The directory is empty on a fresh vault, so
+   every digest has zero images.
+
+4. **Stale `/paperwiki:` namespace is not just in the reporter — it's
+   spread across SKILLs, runners, recipes, docs, and even tests.**
+   `grep` (excluding worktrees) finds **128 occurrences across 34
+   files**. Top offenders:
+   - `skills/bio-search/SKILL.md` (12)
+   - `SPEC.md` (11)
+   - `skills/extract-images/SKILL.md` (8)
+   - `skills/digest/SKILL.md` (7)
+   - `skills/analyze/SKILL.md` (7)
+   - `skills/migrate-sources/SKILL.md` (6)
+   - …plus `markdown_wiki.py` (3, in source-stub body), `obsidian.py` (4),
+     `runners/wiki_lint.py` (1), `runners/diagnostics.py` (1),
+     `recipes/*.yaml` (4 total), `docs/*.md` (8 total), `.claude/commands/*.md` (8 total).
+
+   Tests already pin the README contract (`tests/test_smoke.py:400-409`),
+   but there's no invariant test pinning the rest of the bundled assets.
+   The README test passes today only because someone fixed README in
+   v0.3.5 by hand.
+
+   The stale namespace not only confuses the user (they may try to type
+   `/paperwiki:` and get nothing); it *also* corrupts every source stub
+   that `MarkdownWikiBackend._default_source_body` writes
+   (`markdown_wiki.py:313, 319`), and every `wiki_lint` finding text
+   (`wiki_lint.py:120`).
+
+#### 10.0.2 Architecture context
+
+paper-wiki has a clean SPEC §6 split:
+
+- **Python is LLM-free** — pure deterministic Source → Filter → Scorer →
+  Reporter pipeline.
+- **Claude (via SKILLs) does synthesis** — post-processing on top of the
+  deterministic output.
+
+So fixes fall into four orthogonal levers:
+
+- **(A) Extend the digest SKILL Process** to do a "fill placeholders"
+  LLM-synthesis pass *after* the runner finishes. SPEC-blessed; this is
+  exactly the boundary the SPEC §6 split exists for.
+- **(B) Have the runner emit cleaner skeletons** (just the section
+  headings) so the SKILL fills empty slots rather than overwriting
+  filler prose. Cleaner separation; avoids "is this the runner's stub or
+  Claude's prose" confusion in source diffs.
+- **(C) Auto-extract images** for the auto-ingest-top papers, so
+  `_try_inline_teaser` actually has something to inline.
+- **(D) Mechanical namespace fix** for the stale `/paperwiki:` strings.
+
+### 10.1 Architecture decision (combination of A + B + C + D)
+
+We adopt **all four levers**, sliced so each ships one user-visible
+improvement end-to-end. Rationale per lever:
+
+- **(A) is non-negotiable.** Without it, the user keeps getting
+  permanent placeholders. SPEC §6 says synthesis lives in SKILLs, so
+  this is the right place.
+- **(B) reduces LLM token cost** for (A). If the runner emits a clean
+  empty `### Detailed report` heading instead of a multi-line
+  placeholder, the SKILL's "fill placeholders" pass has less to undo
+  and the diff is auditable. (B) is small and lands first.
+- **(C) is a one-line addition** to the digest SKILL Process: chain
+  `extract-images` for the auto-ingest-top papers. The runner already
+  exists (`extract_paper_images`); we just need the SKILL to call it.
+- **(D) is mechanical** but blocks (A) credibility: if the digest
+  SKILL's synthesized prose says "Run `/paper-wiki:analyze`" but the
+  underlying SKILL.md says `/paperwiki:`, the user will doubt either.
+  Land (D) first as a "boring infrastructure release" (v0.3.6) so the
+  rest of the work sits on a clean namespace baseline.
+
+The combined plan ships across **3 successive minor releases**:
+
+- **v0.3.6 — Namespace + skeleton cleanup.** Slices D + B (deterministic,
+  low-risk, high-leverage; lands together because they touch similar
+  files).
+- **v0.3.7 — Today's Overview synthesis.** Slice A1 (the cross-paper
+  synthesis pass — one LLM call per digest).
+- **v0.3.8 — Per-paper Detailed report + auto images.** Slices A2 + C
+  (per-paper synthesis pass — N LLM calls per digest, where N = top_k;
+  plus auto image extraction for auto_ingest_top papers).
+
+Reason for the split: A2 is the only slice with materially new LLM
+cost. Shipping A1 alone first lets the user feel the win from one
+synthesis pass before we add per-paper passes; if they hate the new
+behavior we can adjust the contract before A2.
+
+### 10.2 Vertical task slicing
+
+Six tasks across two phases. Each ships an independently testable
+improvement.
+
+#### Task 9.1 — Mechanical namespace fix (D) → v0.3.6
+
+**Scope**: replace every `/paperwiki:` with `/paper-wiki:` across
+SKILLs, runners, recipes, docs, slash commands, and source-stub
+bodies. Test files keep one literal `/paperwiki:` reference inside the
+new invariant test (10.6).
+
+**Files** (34 outside `.claude/worktrees/`):
+
+- `src/paperwiki/plugins/reporters/obsidian.py` — 4 hits (overview
+  callout + detailed-report stub).
+- `src/paperwiki/plugins/backends/markdown_wiki.py` — 3 hits (source
+  stub body for Key Takeaways + Figures hints).
+- `src/paperwiki/runners/wiki_lint.py` — 1 hit (finding message text).
+- `src/paperwiki/runners/diagnostics.py` — 1 hit.
+- `src/paperwiki/runners/extract_paper_images.py` — 2 hits (docstring).
+- `src/paperwiki/runners/wiki_compile.py` — 1 hit.
+- `src/paperwiki/config/recipe.py` — 1 hit (comment).
+- `skills/*/SKILL.md` — 11 SKILLs, 53 hits combined.
+- `.claude/commands/*.md` — 4 slash commands, 8 hits.
+- `recipes/*.yaml` — 2 recipes, 4 hits.
+- `docs/wiki.md` (5 hits), `docs/paperclip-setup.md` (3 hits).
+- `SPEC.md` (11 hits — including command-table rows).
+- `CHANGELOG.md` (3 hits in older entries — leave intact, they describe
+  history; only fix forward).
+- `tasks/plan.md` + `tasks/todo.md` (rebuild the references when this
+  plan itself is rewritten — already done in this rewrite).
+- `tests/test_smoke.py`, `tests/unit/plugins/{reporters,backends}/*`,
+  `tests/unit/runners/*`, `tests/integration/test_digest_wiki_handoff.py`
+  — 14 hits combined. Most are assertion strings of the form
+  `assert "/paperwiki:wiki-ingest" in body`; flip to `/paper-wiki:`.
+
+**Acceptance criteria**:
+
+- **AC-9.1.1** Zero `/paperwiki:\w+` matches under `src/`, `skills/`,
+  `recipes/`, `docs/`, `SPEC.md`, `.claude/commands/`. `CHANGELOG.md`
+  is exempt for its existing historical entries.
+- **AC-9.1.2** Existing tests still green after the rewrite (asserting
+  the new namespace).
+- **AC-9.1.3** New invariant test (`test_no_stale_paperwiki_namespace`,
+  see 10.6) pinning the contract.
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py::test_no_stale_paperwiki_namespace`
+  green (after the new test is added).
+- `pytest -q` overall green.
+- Manual: `grep -rn '/paperwiki:' src skills recipes docs SPEC.md
+  .claude/commands` returns zero hits.
+- `claude plugin validate .` green.
+
+**Complexity**: M (large diff, but mechanical — `sed -i` on a curated
+file list, then run tests).
+
+**Dependencies**: none (foundation work; everything else builds on
+the clean namespace).
+
+**Risk**: low. Rollback = `git revert`. Mitigation = ship the new
+invariant test in the same commit so any future regression fails CI
+before merge.
+
+---
+
+#### Task 9.2 — Runner emits clean skeletons (B) → v0.3.6
+
+**Scope**: replace the prose placeholders in
+`obsidian.py::_render_overview_callout` and
+`obsidian.py::_render_recommendation` with **clean, signaled skeleton
+markers** that downstream Claude code can target deterministically:
+
+- "Today's Overview" callout becomes a single `> [!summary] Today's
+  Overview` heading + an HTML comment marker
+  `<!-- paper-wiki:overview-slot -->` inside an empty body. No prose.
+  Reason: a non-prose marker is unambiguous; the SKILL fills the slot
+  by replacing the marker without any "is this old prose or not"
+  fuzzy match.
+- "Detailed report" subsection becomes a single `### Detailed report`
+  heading + an HTML comment marker
+  `<!-- paper-wiki:per-paper-slot:{canonical_id} -->`. Same reason.
+
+**Acceptance criteria**:
+
+- **AC-9.2.1** `render_obsidian_digest` output contains exactly
+  `<!-- paper-wiki:overview-slot -->` once per digest (or zero times
+  when `recommendations` is empty).
+- **AC-9.2.2** Output contains
+  `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` exactly once per
+  recommendation.
+- **AC-9.2.3** Existing test
+  `test_today_overview_placeholder_at_top` (`tests/unit/plugins/reporters/test_obsidian.py:135-145`)
+  is updated to assert on the new marker shape; the heading
+  `Today's Overview` still exists, the prose stub is gone.
+- **AC-9.2.4** Existing test
+  `test_per_paper_has_detailed_report_wikilink`
+  (same file, line 168-172) is updated: assert on
+  `### Detailed report` and the per-paper slot marker; the
+  `/paper-wiki:analyze` fallback in the assertion is removed.
+- **AC-9.2.5** A new test
+  `test_skeleton_markers_are_machine_targetable` asserts the marker
+  shapes are consistent and findable by a regex like
+  `^<!-- paper-wiki:[\w-]+(:.*)? -->$`.
+
+**Verification**:
+
+- `pytest -q tests/unit/plugins/reporters/test_obsidian.py` green.
+- Manual: render a digest with 3 recommendations; confirm 1 overview
+  marker + 3 per-paper markers, no prose stubs.
+
+**Complexity**: S (≤30 LoC change in the reporter, ~3 test edits, 1
+new test).
+
+**Dependencies**: prefers Task 9.1 to land first so the new comment
+strings don't need a follow-up rewrite.
+
+**Risk**: medium-low. Existing user vaults that have OLD digests with
+the prose stub keep them — we don't rewrite history. New digests get
+the new shape.
+Rollback = revert the reporter change; the SKILL slot-fill code (Task
+9.3+) gracefully falls back to "no synthesis if no marker found".
+
+---
+
+#### Task 9.3 — Today's Overview synthesis pass in digest SKILL (A1) → v0.3.7
+
+**Scope**: extend `skills/digest/SKILL.md` Process with a new step that
+runs *after* the runner returns and *before* the optional auto-ingest
+chain. The new step:
+
+1. Read the freshly-written digest file from disk.
+2. If it contains `<!-- paper-wiki:overview-slot -->`, synthesize a
+   cross-paper overview from the recipe's `top_k` recommendations.
+   The synthesis covers:
+   - Topic clustering ("3 papers on VLA models, 2 on diffusion").
+   - Quality distribution (avg composite score, range, outliers).
+   - Research-hotspot signal (which matched topics dominate).
+   - Suggested reading order (by composite score, optionally tweaked
+     for "novel-first" vs "high-impact-first" recipes).
+3. Replace the marker (and the empty body of the
+   `> [!summary] Today's Overview` callout) with the synthesized prose.
+4. Save the file back.
+
+**Constraints**:
+
+- The SKILL must read the recommendations from the same in-memory
+  result the runner emitted (via reading the file or, simpler, via
+  the runner stdout structured-log line `digest.complete`). The
+  current runner already logs `recommendations=N` and `counters=...`;
+  if more detail is needed, extend the log line to JSON the top-K
+  papers — but **don't add a second runner**. SPEC §6 keeps Python
+  deterministic.
+- Synthesized overview MUST cite paper indices (`#1`, `#2`, …) so the
+  user can scroll back to verify. Never invent numbers.
+- Synthesized overview is bounded: ≤ 200 words, no per-paper bullets
+  (those live in the per-paper sections).
+- If the digest has 0 or 1 recommendations, replace the marker with a
+  one-liner ("No recommendations matched today" / "Single match;
+  see #1 below") instead of a faux-overview.
+
+**Acceptance criteria**:
+
+- **AC-9.3.1** `skills/digest/SKILL.md` Process gains an explicit step
+  ("step 7: synthesize Today's Overview") between the existing summary
+  step and the auto-ingest-top step.
+- **AC-9.3.2** SKILL Verification section adds: "Today's Overview
+  callout has prose, not the slot marker, and cites paper indices that
+  exist in the same file".
+- **AC-9.3.3** New parametrized smoke test asserts the SKILL.md
+  contains both `paper-wiki:overview-slot` (the marker name) and
+  "Today's Overview" so future refactors can't drop the contract
+  silently.
+- **AC-9.3.4** Manual: run the `daily` recipe end-to-end on a fresh
+  vault; the resulting file's `> [!summary] Today's Overview` callout
+  has 60-200 words of synthesized prose with at least one `#N`
+  reference matching an actual entry below. (Manual because LLM output
+  is human-judged.)
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py::test_digest_skill_describes_overview_synthesis`
+  green.
+- Manual smoke: as above.
+
+**Complexity**: M (SKILL prose is ~30-50 lines new content; one new
+smoke test; runner stdout schema may need a small extension to expose
+recommendations to the SKILL).
+
+**Dependencies**:
+- Hard: Task 9.2 (the marker exists).
+- Soft: Task 9.1 (so the SKILL Process doesn't itself contain stale
+  `/paperwiki:` references).
+
+**Risk**: medium. LLM output quality is variable; if Claude generates
+an overview that contradicts the per-paper entries, the user loses
+trust in both. Mitigation: SKILL Common Rationalizations table
+explicitly lists "I'll guess at trend names without rereading the
+abstracts" as a wrong answer; SKILL Verification step requires the
+overview to cite `#N` indices (cheap correctness check).
+Rollback: revert the SKILL.md change. Runner output stays usable; the
+slot marker just stays in the file as an orphan comment, harmless.
+
+---
+
+#### Task 9.4 — Per-paper Detailed report synthesis (A2) → v0.3.8
+
+**Scope**: extend the digest SKILL Process again to fill each
+per-paper `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` marker
+with a richer summary than the abstract:
+
+- 2-3 sentence "Why this matters" framing.
+- 2-4 bullet "Key takeaways" (concrete claims from the abstract; never
+  invented).
+- 1-line "Score reasoning" plain-English explanation of the composite
+  score breakdown ("Scores high because relevance is 0.92 — multiple
+  exact topic matches, modest novelty 0.55").
+
+**Constraints**:
+
+- Each per-paper section gets ONE LLM call. For `top_k=10`, that's 10
+  calls per digest. The SKILL should batch these (one prompt, 10
+  outputs) when feasible to amortize cost.
+- The SKILL **must not** invent claims that aren't in the abstract.
+  Common Rationalizations table calls this out explicitly.
+- "Detailed report" stays distinct from "Abstract" (which the runner
+  still inlines verbatim above). It's a synthesized layer, not a
+  rewrite.
+
+**Acceptance criteria**:
+
+- **AC-9.4.1** SKILL.md Process step 7 (or 8, after the overview pass)
+  adds: "fill each per-paper slot marker with synthesized Detailed
+  report".
+- **AC-9.4.2** SKILL Common Rationalizations table adds a row about
+  inventing per-paper claims.
+- **AC-9.4.3** New smoke test pins the contract: SKILL.md mentions
+  both `paper-wiki:per-paper-slot` and "Detailed report" and bans
+  the historical `/paper-wiki:analyze`-as-fallback prose.
+- **AC-9.4.4** Manual: run the recipe; each `### Detailed report`
+  subsection has 3-6 lines of synthesized prose with no `<!-- -->`
+  marker remaining.
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py::test_digest_skill_describes_per_paper_synthesis`
+  green.
+- Manual smoke: as above.
+
+**Complexity**: M-L (per-paper synthesis is the heaviest LLM step;
+SKILL prose grows; the bracketing of cost via batching needs to be
+spelled out).
+
+**Dependencies**:
+- Hard: Task 9.2 (the per-paper marker exists).
+- Soft: Task 9.3 (sequenced after the overview pass for a coherent
+  digest-fill order).
+
+**Risk**: medium-high. This is the slice with the largest LLM-cost
+delta. Mitigation: SKILL Common Rationalizations covers cost ("I'll
+just send 10 separate prompts" / "I'll skip top_k=10 and only do
+top 3" — both wrong); SKILL Process step says batched-prompt is the
+default and per-paper-prompt is the fallback when batching exceeds
+the context window.
+Rollback: revert SKILL.md. Slot markers stay; harmless.
+
+---
+
+#### Task 9.5 — Auto image extraction for auto_ingest_top papers (C) → v0.3.8
+
+**Scope**: extend the digest SKILL Process to chain
+`/paper-wiki:extract-images <canonical-id>` for each paper in
+`min(auto_ingest_top, top_k)` *before* the wiki-ingest chain. This
+makes `_try_inline_teaser` actually work — the digest gets real
+inline figures for the auto-ingested top papers.
+
+**Constraints**:
+
+- Only run for `arxiv:` canonical ids. Surface a one-liner skip
+  reason for `paperclip:` / `s2:` ids.
+- Continue on failure (a 404 source tarball is not a digest failure).
+- Cache hits are normal — no warning when the runner reports
+  `cached=true`.
+- The chain order is: **extract-images first, wiki-ingest second**.
+  Extract-images runs before wiki-ingest so the figures are present
+  when `_try_inline_teaser` is later invoked on the next digest run.
+  (The current digest never re-renders, so the figures appear *next*
+  digest; the user sees the win on day 2. That's fine; we'll document
+  it.)
+
+**Acceptance criteria**:
+
+- **AC-9.5.1** `skills/digest/SKILL.md` step "Auto-chain wiki-ingest"
+  becomes "Auto-chain extract-images + wiki-ingest" with the new
+  ordering.
+- **AC-9.5.2** SKILL Common Rationalizations adds: "Skipping image
+  extraction because Obsidian renders without it" — wrong, the user
+  wants figures.
+- **AC-9.5.3** Smoke test asserts the SKILL mentions both
+  `extract-images` AND `wiki-ingest` in the right order in the
+  Process section.
+- **AC-9.5.4** Manual: run the recipe with `auto_ingest_top=3` on a
+  fresh vault; confirm `Wiki/sources/<id>/images/` is populated for
+  the top-3 papers; confirm the **next** digest run has inline
+  `![[...|700]]` teasers in those 3 entries.
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py::test_digest_skill_chains_extract_images`
+  green.
+- Manual smoke: as above.
+
+**Complexity**: S (SKILL prose change only; runner already exists).
+
+**Dependencies**:
+- Hard: Task 9.1 (the SKILL Process must reference
+  `/paper-wiki:extract-images`, not the stale namespace).
+
+**Risk**: low. arXiv source tarballs are rate-limited but the runner
+already handles that (cache + 1/sec budget). Rollback = revert
+SKILL.md.
+
+**Note**: this slice uses ONLY the existing extract-images runner +
+SKILL — no new Python code. The SKILL prose is the entire deliverable.
+
+---
+
+#### Task 9.6 — Invariant test for stale namespace (D-companion) → v0.3.6
+
+**Scope**: add a new test in `tests/test_smoke.py` named
+`test_no_stale_paperwiki_namespace` that pins zero `/paperwiki:\w+`
+matches across the bundle. Mirrors the existing
+`test_readme_uses_correct_slash_command_namespace` (test_smoke.py:400)
+but expanded to cover SKILLs, runners, recipes, docs, SPEC, and slash
+commands.
+
+**Acceptance criteria**:
+
+- **AC-9.6.1** Test scans these roots: `src/`, `skills/`, `recipes/`,
+  `docs/`, `.claude/commands/`, plus the top-level `SPEC.md`. Skips
+  `tests/`, `CHANGELOG.md`, `.claude/worktrees/`, and `tasks/` (the
+  last because plan files rewrite the namespace as part of editing
+  history).
+- **AC-9.6.2** Test fails with a list of files + line numbers when
+  any `/paperwiki:` literal is found (so the failure message points
+  at exactly what to fix).
+- **AC-9.6.3** Test passes after Task 9.1 lands.
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py::test_no_stale_paperwiki_namespace`
+  green after Task 9.1 lands; red before.
+
+**Complexity**: S (one ~30 LoC test).
+
+**Dependencies**:
+- Hard: Task 9.1 (the test would fail today; we add it in the same
+  commit as the rewrite so CI stays green).
+
+**Risk**: very low. Rollback = delete the test.
+
+---
+
+#### Task 9.7 — Auto-ingest bootstrap on fresh vault → v0.3.7
+
+**Problem (discovered during 9.0 recon, after the v0.3.5 digest run)**:
+When a user runs `/paper-wiki:digest daily` against a vault with no
+`Wiki/concepts/` articles yet (fresh setup, or first-ever digest), the
+`auto_ingest_top` chain hits a dead-end. `wiki-ingest` returns
+`affected_concepts: []` for every paper because no concept article
+exists to update, and the SKILL refuses to silently create new ones
+(design decision: new concepts require user confirmation). Net effect:
+every fresh-vault digest stops auto-ingest after paper #1 with
+"stopped — wiki_ingest_plan returned affected_concepts: []".
+
+This is a hard UX gate: the demo flow (install → setup → digest →
+auto-ingest fills the wiki) breaks at step 3.
+
+**Solution**: Extend the `wiki-ingest` SKILL with an `--auto-bootstrap`
+invocation mode. In this mode:
+
+- Missing concept articles named in the `suggested_new_concepts` list
+  are auto-stubbed before the update loop: frontmatter (`name`, `tags`,
+  `created`, `auto_created: true`) plus a one-line sentinel body —
+  `_Auto-created during digest auto-ingest. Lint with /paper-wiki:wiki-lint
+  to flag for review._`.
+- After stubbing, the normal wiki-ingest update loop runs, finds the
+  newly-stubbed concept, and folds the source citation in.
+- A summary line is emitted: `"created N stubs, updated M concepts"`.
+
+The digest SKILL Process step 7 (auto-chain wiki-ingest) is updated to
+pass `--auto-bootstrap` for every chained call. Manual
+`/paper-wiki:wiki-ingest <id>` invocations stay non-bootstrap — the
+existing safeguard remains for interactive use.
+
+**Acceptance criteria**:
+
+- **AC-9.7.1** `skills/wiki-ingest/SKILL.md` documents the
+  `--auto-bootstrap` flag, when to use it, the auto-stub frontmatter
+  shape, and the sentinel body template.
+- **AC-9.7.2** `skills/digest/SKILL.md` Process step 7 passes
+  `--auto-bootstrap` for all auto-chained `wiki-ingest` invocations.
+- **AC-9.7.3** Smoke test
+  `test_wiki_ingest_skill_describes_auto_bootstrap_mode` asserts the
+  flag, sentinel body, `auto_created: true` frontmatter, and "stub
+  then update" two-step are documented.
+- **AC-9.7.4** Smoke test
+  `test_digest_skill_passes_auto_bootstrap_to_wiki_ingest` asserts the
+  flag appears in the digest SKILL auto-chain step.
+- **AC-9.7.5** Manual smoke: `rm -rf <vault>/Wiki`, run digest with
+  `auto_ingest_top: 3`, observe 3 new concept stubs created and 3
+  source-to-concept citations populated, no manual confirmation
+  prompts.
+- **AC-9.7.6** wiki-lint flags concept articles with
+  `auto_created: true` as "needs human review" rather than as broken
+  orphans.
+
+**Verification**:
+
+- `pytest tests/test_smoke.py -k bootstrap` green.
+- Manual smoke as above.
+- `/paper-wiki:wiki-lint` after the smoke surfaces the auto-created
+  stubs in a dedicated "needs review" section.
+
+**Complexity**: S-M (~30 min). Two SKILL.md edits, two smoke tests, and
+a small wiki-lint adjustment to recognise the `auto_created` flag.
+
+**Dependencies**:
+
+- Hard: Task 9.1 (namespace fix) — keeps `/paper-wiki:wiki-ingest`
+  references consistent across the new doc.
+- Soft: independent of 9.2 / 9.3 (different files).
+
+**Risk**: medium. Auto-stubs could pollute the vault with empty
+articles if a user explores topics they later abandon. Mitigation: the
+`auto_created: true` frontmatter + sentinel body string make stubs
+machine-detectable; wiki-lint surfaces them in a dedicated bucket the
+user can prune en masse.
+
+---
+
+### 10.3 Dependency graph + parallelization
+
+```
+9.1 (namespace fix) ────┬──> 9.6 (invariant test, same commit)        v0.3.6
+                        │
+                        ├──> 9.7 (auto-ingest bootstrap)              v0.3.7
+                        │
+9.2 (skeleton markers) ─┼──> 9.3 (overview synthesis)                 v0.3.7
+                        │       │
+                        │       └──> 9.4 (per-paper synthesis)        v0.3.8
+                        │
+                        └──> 9.5 (auto image extraction)              v0.3.8
+```
+
+- **Sequenced strictly**: 9.1 → 9.2 → 9.3 → 9.4. Each builds on the
+  previous.
+- **Parallelizable in v0.3.7**: 9.3 and 9.7 ship together but touch
+  different SKILL files (digest vs wiki-ingest); only conflict point is
+  digest SKILL Process step 7 — write 9.7 first, then 9.3 layers
+  in the overview-synthesis step alongside.
+- **Parallelizable in v0.3.8**: 9.5 can land in parallel with 9.4 —
+  different files; only conflict point is digest SKILL Process, same
+  pattern as above.
+- **9.6 lands in the same PR as 9.1** — the test would fail before the
+  rewrite; bundling them keeps CI green at every commit.
+
+### 10.4 Release sequencing
+
+| Release | Tasks bundled | User-visible win |
+|---------|---------------|------------------|
+| v0.3.6  | 9.1 + 9.2 + 9.6 | Stale namespace gone; new digests have machine-targetable skeleton markers (no more "run SKILL after runner" prose); future regressions blocked by the invariant test. |
+| v0.3.7  | 9.3 + 9.7 | Today's Overview callout actually has cross-paper synthesis; auto-ingest no longer dies on fresh vaults — concept stubs are bootstrapped automatically with a sentinel marker for later review. |
+| v0.3.8  | 9.4 + 9.5 | Per-paper Detailed report has synthesized takeaways; auto-ingest-top papers get figures extracted automatically (visible on day 2). |
+
+Three small releases, each independently shippable. Total estimated
+work: 7 tasks at 15-60 min each = **3-4.5 hours of focused work**.
+Comfortably fits the user's "1 release per 30 min" cadence.
+
+### 10.5 Risks (Phase 9)
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Task 9.1 rewrite breaks a string the user relied on (e.g. `/paperwiki:digest` somewhere we didn't grep) | Slash command stops working in third-party docs | Stale namespace was already wrong (slash command name is `/paper-wiki:`); `claude plugin validate .` is the source of truth. CHANGELOG entry calls out the rename. |
+| Task 9.3 synthesis hallucinates trends not present in the data | Misleading "Today's Overview" | SKILL Process requires `#N` citations for every claim; SKILL Common Rationalizations forbids inventing topic names; manual review on each digest run during v0.3.7 rollout. |
+| Task 9.4 batching prompt blows context window when `top_k=20` | LLM call fails mid-digest | SKILL Process step says: batched prompt is default, fall back to per-paper if batched output truncates. Document max batch size empirically (likely ~10 abstracts). |
+| Task 9.5 chains extract-images for 10+ papers per digest, hits arXiv rate-limits | First-run slowness | Runner already has 1/sec budget + caching; users with `auto_ingest_top > 5` see a one-time stall, then cached. SKILL Red Flags lists `auto_ingest_top > 10` as worth questioning. |
+| HTML comment markers appear in Obsidian preview as visible glitches | Ugly digest UI | Obsidian hides HTML comments by default; verify on first v0.3.6 build. Fallback: switch to a YAML-fenced block as the marker. |
+| Image extraction fails silently for one paper, the SKILL keeps going, user never finds out which | Half-imaged digest | SKILL Process step requires a one-line summary at the end ("3/3 succeeded, 0 failed"). |
+| Task 9.7 auto-bootstrap pollutes vault with empty concept stubs the user later abandons | Vault clutter | `auto_created: true` frontmatter + sentinel body string; wiki-lint surfaces stubs in a dedicated "needs review" bucket the user can prune en masse. Manual `/paper-wiki:wiki-ingest` keeps the original confirmation prompt. |
+
+### 10.6 Rollback notes
+
+- **9.1**: `git revert`. Risk = low because the rewrite is mechanical
+  string substitution.
+- **9.2**: `git revert`. Existing user vaults with old digests are
+  unchanged.
+- **9.3, 9.4, 9.5**: `git revert` on the SKILL.md. Slot markers stay
+  in the file as orphan HTML comments — harmless.
+- **9.6**: `pytest -k 'not test_no_stale_paperwiki_namespace'` to skip
+  if the rewrite is being rolled back.
+- **9.7**: `git revert` on the wiki-ingest + digest SKILL.md edits.
+  Stubs already created in user vaults stay (sentinel string makes
+  them findable: `grep -rl "Auto-created during digest auto-ingest"
+  <vault>/Wiki/concepts/`); user can `rm -rf` them en masse or keep
+  them as scaffolding.
+
+### 10.7 Out of scope (Phase 9)
+
+- Phase 8 PDF text extraction (still candidate; per-paper synthesis in
+  9.4 leans on the abstract only — we'll know after v0.3.8 ships
+  whether 9.4's quality justifies promoting Phase 8 to active).
+- Migrating `extract-paper-images` SKILL to chain automatically inside
+  the runner (would violate SPEC §6 — Python stays LLM-free; chaining
+  belongs in the SKILL).
+- Rewriting `_today_overview_block` to do client-side synthesis (would
+  violate SPEC §6 — runner stays deterministic).
+- Per-paper images in the inline teaser for `paperclip:` /
+  `s2:` ids — those don't have arXiv source tarballs. Document the
+  limitation; don't pretend.
+- Adding a `confidence` field to the synthesized Today's Overview
+  prose — the user's mental model is "this is my Claude assistant
+  summarizing the day"; a confidence score on cross-paper synthesis
+  is over-engineering for a 200-word block.
 
 ---
 
