@@ -9,6 +9,35 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-04-27
+
+### Added
+
+- **digest SKILL now synthesizes the "Today's Overview" callout** instead of
+  leaving an empty slot. After the deterministic runner writes the digest
+  skeleton, the SKILL re-reads the file and replaces
+  `<!-- paper-wiki:overview-slot -->` with 60–200 words of cross-paper prose
+  covering top trends, quality / score distribution, and suggested reading
+  order — every claim cited with `#N` paper-index markers. New SKILL Common
+  Rationalizations + Red Flags pin the contract: don't claim a trend from one
+  paper; don't skip `#N` cites; don't invent topics not in the digest.
+- **`--auto-bootstrap` mode for `wiki-ingest` SKILL.** When invoked with this
+  flag (only by digest auto-chain — manual `/paper-wiki:wiki-ingest <id>` keeps
+  the existing confirmation prompt), missing concept articles are auto-stubbed
+  with `auto_created: true` frontmatter + sentinel body before the normal update
+  loop runs. Net effect: fresh-vault digests no longer dead-end on paper #1 with
+  `affected_concepts: []` — auto-chain creates stubs for top-N papers and folds
+  source citations in.
+- **`wiki-lint` SKILL surfaces concept articles with `auto_created: true`** in a
+  dedicated "Needs review (auto-created stubs)" section, separate from
+  broken-link / orphan reports. Users can prune en masse via the sentinel body
+  string or remove with `rm <vault>/Wiki/concepts/<name>.md`.
+- **Tests**: `test_wiki_ingest_skill_describes_auto_bootstrap_mode`,
+  `test_digest_skill_passes_auto_bootstrap_to_wiki_ingest`,
+  `test_wiki_lint_skill_surfaces_auto_created_stubs`,
+  `test_digest_skill_describes_overview_synthesis` — 4 new smoke tests pin the
+  contracts.
+
 ## [0.3.6] - 2026-04-27
 
 ### Fixed
