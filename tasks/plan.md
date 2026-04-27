@@ -733,11 +733,41 @@ This stays inside SPEC §6 boundaries (no LLM in Python).
 
 ---
 
-## 10. Phase 9 — Digest quality (active, targets v0.3.6 → v0.3.8)
+## 10. Phase 9 — Digest quality (active, v0.3.6 → v0.3.18)
 
-**Status**: Active. Targets a chain of three small releases that fix the
-quality regressions a user just observed in `digest daily` against a
-fresh vault on 2026-04-27.
+**Status**: Active. v0.3.6–v0.3.12 shipped. v0.3.13–v0.3.18 outstanding.
+
+**Original framing (2026-04-27 morning)**: a chain of three small
+releases to fix the placeholder-prose / stale-namespace / no-images
+regressions a user observed on a fresh-vault digest run.
+
+**Updated framing (2026-04-27 evening)**: after seven cumulative
+releases (v0.3.6–v0.3.12), the user has run digest three times against
+fresh vaults. Each run hit a different bug. The latest run (v0.3.12)
+**hung for 4 minutes mid-flow** during the auto-chain step, with the
+SKILL stuck in a Read-then-Edit loop on a pre-existing concept article.
+The transcript was:
+
+```
+⏺ For paper #2 and #3, I need to fold the new source citations into
+  the pre-existing stubs. I'll update each stub's sources list directly.
+  Read 2 files (ctrl+o to expand)
+⏺ Update(Documents/Paper-Wiki/Wiki/concepts/vision-multimodal.md)
+  ⎿  File must be read first
+✻ Cooked for 4m 0s
+```
+
+The architectural mismatch causing this hang is documented in §10.8
+below. In short: the runner with `--auto-bootstrap` only handles
+**stub creation** for missing concepts. The actual **citation-folding
+into pre-existing concepts** is still SKILL-side LLM Edit work, which
+is fragile and slow. The fix (Task 9.13, §10.8) moves this work into
+the deterministic Python runner where it belongs per SPEC §6.
+
+This revision adds six tasks (9.13–9.18, §10.8–§10.13) and reshapes
+the release sequencing into v0.3.13–v0.3.18, each shippable in
+~30–60 minutes of focused work, with a hard floor of an end-to-end
+smoke test (Task 9.14) that runs in CI on every commit.
 
 ### 10.0 Problem statement
 
@@ -1835,61 +1865,107 @@ Rollback = revert. No effect on already-created stubs in user vaults
 
 ### 10.3 Dependency graph + parallelization
 
+**Shipped (v0.3.6 – v0.3.12):**
+
 ```
 9.1 (namespace fix) ────┬──> 9.6 (invariant test, same commit)        v0.3.6
                         │
-                        ├──> 9.7 (auto-ingest bootstrap)              v0.3.7
+                        ├──> 9.7 (auto-ingest bootstrap docs)         v0.3.7
                         │       │
                         │       └──> 9.10 (runner --auto-bootstrap)   v0.3.9
-                        │               │
-                        │               └──> 9.12 (sentinel + lint UX)  v0.3.11
                         │
 9.2 (skeleton markers) ─┼──> 9.3 (overview synthesis)                 v0.3.7
-                        │       │
-                        │       └──> 9.4 (per-paper synthesis)        v0.3.10
                         │
-                        ├──> 9.5 (auto image extraction)              v0.3.10
-                        │
-                        └──> 9.9 (concept matching threshold)         v0.3.11
-                                │
-                                └─> 9.11 (dedup log level, indep.)    v0.3.11
+                        └──> 9.8 (standard upgrade flow)              v0.3.8
+
+[v0.3.10 — digest SKILL: imperative auto-chain]                       v0.3.10
+[v0.3.11 — wiki-ingest SKILL: append flag, no inline-Python]          v0.3.11
+[v0.3.12 — quiet runner DEBUG + dedup.vault.missing → DEBUG]          v0.3.12
 ```
 
-- **Sequenced strictly**: 9.1 → 9.2 → 9.3 → 9.4. Each builds on the
-  previous.
-- **Parallelizable in v0.3.7**: 9.3 and 9.7 ship together but touch
-  different SKILL files (digest vs wiki-ingest); only conflict point is
-  digest SKILL Process step 7 — write 9.7 first, then 9.3 layers
-  in the overview-synthesis step alongside.
-- **v0.3.9 is 9.10 alone** — the standalone "close the runner gap left
-  by 9.7" release. No other tasks touch the same files, so it ships
-  without blocking the bigger v0.3.10 batch.
-- **Parallelizable in v0.3.10**: 9.5 can land in parallel with 9.4 —
-  different files; only conflict point is digest SKILL Process, same
-  pattern as above.
-- **Parallelizable in v0.3.11**: 9.9 / 9.11 / 9.12 are mutually
-  independent. 9.9 touches scorer + reporter + setup SKILL; 9.11 is a
-  one-line dedup log change; 9.12 is two SKILL prose edits. Land in
-  any order; bundle as one release for cohesion ("digest quality
-  refinements").
-- **9.6 lands in the same PR as 9.1** — the test would fail before the
-  rewrite; bundling them keeps CI green at every commit.
+**Outstanding (v0.3.13 – v0.3.18):**
+
+```
+9.13 (citation folding into runner) ────────────┬──> 9.16 (SKILLs use runners)   v0.3.13
+                                                │
+                                                └──> 9.14 (e2e smoke test)       v0.3.14
+                                                          │
+                                                          └──> 9.15 (centralized logger)   v0.3.15
+                                                                    │
+9.4 (per-paper synthesis) ──────────────────────┬─────────┬─> 9.5 (auto images)  v0.3.16
+                                                │         │
+9.9 (concept matching threshold) ───────────────┼─────────┴─> 9.12 (auto-stub UX)   v0.3.17
+                                                │
+                                                └──> 9.17 (vault lock)              v0.3.18
+                                                          │
+                                                          └──> 9.18 (overview crash-safe)   v0.3.18
+```
+
+- **9.13 is the keystone.** Once citation folding moves into the
+  runner, the digest auto-chain stops needing Claude to do Read+Edit
+  per concept. This is the fix for the 4-minute hang.
+- **9.16 follows 9.13 in the same release.** No point landing the
+  runner if the SKILLs still orchestrate it the old way.
+- **9.14 (e2e smoke) lands AFTER 9.13/9.16** because the test asserts
+  the new auto-chain shape (subprocess-only, no LLM Edit/Read). It
+  becomes the hard floor for every subsequent release.
+- **9.15 (centralized logger) is independent** but lands after 9.14
+  so the e2e smoke can pin "no DEBUG noise" as part of its asserts.
+- **9.4 / 9.5** can land together (parallel SKILL prose; no file
+  conflicts). 9.4 is the heaviest LLM cost; 9.5 is a 5-line SKILL
+  prose addition.
+- **9.9 / 9.12** can land together (different files). 9.9 is the
+  scorer + reporter + setup SKILL change; 9.12 is the
+  `_stub_constants.py` body update + wiki-lint SKILL message.
+- **9.17 (vault lock)** is a defensive feature; ships standalone
+  because it touches every mutating runner.
+- **9.18 (overview crash-safe)** is SKILL prose only; ships
+  alongside 9.17 for cohesion ("robustness release").
 
 ### 10.4 Release sequencing
 
-| Release | Tasks bundled | User-visible win |
-|---------|---------------|------------------|
-| v0.3.6  | 9.1 + 9.2 + 9.6 | Stale namespace gone; new digests have machine-targetable skeleton markers (no more "run SKILL after runner" prose); future regressions blocked by the invariant test. |
-| v0.3.7  | 9.3 + 9.7 | Today's Overview callout actually has cross-paper synthesis; auto-ingest no longer dies on fresh vaults — concept stubs are bootstrapped automatically with a sentinel marker for later review. |
-| v0.3.8  | 9.8 | Plugin upgrade UX fixed: `"skills"` declaration added to `plugin.json`; standard `/plugin uninstall` + `/plugin install` flow now works without manual cache cleanup. |
-| v0.3.9  | 9.10 | Auto-bootstrap moved into the `wiki_ingest_plan` runner per SPEC §6 — the SKILL no longer falls back to fragile inline-Python `upsert_concept` calls. Closes the v0.3.7 partial-implementation gap. |
-| v0.3.10 | 9.4 + 9.5 | Per-paper Detailed report has synthesized takeaways; auto-ingest-top papers get figures extracted automatically (visible on day 2). |
-| v0.3.11 | 9.9 + 9.11 + 9.12 | Concept-matching threshold stops generic-keyword leakage (no more autonomous-driving papers in the biomedical bucket); fresh-vault `dedup.vault.missing` warnings drop to INFO; auto-stub bodies + wiki-lint message tell the user how to fold real content in. |
+**Shipped:**
 
-Six small releases, each independently shippable. Total estimated work:
-11 tasks at 15-90 min each = **5.5-8.5 hours of focused work** for
-Phase 9 in total. The 4 new tasks (9.9-9.12) add ~2.5-4.5 hours on top
-of the original 7-task baseline.
+| Release | Tasks | User-visible win |
+|---------|-------|------------------|
+| v0.3.6  | 9.1 + 9.2 + 9.6 | Stale namespace gone; machine-targetable skeleton markers; invariant test pins the contract. |
+| v0.3.7  | 9.3 + 9.7 | Today's Overview synthesis; auto-ingest bootstrap docs. |
+| v0.3.8  | 9.8 | Plugin upgrade UX: `"skills"` declaration; standard `/plugin uninstall` + `/plugin install` flow. |
+| v0.3.9  | 9.10 | Auto-bootstrap runner-side; SKILL no longer falls back to inline-Python. |
+| v0.3.10 | digest SKILL imperative auto-chain | No "shall I chain?" prompt; `auto_ingest_top: N` is the user's pre-approval. |
+| v0.3.11 | wiki-ingest SKILL flag-append + no-inline-Python | Closes the v0.3.10 prose gap that allowed inline-Python regression. |
+| v0.3.12 | runner DEBUG quieting + dedup.vault.missing → DEBUG | Fresh-vault digest no longer leaks DEBUG / WARNING noise to user transcript. |
+
+**Outstanding (this revision):**
+
+| Release | Tasks bundled | User-visible win | Time |
+|---------|---------------|------------------|------|
+| v0.3.13 | 9.13 + 9.16 | **Auto-chain stops hanging.** Citation folding moves into the runner; SKILLs no longer do Read+Edit dances on concept files. The 4-minute mid-flow hang is gone. | 60-90 min |
+| v0.3.14 | 9.14 | **No more per-release regressions.** End-to-end smoke test pins the full digest → auto-chain pipeline as a hard CI floor. Every future release inherits this floor. | 45-60 min |
+| v0.3.15 | 9.15 | **Clean logs by default.** Centralized `_internal/logging.py` module + `--verbose` flag + `PAPERWIKI_LOG_LEVEL` env var. No more spot-fixes per release for noisy `logger.debug` lines. | 30-45 min |
+| v0.3.16 | 9.4 + 9.5 | **Per-paper Detailed report has prose**; **auto-ingest-top papers get figures** (visible day 2). | 60-90 min |
+| v0.3.17 | 9.9 + 9.12 | Concept-matching threshold stops generic-keyword leakage; auto-stub bodies + wiki-lint message clarify next steps. | 45-75 min |
+| v0.3.18 | 9.17 + 9.18 | Vault lock prevents corruption when two sessions race; Today's Overview is crash-safe (SIGINT mid-pass leaves the digest file recoverable). | 30-45 min |
+
+Six outstanding releases, each ~30–90 minutes of focused work.
+**Total: 4.5–7 hours.** Each release can be cut and tagged
+independently so the user feels a steady drip of fixes.
+
+### 10.4.1 Why v0.3.13 ships first (and alone)
+
+Three reasons to land 9.13 + 9.16 together as v0.3.13 BEFORE everything
+else, even though the e2e smoke test (9.14) is more obviously
+"infrastructure":
+
+1. **9.13 is the actual bug fix the user is blocked on.** Every fresh
+   digest run hangs at the auto-chain step because of the SKILL-side
+   Edit dance. Until the runner does the citation folding, the user
+   can't get a full pipeline run end-to-end.
+2. **9.14 needs 9.13 to pin the right contract.** Writing the e2e
+   test before the runner change would lock in the broken
+   architecture.
+3. **9.16 (SKILL trim) can't ship without 9.13** — the SKILL change
+   is "delete the Read+Edit prose because the runner does it now".
 
 ### 10.5 Risks (Phase 9)
 
@@ -1908,6 +1984,13 @@ of the original 7-task baseline.
 | Task 9.10 auto-bootstrap creates stubs for noisy `suggested_concepts` (compounds with 9.9 unless both ship) | Vault clutter on first run | Ship 9.10 in v0.3.9 alone (no threshold gating yet); 9.9 in v0.3.11 adds the gate. Document in v0.3.9 CHANGELOG that "concept-strength gating ships in v0.3.11". |
 | Task 9.11 log-level downgrade hides a real misconfiguration (user typo'd vault path) | User wonders why dedup never fires | INFO line still includes the path verbatim; structured log key change (`dedup.vault.absent`) makes it filterable. Add a Red Flags entry to digest SKILL: "if a recipe's `vault_paths` are ALL absent across multiple runs, prompt user to re-run setup." |
 | Task 9.12 sentinel body diverges between runner (Task 9.10) and SKILL (Task 9.7 docs) | Inconsistent bodies in user vaults | Define the sentinel as a constant in `paperwiki.runners._stub_constants`; runner imports it; smoke test asserts both SKILL.md and runner constant match. |
+| Task 9.13 runner mutates concept frontmatter; if a user has hand-edited a concept's `sources:` list, the runner appends without merging | User edit lost mid-list | Runner reads existing `sources:`, appends only if `canonical_id` not already present; round-trips other frontmatter verbatim (yaml.safe_dump preserves order via `sort_keys=False`); never deletes existing entries. Smoke test pins a hand-edited concept survives the fold. |
+| Task 9.13 changes the JSON schema (new `folded_citations` field) — third-party SKILLs reading the JSON might break | Silent schema drift | Field is additive; `affected_concepts` and `created_stubs` preserved. CHANGELOG calls out the new field; e2e smoke (9.14) asserts the schema. |
+| Task 9.14 e2e smoke test relies on a stub `Source` plugin — if the real `ArxivSource` schema drifts, the test passes but production still breaks | False sense of security | Stub plugin uses the same `Paper` model as production; recipe loader / pipeline / scorer / reporter / wiki-backend are real. Only the network adapter is mocked. CI also keeps the existing `test_bundled_recipes.py` to catch source-plugin schema drift. |
+| Task 9.15 logger config breaks tests that capture log output via `caplog` | Test suite goes red | New `configure_runner_logging` is opt-in (called from runners' `main()`); pytest fixtures don't trigger it. Existing tests that import `from loguru import logger` keep working. New `tests/unit/_internal/test_logging.py` pins the configure-then-log shape. |
+| Task 9.17 lock file gets stranded after a crash — user can't run anything until they `rm` it | UX foot-gun | `acquire_vault_lock` reclaims locks older than `stale_after_s` (default 5 min); the held-lock error message tells the user the exact `rm` path. Lock content is human-readable JSON `{pid, host, started_at, runner}`. |
+| Task 9.17 lock file in user vault confuses Obsidian sync (Dropbox / iCloud) | Sync conflicts | `.paperwiki.lock` filename starts with a dot (Obsidian doesn't index dotfiles); recommend `.paperwiki.lock` be added to `.gitignore` (already implied by `Wiki/.cache/`-style ignores). Document in CHANGELOG. |
+| Task 9.18 SIGINT handler races with file write — partial digest on disk | Half-written digest | The digest runner already writes the file in one `aiofiles.open(...).write(rendered)` call; SIGINT interrupting the write is a kernel-level concern not addressable in user-space. SKILL prose only documents that the SLOT MARKERS make the file re-fillable, not that the file is atomically written. |
 
 ### 10.6 Rollback notes
 
@@ -1940,11 +2023,728 @@ of the original 7-task baseline.
 - **9.12**: `git revert`. Stubs created with the new sentinel keep
   it in user vaults (harmless prose); the SKILL Process reverts to
   the pre-9.12 prose.
+- **9.13**: `git revert` on the new runner. Concepts already folded
+  via the runner keep the appended `canonical_id` in their `sources:`
+  frontmatter (harmless — that's where it should be). The wiki-ingest
+  SKILL falls back to the old Read+Edit dance via the v0.3.12 SKILL
+  prose; users see the 4-minute hang return on next digest.
+  Mitigation: forward fixes preferred over rollback for 9.13.
+- **9.14**: `pytest -k 'not test_full_digest_auto_chain'` to skip if
+  the test is too brittle. Better: fix the brittleness inline.
+- **9.15**: `git revert`. Loguru defaults return; user sees DEBUG
+  noise again. Pure observability change.
+- **9.16**: `git revert` on SKILL.md. SKILLs go back to the old
+  Read+Edit prose; runner gains stay (no harm). Net: similar to 9.13
+  rollback but the runner side is preserved.
+- **9.17**: `git revert`. Lock file logic gone; concurrent writes
+  resume the racey-but-rare-in-practice behavior. Users with a
+  stranded `.paperwiki.lock` in their vault can `rm` it.
+- **9.18**: `git revert` on SKILL.md. Pre-revert digest files keep
+  their slot markers (harmless); SKILL Process reverts to the
+  pre-9.18 ordering.
 
-### 10.7 Out of scope (Phase 9)
+---
+
+### 10.7 Task 9.13 — Move citation folding from SKILL to runner → v0.3.13
+
+**Problem (discovered during 2026-04-27 v0.3.12 fresh-vault smoke run)**:
+
+Per the SKILL transcript, after the digest auto-chain invoked
+`/paper-wiki:wiki-ingest <id> --auto-bootstrap` for paper #1, control
+moved to paper #2 and #3, where the SKILL had to fold the new source's
+`canonical_id` into the `sources:` lists of TWO PRE-EXISTING concepts
+(`vision-multimodal`, `agents-reasoning`) the user had created
+manually. The SKILL transcript shows:
+
+```
+⏺ For paper #2 and #3, I need to fold the new source citations into
+  the pre-existing stubs. I'll update each stub's sources list directly.
+  Read 2 files (ctrl+o to expand)
+⏺ Update(Documents/Paper-Wiki/Wiki/concepts/vision-multimodal.md)
+  ⎿  File must be read first
+✻ Cooked for 4m 0s
+```
+
+The Edit tool requires the file to be Read first; Claude Read it,
+tried to Edit, hit a "File must be read first" error (probably a
+race or a SKILL-side bug), retried, looped, and stalled for four
+minutes before the user gave up.
+
+**Architectural diagnosis**:
+
+`paperwiki.runners.wiki_ingest_plan` accepts `--auto-bootstrap`
+(shipped v0.3.9) which auto-creates STUBS for missing concepts in
+`suggested_concepts`. But for concepts that ALREADY EXIST (and the
+source's frontmatter `related_concepts` lists them), the runner
+returns them in `affected_concepts` and the SKILL is expected to
+"fold the source citation in" via LLM-driven Edits. The wiki-ingest
+SKILL Process Step 4:
+
+> 4. **Update affected concepts.** For each name in
+>    `affected_concepts`: read the existing concept body, fetch the new
+>    source's content, and synthesize an updated body that
+>    incorporates the new evidence without dropping prior synthesis.
+
+This step assumes the SKILL will do BOTH:
+
+- (a) **fold the source citation** into the concept's `sources:`
+  frontmatter list, AND
+- (b) **synthesize updated body prose** that reflects the new
+  evidence.
+
+(a) is a deterministic YAML mutation. (b) is genuine LLM synthesis.
+Today, both are bundled into the same SKILL step — and the bundled
+step does Read + Edit per concept, which is fragile and slow.
+
+**The fix is to split (a) from (b):**
+
+- (a) **citation folding** moves into the runner. Pure file I/O.
+  Always runs. Idempotent.
+- (b) **body synthesis** stays in the SKILL but becomes EXPLICITLY
+  manual-only (`/paper-wiki:wiki-ingest <id>` without
+  `--auto-bootstrap` triggers it; the digest auto-chain skips it).
+
+This puts the architecture on the right side of SPEC §6: Python is
+LLM-free deterministic file I/O; SKILLs do genuine synthesis only when
+the user asks for it.
+
+**Solution**:
+
+Rename `paperwiki.runners.wiki_ingest_plan` to
+`paperwiki.runners.wiki_ingest` (one runner, two modes via flags).
+Old module stays as a deprecation shim importing from the new one,
+emitting a one-line `DeprecationWarning`. Or land a new module side-
+by-side and migrate the SKILL — the user can choose; the cleaner
+architecture is the rename.
+
+**New CLI**:
+
+```
+python -m paperwiki.runners.wiki_ingest <vault> <canonical-id>
+    [--auto-bootstrap]   # creates stubs for missing concepts (existing v0.3.9 behavior)
+    [--fold-citations]   # appends canonical_id to each affected concept's sources list (NEW)
+```
+
+The two flags are independent. Auto-chain digest passes both; manual
+invocations of `/paper-wiki:wiki-ingest <id>` pass neither (interactive
+mode).
+
+**Citation-folding implementation** (new in this task):
+
+For each name in `affected_concepts`:
+
+1. Read `<vault>/Wiki/concepts/<name>.md` via the existing
+   `_read_frontmatter` helper.
+2. If `canonical_id` is already in `frontmatter["sources"]`, skip
+   (idempotent — covers the "re-run same digest" case).
+3. Append `canonical_id` to `frontmatter["sources"]`. Bump
+   `frontmatter["last_synthesized"]` to today (UTC). Other fields
+   (title, status, confidence, related_concepts) preserved verbatim.
+4. Re-render the file: frontmatter (yaml.safe_dump, sort_keys=False)
+   + `---\n\n` + existing body verbatim. Body is read from disk and
+   passed through unchanged.
+5. Append the concept name to `folded_citations: list[str]` in the
+   JSON output.
+
+**SKILL change** (`skills/wiki-ingest/SKILL.md` Process Step 4):
+
+> 4. **Update affected concepts.** For each name in
+>    `affected_concepts`:
+>
+>    - **If `--fold-citations` was passed (the digest auto-chain
+>      path)**: SKIP this step. The runner has already appended the
+>      source citation to each concept's `sources:` frontmatter. Do
+>      NOT Read or Edit any concept file. Surface
+>      `folded_citations` count from the runner JSON in your summary.
+>    - **Otherwise (interactive `/paper-wiki:wiki-ingest <id>` invocation)**:
+>      proceed with body-synthesis update as documented today.
+
+**Acceptance criteria**:
+
+- **AC-9.13.1** `paperwiki.runners.wiki_ingest` (or
+  `paperwiki.runners.wiki_ingest_plan` extended) accepts both
+  `--auto-bootstrap` and `--fold-citations` Typer flags.
+- **AC-9.13.2** `--fold-citations` appends `canonical_id` to each
+  affected concept's `sources:` frontmatter list. Idempotent (no
+  duplicate appends if the canonical_id is already present).
+- **AC-9.13.3** Concept body is preserved byte-for-byte across the
+  fold. Frontmatter ordering is preserved (yaml.safe_dump
+  `sort_keys=False`).
+- **AC-9.13.4** Last_synthesized in folded concepts bumps to today.
+- **AC-9.13.5** JSON output gains `folded_citations: list[str]`
+  field. Empty list when `--fold-citations` is not passed (legacy
+  schema preserved).
+- **AC-9.13.6** Wiki-ingest SKILL Process Step 4 is updated:
+  `--fold-citations` path skips the Read+Edit dance entirely; SKILL
+  surfaces the count from runner JSON.
+- **AC-9.13.7** New unit tests:
+  - `test_fold_citations_appends_canonical_id_to_existing_concept`
+  - `test_fold_citations_idempotent_when_canonical_id_already_present`
+  - `test_fold_citations_preserves_concept_body_verbatim`
+  - `test_fold_citations_preserves_other_frontmatter_fields`
+  - `test_fold_citations_bumps_last_synthesized_to_today`
+  - `test_fold_citations_no_op_when_affected_concepts_empty`
+  - `test_runner_with_both_flags_creates_stubs_and_folds_existing`
+
+**Verification**:
+
+- `pytest -q tests/unit/runners/test_wiki_ingest.py -k fold_citations`
+  green.
+- Manual: with two pre-existing concepts in `<vault>/Wiki/concepts/`,
+  invoke
+  `python -m paperwiki.runners.wiki_ingest <vault> arxiv:X --fold-citations`;
+  observe both concepts gain `arxiv:X` in their `sources:` list,
+  bodies unchanged, no LLM tools invoked.
+
+**Complexity**: L (60–90 min). New runner subcommand or rename;
+seven unit tests; SKILL Process Step 4 rewrite; smoke test update.
+
+**Dependencies**:
+- Hard: nothing (the runner already exists; this is a new mode).
+- Soft: 9.16 (SKILL trim) ships in same release.
+
+**Risk**: low-medium. Risk = a hand-edited concept's frontmatter has
+non-standard fields the runner doesn't preserve. Mitigation =
+yaml.safe_dump round-trip preserves arbitrary keys; smoke test pins
+this with a concept that has a custom `notes:` field.
+
+---
+
+### 10.8 Task 9.14 — End-to-end smoke test → v0.3.14
+
+**Problem**: the user has run `/paper-wiki:digest` against a fresh
+vault three times across v0.3.5, v0.3.10, and v0.3.12. Each run hit
+a different bug:
+
+- v0.3.5: stale `/paperwiki:` namespace (fixed in v0.3.6).
+- v0.3.10: SKILL asked "shall I auto-chain?" (fixed in v0.3.10).
+- v0.3.12: SKILL hung 4 minutes mid-flow on Edit dance (fix landing
+  in v0.3.13).
+
+Three releases, three fresh-vault regressions. The pattern is clear:
+**there is no end-to-end test exercising the full digest + auto-chain
+pipeline.** Existing tests cover individual modules, individual
+runners, individual SKILLs — but nothing pins the whole digest →
+auto-chain → wiki-state-on-disk flow as a hard contract.
+
+**Solution**: add `tests/integration/test_full_digest_auto_chain.py`.
+This is the floor that every future release must hold.
+
+**Test structure**:
+
+```python
+async def test_full_digest_auto_chain_lands_top_papers_into_wiki(
+    tmp_path: Path,
+) -> None:
+    """Fresh vault → digest → auto-chain → wiki state on disk."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    # Stub source emits 3 deterministic papers (no network).
+    recipe = build_test_recipe(
+        vault=vault,
+        sources=[StubSource(papers=[paper1, paper2, paper3])],
+        auto_ingest_top=3,
+        topics=[topic_vision, topic_agents],
+    )
+
+    # Run the real digest pipeline.
+    await run_digest(recipe_path=recipe, target_date=fixed_date)
+
+    # Assert digest file on disk.
+    digest_files = list((vault / "Daily").glob("*.md"))
+    assert len(digest_files) == 1
+
+    # Simulate the digest SKILL's auto-chain step: invoke
+    # the wiki_ingest runner subprocess-style for each top paper.
+    for paper in [paper1, paper2, paper3]:
+        result = subprocess.run([
+            sys.executable, "-m", "paperwiki.runners.wiki_ingest",
+            str(vault), paper.canonical_id,
+            "--auto-bootstrap", "--fold-citations",
+        ], capture_output=True, check=True)
+        plan = json.loads(result.stdout)
+        # Each paper should have stubbed >= 1 concept OR folded into >= 1.
+        assert plan["created_stubs"] or plan["folded_citations"]
+
+    # Assert wiki state on disk.
+    concepts = list((vault / "Wiki" / "concepts").glob("*.md"))
+    assert len(concepts) >= 3, "expected >= 3 concept stubs"
+
+    for concept_path in concepts:
+        text = concept_path.read_text()
+        # Each concept references at least one source.
+        assert "sources:" in text
+        # Auto-created stubs use the sentinel body.
+        if "auto_created: true" in text:
+            assert AUTO_CREATED_SENTINEL_BODY in text
+```
+
+Pinned contracts (every assertion is a contract):
+
+1. **Pipeline produces a digest file** (count + filename pattern).
+2. **Auto-chain runner is invoked subprocess-style** with
+   `--auto-bootstrap --fold-citations`. NO Claude Edit/Read tool
+   calls happen for citation folding. (This is what the v0.3.12
+   transcript got wrong.)
+3. **Concept stubs are created** for missing concepts.
+4. **Pre-existing concepts get the new source's `canonical_id`** in
+   their `sources:` list (Task 9.13's contract).
+5. **No DEBUG noise** — capture stderr, assert no `DEBUG` lines
+   (the v0.3.15 contract).
+6. **Total runtime < 10 seconds** — pin no SKILL hang.
+
+**Acceptance criteria**:
+
+- **AC-9.14.1** `tests/integration/test_full_digest_auto_chain.py`
+  exists.
+- **AC-9.14.2** Test passes on a clean checkout.
+- **AC-9.14.3** Test fails when `--fold-citations` is broken in the
+  runner (smoke-test the test by manually breaking the runner
+  during development — verify the test points at the right
+  assertion).
+- **AC-9.14.4** Test fails when DEBUG-noise is reintroduced (after
+  9.15).
+- **AC-9.14.5** Test runtime < 10s (no live network; no LLM).
+- **AC-9.14.6** Test asserts subprocess-style runner invocation,
+  NOT in-process — this is the contract that the auto-chain is
+  Python-only.
+
+**Verification**:
+
+- `pytest -q tests/integration/test_full_digest_auto_chain.py`
+  green.
+- Manual: deliberately break the `--fold-citations` flag in the
+  runner; the test fails with a precise message about a missing
+  source citation.
+
+**Complexity**: M (45–60 min). Single test file with ~80 LoC; one
+StubSource fixture (~30 LoC); reuses existing recipe / pipeline /
+backend.
+
+**Dependencies**:
+- Hard: 9.13 (the test asserts the new flag's contract).
+- Soft: 9.15 (the no-DEBUG-noise assert depends on the centralized
+  logger).
+
+**Risk**: low. Risk = test brittleness across CI runners (timing,
+filesystem). Mitigation = `tmp_path`, fixed `target_date`,
+no-network stub source, async-await for I/O.
+
+---
+
+### 10.9 Task 9.15 — Centralized logger config + `--verbose` → v0.3.15
+
+**Problem**: loguru defaults to DEBUG. Every release has had at least
+one "user sees DEBUG noise" report. v0.3.12 patched two specific
+lines; v0.3.13 will introduce a new runner with new DEBUG-eligible
+log calls; the pattern repeats.
+
+There is currently NO `paperwiki._internal/logging.py` (verified —
+the file does not exist). Each runner imports `from loguru import
+logger` directly and gets loguru's defaults.
+
+**Solution**: add `src/paperwiki/_internal/logging.py`:
+
+```python
+"""Centralized logger configuration for paperwiki runners."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+from loguru import logger
+
+
+def configure_runner_logging(
+    *,
+    verbose: bool = False,
+    default_level: str = "INFO",
+) -> None:
+    """Reset loguru's sinks and re-configure for runner output.
+
+    Removes the default DEBUG sink. Adds a stderr sink at
+    ``default_level`` (INFO) or DEBUG when ``verbose`` is True.
+    Honors PAPERWIKI_LOG_LEVEL env var as the highest-priority
+    override (so CI / hooks can silence runners with one env var).
+    """
+    logger.remove()  # Drop loguru's default DEBUG sink.
+
+    env_override = os.environ.get("PAPERWIKI_LOG_LEVEL")
+    if env_override:
+        level = env_override.upper()
+    elif verbose:
+        level = "DEBUG"
+    else:
+        level = default_level
+
+    logger.add(
+        sys.stderr,
+        level=level,
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function} - {message}",
+    )
+
+    # Pin chatty modules to WARNING by default (overridable via
+    # PAPERWIKI_LOG_LEVEL=DEBUG which still wins).
+    if not verbose and not env_override:
+        logger.disable("paperwiki.plugins.filters.dedup")
+        logger.disable("paperwiki._internal.arxiv_source")
+```
+
+Every runner's `main()` calls
+`configure_runner_logging(verbose=verbose_flag)` as the first line.
+Each runner gains a `--verbose / -v` Typer option (default False).
+
+**Acceptance criteria**:
+
+- **AC-9.15.1** `src/paperwiki/_internal/logging.py` exists with
+  `configure_runner_logging`.
+- **AC-9.15.2** Every runner (`digest`, `wiki_ingest`,
+  `wiki_compile`, `wiki_query`, `wiki_lint`, `extract_paper_images`,
+  `migrate_sources`, `diagnostics`) imports + calls
+  `configure_runner_logging` in `main()`.
+- **AC-9.15.3** Every runner exposes `--verbose / -v` Typer option.
+- **AC-9.15.4** Default behavior: no DEBUG lines on stderr.
+- **AC-9.15.5** `--verbose` enables DEBUG.
+- **AC-9.15.6** `PAPERWIKI_LOG_LEVEL=WARNING` silences INFO.
+- **AC-9.15.7** Unit test `test_configure_runner_logging_default_level_is_info`
+  pins INFO is default.
+- **AC-9.15.8** Unit test
+  `test_configure_runner_logging_verbose_emits_debug` pins
+  `--verbose` re-enables DEBUG.
+- **AC-9.15.9** e2e smoke (Task 9.14) asserts no DEBUG lines on
+  stderr.
+
+**Verification**:
+
+- `pytest -q tests/unit/_internal/test_logging.py` green.
+- Manual: fresh vault `/paper-wiki:digest daily` produces zero
+  DEBUG lines on stderr; `python -m paperwiki.runners.digest
+  recipes/daily-arxiv.yaml --verbose` re-enables DEBUG.
+
+**Complexity**: S (30–45 min). One new module (~30 LoC); 8 runner
+edits (1 line each); 2 unit tests.
+
+**Dependencies**: none (independent).
+
+**Risk**: very low. Risk = users who set `LOGURU_LEVEL` env var
+expect the old behavior. Mitigation = `PAPERWIKI_LOG_LEVEL` is a
+distinct namespaced env var; loguru's `LOGURU_LEVEL` is documented
+as ignored by paperwiki runners.
+
+---
+
+### 10.10 Task 9.16 — Update SKILLs to USE runners, not orchestrate them → v0.3.13
+
+**Problem**: even after Task 9.13 lands the `--fold-citations` flag,
+the wiki-ingest SKILL.md still has Process Step 4 + Step 5 + the
+"Auto-bootstrap mode" section that describe the LLM-side dance.
+Without trimming the SKILL prose, the LLM may still try to do the
+old behavior even when the new flag is available — partial-fix
+regression.
+
+**Solution**: rewrite `skills/wiki-ingest/SKILL.md` Process to be a
+runner pass-through for the auto-chain path. Manual interactive
+mode keeps body-synthesis. The "Auto-bootstrap mode" section
+collapses to a 4-line runner invocation summary.
+
+**SKILL Process (revised)**:
+
+```markdown
+## Process
+
+1. **Resolve the source id.** Accept arxiv:1234.5678, s2:<paperId>,
+   or a fuzzy title; normalize via paperwiki._internal.normalize.
+
+2. **Run the runner.** Invoke
+   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_ingest
+   <vault> <canonical-id>`.
+
+   - **Auto-chain path (digest auto-ingest):** append both
+     `--auto-bootstrap` and `--fold-citations`. The runner stubs
+     missing concepts AND folds the source citation into each
+     affected concept's `sources:` list. NO LLM work in this path.
+   - **Interactive path (manual `/paper-wiki:wiki-ingest <id>`)**:
+     omit both flags. The runner returns `affected_concepts` and
+     `suggested_concepts`; you'll handle the body-synthesis update
+     loop in Step 4.
+
+3. **Honor `source_exists`.** If false, stop and ask the user to
+   run `/paper-wiki:analyze <id>` first.
+
+4. **Body synthesis (interactive only).** For each name in
+   `affected_concepts`: read the existing concept body, fetch the
+   new source's content, synthesize an updated body that
+   incorporates the new evidence. Write back via
+   `MarkdownWikiBackend.upsert_concept(...)`. **Skip this entire
+   step on the auto-chain path** — the runner has already folded
+   citations; body prose is intentionally NOT regenerated to keep
+   auto-chain fast and deterministic.
+
+5. **Append to _log.md.** One line per ingest call.
+
+6. **Summarize.** Print "created N stubs, folded M citations,
+   updated K concept bodies" so the digest auto-chain can surface
+   per-paper progress.
+```
+
+**Acceptance criteria**:
+
+- **AC-9.16.1** `skills/wiki-ingest/SKILL.md` Process is rewritten
+  per the structure above.
+- **AC-9.16.2** Auto-chain path documents NO Read or Edit tool
+  calls.
+- **AC-9.16.3** Interactive path keeps body-synthesis.
+- **AC-9.16.4** Common Rationalizations gains a row: "I'll Edit the
+  concept file directly to fold the citation, faster than calling
+  the runner" — wrong, the runner is now the single source of
+  truth for citation folding.
+- **AC-9.16.5** Smoke test
+  `test_wiki_ingest_skill_auto_chain_path_uses_only_runner` pins
+  the SKILL.md auto-chain path mentions
+  `--auto-bootstrap --fold-citations` and contains no `Edit` or
+  `Read` tool references.
+- **AC-9.16.6** `skills/digest/SKILL.md` Process Step 8 also
+  updates: the auto-chain invocation passes both flags.
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py -k wiki_ingest_skill_auto_chain`
+  green.
+- Manual: read SKILL.md auto-chain path; verify no Read/Edit
+  language remains.
+
+**Complexity**: M (30–45 min). SKILL prose rewrite (~80 LoC delta);
+1 new smoke test; digest SKILL Process Step 8 update.
+
+**Dependencies**:
+- Hard: 9.13 (the runner flag must exist for the SKILL to invoke
+  it).
+
+**Risk**: low. Risk = users with custom workflows expecting the old
+SKILL behavior. Mitigation = interactive path preserved; only
+auto-chain changes; CHANGELOG entry calls out the new flag's role.
+
+---
+
+### 10.11 Task 9.17 — Defensive concurrency lock → v0.3.18
+
+**Problem (parent-agent diagnosis from 2026-04-27 v0.3.12 smoke
+incident)**:
+
+The user's vault `Wiki/concepts/` directory disappeared between
+14:09 and 14:15 during the SKILL flow. The most likely root cause
+was the parent agent (the assistant managing the test session)
+running `rm -rf ~/Documents/Paper-Wiki/Wiki ...` for fresh-test
+cleanup, while the user's session was still mid-flow on a previous
+digest run.
+
+This is primarily a parent-agent UX issue ("don't nuke vault while
+user is running"), but it also reveals an architectural gap: there
+is NO defensive locking. Two parallel digest runs against the same
+vault, or a digest mid-flow plus a `rm -rf`, both produce silent
+corruption rather than a clear "vault is locked" error.
+
+**Solution**: add `src/paperwiki/_internal/locking.py` with an
+`acquire_vault_lock` async context manager that writes a
+`.paperwiki.lock` file containing `{pid, host, started_at,
+runner_name}` JSON. Releases on exit. Reclaims locks older than
+`stale_after_s` (default 300s) so a crashed runner doesn't strand
+the vault.
+
+**Locked runners**:
+
+- `wiki_ingest` (acquires for the duration of stub creation +
+  citation folding + body synthesis)
+- `wiki_compile` (acquires for the index.md regeneration)
+- `migrate_sources` (acquires for source-stub format upgrades)
+- `obsidian` reporter when `wiki_backend=true` (the digest's source-
+  file write path)
+
+**Read-only runners do NOT lock**:
+
+- `wiki_query` (read-only)
+- `wiki_lint` (read-only — only reports findings)
+- `diagnostics` (read-only — env probes)
+
+**Lock content** (human-readable JSON):
+
+```json
+{
+  "pid": 12345,
+  "host": "MacBook-Pro.local",
+  "started_at": "2026-04-27T14:09:00+00:00",
+  "runner": "wiki_ingest",
+  "vault": "/Users/.../Documents/Paper-Wiki"
+}
+```
+
+**Held-lock error message**:
+
+```
+UserError: vault is locked by pid=12345 (runner=wiki_ingest,
+started 2 minutes ago at 14:09:00).
+
+If the previous run is still active, wait for it to finish.
+If the previous run crashed, the lock will be reclaimed
+automatically after 5 minutes — or remove it manually:
+
+    rm /Users/.../Documents/Paper-Wiki/.paperwiki.lock
+
+Lock content was written to help debug stuck runs.
+```
+
+**Acceptance criteria**:
+
+- **AC-9.17.1** `src/paperwiki/_internal/locking.py` exists with
+  `acquire_vault_lock(vault_path: Path, *, runner_name: str,
+  timeout_s: float = 5.0, stale_after_s: float = 300.0)` async
+  context manager.
+- **AC-9.17.2** Lock file is `<vault>/.paperwiki.lock` containing
+  JSON.
+- **AC-9.17.3** Two parallel writers race: one acquires; the
+  second raises `UserError` with the held-lock message.
+- **AC-9.17.4** Stale lock (> `stale_after_s` old) is reclaimed
+  automatically with a `logger.info("vault.lock.reclaimed", ...)`
+  line.
+- **AC-9.17.5** Lock is released on context exit (including
+  exception path).
+- **AC-9.17.6** Mutating runners (`wiki_ingest`, `wiki_compile`,
+  `migrate_sources`) acquire the lock; read-only runners
+  (`wiki_query`, `wiki_lint`, `diagnostics`) do NOT.
+- **AC-9.17.7** Obsidian reporter with `wiki_backend=true`
+  acquires the lock before per-source writes; releases after the
+  loop completes.
+- **AC-9.17.8** Unit tests:
+  - `test_lock_blocks_concurrent_writers`
+  - `test_lock_is_released_on_exception`
+  - `test_stale_lock_is_reclaimed`
+  - `test_read_only_runner_does_not_lock`
+
+**Verification**:
+
+- `pytest -q tests/unit/_internal/test_locking.py` green.
+- Manual: open two terminals, run
+  `python -m paperwiki.runners.wiki_ingest <vault> arxiv:X` in
+  each simultaneously; second invocation exits 1 with the
+  held-lock message. After first completes, second can be re-run
+  successfully.
+
+**Complexity**: S-M (30–45 min). One module (~60 LoC); 4 unit
+tests; runner integration (4 imports + 4 `async with`).
+
+**Dependencies**: none (independent).
+
+**Risk**: low-medium. Risk = lock contention in user vaults synced
+via Dropbox/iCloud (the lock file is created on local disk before
+sync sees it). Mitigation = lock file uses `.paperwiki.lock` (dot
+prefix; Obsidian doesn't index, most sync tools deprioritize); the
+JSON content is small (< 500 bytes); README documents adding
+`.paperwiki.lock` to vault-level ignore lists if the user uses git.
+
+---
+
+### 10.12 Task 9.18 — Make Today's Overview synthesis crash-safe → v0.3.18
+
+**Problem**: today's digest SKILL Process orders the steps as
+"runner runs → SKILL summarizes top-3 → SKILL synthesizes overview
+→ SKILL auto-chains wiki-ingest". If the SKILL crashes (SIGINT,
+context-window exhaustion, model timeout) during overview
+synthesis, the digest file on disk has the per-paper sections + the
+slot marker `<!-- paper-wiki:overview-slot -->` — but the user's
+auto-chain never runs and the user has to re-trigger the entire
+pipeline.
+
+After Task 9.13 lands and citation folding is in the runner, the
+auto-chain becomes deterministic and fast (Python only, no LLM
+hangs). So the right ordering is:
+
+1. Runner produces digest file with all slot markers in place.
+2. SKILL invokes auto-chain runner (subprocess; deterministic; no
+   LLM).
+3. SKILL synthesizes per-paper Detailed reports (LLM; may crash).
+4. SKILL synthesizes Today's Overview (LLM; may crash).
+
+If 3 or 4 crash, the digest file is on disk, auto-chain has run,
+and re-running the SKILL only re-fills the synthesis steps for slot
+markers still on disk (idempotent).
+
+**Solution**: document the new ordering in `skills/digest/SKILL.md`
+Process. Add a Common Rationalizations row about "I'll synthesize
+overview before flushing per-paper sections — saves a roundtrip"
+calling out the order matters for crash safety.
+
+**Revised SKILL Process** (key sections):
+
+```markdown
+6. **Summarize the outcome.** Read the reporter output paths from
+   the recipe and report: how many recommendations were emitted,
+   where they were written, and the titles + composite scores of
+   the top 3. (No file modifications yet; pure reporting.)
+
+7. **Auto-chain wiki-ingest** (deterministic; runs first to
+   finish even if synthesis crashes later). Read the recipe's
+   `auto_ingest_top` field. If > 0, immediately invoke
+   `paperwiki.runners.wiki_ingest <vault> <canonical-id>
+   --auto-bootstrap --fold-citations` for each top paper. NO LLM
+   work. Surface `created_stubs` and `folded_citations` counts
+   per paper.
+
+8. **Per-paper Detailed report synthesis** (LLM; idempotent).
+   For each `<!-- paper-wiki:per-paper-slot:{canonical_id} -->`
+   marker still in the digest file, synthesize the Detailed
+   report block and replace the marker. If a marker is already
+   gone (re-run case), skip it.
+
+9. **Today's Overview synthesis** (LLM; idempotent). Find the
+   `<!-- paper-wiki:overview-slot -->` marker. If present,
+   synthesize 60-200 words of cross-paper prose and replace the
+   marker. If gone (re-run case), skip.
+```
+
+The order shift moves auto-chain BEFORE synthesis. If SKILL
+crashes during step 8 or 9, the user re-runs the SKILL and only
+the un-synthesized slot markers get filled — auto-chain doesn't
+re-run because it's already done its job.
+
+**Acceptance criteria**:
+
+- **AC-9.18.1** `skills/digest/SKILL.md` Process Steps 6–9
+  documented in the new order: summarize → auto-chain → per-paper
+  synthesis → overview synthesis.
+- **AC-9.18.2** Common Rationalizations gains a row about
+  ordering.
+- **AC-9.18.3** Smoke test
+  `test_digest_skill_synthesizes_overview_after_pipeline_complete`
+  asserts the overview-synthesis step appears AFTER the
+  auto-chain step in the SKILL Process.
+- **AC-9.18.4** SKILL Verification section adds: "if the SKILL
+  is interrupted mid-synthesis, re-running the SKILL re-fills only
+  the still-present slot markers; the auto-chain does NOT re-run".
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py -k overview_after_pipeline` green.
+- Manual: run digest, SIGINT during overview synthesis (~step 9);
+  re-run SKILL; observe only the overview slot is re-filled,
+  per-paper sections preserved verbatim, auto-chain not re-run.
+
+**Complexity**: S (20-30 min). SKILL prose rewrite (~30 LoC delta);
+1 smoke test.
+
+**Dependencies**:
+- Hard: 9.13 + 9.14 + 9.16 (auto-chain must be deterministic before
+  reordering makes sense).
+
+**Risk**: very low. Pure SKILL prose change; no Python edits.
+
+---
+
+### 10.13 Out of scope (Phase 9)
 
 - Phase 8 PDF text extraction (still candidate; per-paper synthesis in
-  9.4 leans on the abstract only — we'll know after v0.3.8 ships
+  9.4 leans on the abstract only — we'll know after v0.3.16 ships
   whether 9.4's quality justifies promoting Phase 8 to active).
 - Migrating `extract-paper-images` SKILL to chain automatically inside
   the runner (would violate SPEC §6 — Python stays LLM-free; chaining
