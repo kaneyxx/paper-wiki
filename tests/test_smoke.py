@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.7"
+    assert data["version"] == "0.3.8"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -700,4 +700,74 @@ def test_digest_skill_describes_overview_synthesis() -> None:
     )
     assert "200" in body, (
         "digest SKILL.md must specify the 200-word maximum target length for the overview"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.8 — Standard upgrade flow (OMC-style, v0.3.8)
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_manifest_declares_skills_directory() -> None:
+    """``plugin.json`` must declare the ``"skills"`` field pointing to ``./skills/``.
+
+    Without this declaration the Claude Code plugin loader cannot locate SKILL
+    files after install, causing the "already installed globally but Unknown
+    command" failure mode. OMC's plugin.json carries this field; paper-wiki
+    must too.
+    """
+    manifest = REPO_ROOT / ".claude-plugin" / "plugin.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert "skills" in data, (
+        "plugin.json must have a 'skills' field so Claude Code can locate SKILL files. "
+        "Without it, /plugin install leaves metadata in an inconsistent state."
+    )
+    skills_value: str = data["skills"]
+    assert skills_value.startswith("./skills"), (
+        f"plugin.json 'skills' must point at the ./skills/ directory, got: {skills_value!r}"
+    )
+
+
+def test_readme_documents_standard_upgrade_flow() -> None:
+    """README must document the standard /plugin uninstall + /plugin install upgrade flow.
+
+    Users need to know the canonical upgrade path (uninstall + reinstall + fresh session)
+    and must be warned not to use ``claude -c`` after an upgrade.
+    """
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "/plugin uninstall paper-wiki@paper-wiki" in body, (
+        "README must document '/plugin uninstall paper-wiki@paper-wiki' as part of the "
+        "standard upgrade flow"
+    )
+    assert "/plugin install paper-wiki@paper-wiki" in body, (
+        "README must document '/plugin install paper-wiki@paper-wiki' as part of the "
+        "standard upgrade flow"
+    )
+    assert "claude -c" in body, (
+        "README must warn users not to use 'claude -c' after an upgrade — "
+        "SKILL changes only take effect in fresh sessions"
+    )
+
+
+def test_readme_does_not_recommend_manual_cache_nuke() -> None:
+    """README must not tell users to ``rm -rf`` the plugin cache as a normal upgrade step.
+
+    The ``rm -rf`` cache instructions were a workaround for the missing
+    ``"skills"`` declaration in plugin.json (fixed in v0.3.8). They should not
+    appear in user-facing docs as part of the primary upgrade flow.
+    """
+    body = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    # The combination of rm -rf and a cache/paper-wiki path is the red flag.
+    # A bare mention of rm -rf for other purposes (e.g. vault pruning) is fine.
+    import re
+
+    cache_nuke_pattern = re.compile(r"rm\s+-rf.*cache[/\\]paper-wiki", re.IGNORECASE)
+    assert not cache_nuke_pattern.search(body), (
+        "README must not tell users to 'rm -rf' the plugin cache as part of the "
+        "upgrade flow — use '/plugin uninstall' + '/plugin install' instead. "
+        "The rm -rf instructions were a workaround for the missing 'skills' "
+        "declaration in plugin.json (fixed in v0.3.8)."
     )

@@ -9,6 +9,50 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-04-27
+
+### Fixed
+
+- **`.claude-plugin/plugin.json` was missing the `"skills": "./skills/"` declaration**
+  that Claude Code uses to locate SKILL files. Without it, `/plugin install` could
+  leave the metadata in an inconsistent state (cache populated but slash commands
+  unresolvable), leading to the "already installed globally" + "Unknown command" failure
+  mode reported repeatedly during 0.3.5–0.3.7 upgrades. With the declaration in place,
+  the standard `/plugin uninstall paper-wiki@paper-wiki` +
+  `/plugin install paper-wiki@paper-wiki` flow works without any manual cache cleanup.
+
+### Documentation
+
+- **README's upgrade section rewritten** to describe the standard flow:
+  `/plugin uninstall paper-wiki@paper-wiki` + `/plugin install paper-wiki@paper-wiki` +
+  fully exit + start a fresh `claude` session (not `claude -c`). Removed the manual
+  `rm -rf` cache instructions that were workarounds for the bug above.
+- Troubleshooting row for "already installed but Unknown command" updated: the cure is
+  now the standard uninstall + reinstall flow; manual JSON editing is mentioned only as
+  a last-resort fallback.
+
+### Tests
+
+- `test_plugin_manifest_declares_skills_directory` — pins the `"skills"` declaration
+  so future refactors cannot accidentally drop it.
+- `test_readme_documents_standard_upgrade_flow` — asserts README contains the literal
+  `/plugin uninstall` and `/plugin install` commands and the `claude -c` warning.
+- `test_readme_does_not_recommend_manual_cache_nuke` — asserts README does not tell
+  users to `rm -rf` the plugin cache as part of normal upgrades.
+
+### Note
+
+The previous v0.3.5–0.3.7 workarounds (`rm -rf ~/.claude/plugins/cache/paper-wiki/`
+and manual `installed_plugins.json` edits) were diagnostic workarounds for the missing
+`"skills"` declaration — not best practice. Existing users upgrading to 0.3.8 should
+NOT need to nuke; the standard uninstall + reinstall flow above is sufficient.
+
+### Deferred to v0.3.9
+
+- Task 9.4 (per-paper Detailed report synthesis) and Task 9.5 (auto image extraction)
+  were originally planned for v0.3.8 but are pushed to v0.3.9 so this release stays
+  small and focused on the upgrade-UX fix.
+
 ## [0.3.7] - 2026-04-27
 
 ### Added
