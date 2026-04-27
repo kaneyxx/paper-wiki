@@ -165,11 +165,32 @@ class TestRenderObsidianDigest:
         # shows abstracts as collapsible blocks.
         assert "### Abstract" in body
 
-    def test_per_paper_has_detailed_report_wikilink(self) -> None:
-        """Each entry suggests opening the deep-analysis note."""
+    def test_per_paper_has_detailed_report_subheading(self) -> None:
+        """Each entry has a ``### Detailed report`` subheading."""
         body = render_obsidian_digest([_make_recommendation()], _make_ctx())
-        # Pointer at the analyze workflow.
-        assert "/paperwiki:analyze" in body or "Detailed report" in body
+        assert "### Detailed report" in body
+
+    def test_obsidian_reporter_emits_overview_slot_marker(self) -> None:
+        """Digest output contains the machine-targetable overview slot marker."""
+        body = render_obsidian_digest([_make_recommendation()], _make_ctx())
+        assert "<!-- paper-wiki:overview-slot -->" in body
+
+    def test_obsidian_reporter_emits_per_paper_slot_markers(self) -> None:
+        """Each paper section contains a per-paper slot marker with canonical_id."""
+        rec = _make_recommendation(canonical_id="arxiv:2506.13063")
+        body = render_obsidian_digest([rec], _make_ctx())
+        assert "<!-- paper-wiki:per-paper-slot:arxiv:2506.13063 -->" in body
+
+    def test_obsidian_reporter_does_not_emit_legacy_placeholder_prose(self) -> None:
+        """Digest must NOT contain prose stubs that mislead users into thinking
+        a SKILL hasn't run yet."""
+        body = render_obsidian_digest([_make_recommendation()], _make_ctx())
+        assert "Run /paper-wiki:" not in body, (
+            "digest must not emit 'Run /paper-wiki:' prose; use slot markers instead"
+        )
+        assert "fill in the cross-paper synthesis here" not in body, (
+            "digest must not emit old cross-paper synthesis prose stub"
+        )
 
 
 # ---------------------------------------------------------------------------

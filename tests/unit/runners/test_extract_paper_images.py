@@ -132,7 +132,7 @@ class TestExtractPaperImages:
         # extracted file.
         assert "![[arxiv_2506.13063/images/teaser.png" in body
         # Placeholder hint about extract-images is gone.
-        assert "/paperwiki:extract-images arxiv:2506.13063" not in body
+        assert "/paper-wiki:extract-images arxiv:2506.13063" not in body
 
     async def test_preserves_other_sections(self, tmp_path: Path) -> None:
         """Replacing ``## Figures`` must NOT touch ``## Notes`` or anything else."""

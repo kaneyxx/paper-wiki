@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.5"
+    assert data["version"] == "0.3.6"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -187,10 +187,10 @@ def test_slash_command_has_description(cmd_path: Path) -> None:
 
 def test_digest_skill_describes_auto_ingest_top_chaining() -> None:
     """When ``auto_ingest_top`` is set, the digest SKILL must auto-chain
-    ``/paperwiki:wiki-ingest`` for the top-N papers — pin the contract."""
+    ``/paper-wiki:wiki-ingest`` for the top-N papers — pin the contract."""
     body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
     assert "auto_ingest_top" in body, "digest SKILL must reference the auto_ingest_top recipe field"
-    assert "/paperwiki:wiki-ingest" in body, (
+    assert "/paper-wiki:wiki-ingest" in body, (
         "digest SKILL must call out the chained wiki-ingest invocation"
     )
 
@@ -305,10 +305,10 @@ def test_analyze_skill_writes_to_sources_subdir() -> None:
 
 
 def test_analyze_skill_hands_off_to_wiki_ingest() -> None:
-    """After writing the source, analyze must call /paperwiki:wiki-ingest."""
+    """After writing the source, analyze must call /paper-wiki:wiki-ingest."""
     body = (REPO_ROOT / "skills" / "analyze" / "SKILL.md").read_text(encoding="utf-8")
-    assert "/paperwiki:wiki-ingest" in body, (
-        "analyze SKILL must hand off to /paperwiki:wiki-ingest after writing"
+    assert "/paper-wiki:wiki-ingest" in body, (
+        "analyze SKILL must hand off to /paper-wiki:wiki-ingest after writing"
     )
 
 
@@ -363,7 +363,7 @@ def test_bio_search_skill_documents_mcp_dependency_and_fallback() -> None:
     assert "paperclip" in body.lower()
     assert "mcp" in body.lower()
     # Graceful fallback when paperclip MCP isn't registered.
-    assert "docs/paperclip-setup.md" in body or "/paperwiki:setup" in body, (
+    assert "docs/paperclip-setup.md" in body or "/paper-wiki:setup" in body, (
         "bio-search SKILL must point users at setup docs when MCP is missing"
     )
 
@@ -535,4 +535,70 @@ def test_setup_skill_does_not_add_manual_other_or_cancel() -> None:
     assert not cancel_label_pattern.search(body), (
         "setup SKILL must NOT add a manual Cancel option label in AskUserQuestion calls; "
         "Claude Code injects Cancel automatically."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Namespace regression (9.6)
+# ---------------------------------------------------------------------------
+
+
+def test_no_stale_paperwiki_namespace() -> None:
+    """No file in src/, skills/, recipes/, docs/, SPEC.md, or .claude/commands/
+    may contain the legacy ``/paperwiki:`` prefix.
+
+    The correct namespace is ``/paper-wiki:`` (with a hyphen). The stale form
+    fails at runtime because the Claude Code plugin is registered as
+    ``paper-wiki``, not ``paperwiki``.
+
+    CHANGELOG.md is exempt — historical entries describe old reality.
+    tests/test_smoke.py is exempt — this test necessarily references the
+    bad pattern as a literal string.
+    tasks/ is exempt — plan files rewrite the namespace as part of editing
+    history.
+    .claude/worktrees/ is exempt — sandboxed worktrees may have stale state
+    during active development.
+    """
+    import re
+
+    bad_pattern = re.compile(r"/paperwiki:\w+")
+
+    scan_roots = [
+        REPO_ROOT / "src",
+        REPO_ROOT / "skills",
+        REPO_ROOT / "recipes",
+        REPO_ROOT / "docs",
+        REPO_ROOT / "SPEC.md",
+        REPO_ROOT / ".claude" / "commands",
+    ]
+
+    skip_dirs = {".venv", "node_modules", "__pycache__", ".git", "worktrees"}
+
+    hits: list[str] = []
+    for root in scan_roots:
+        paths = [root] if root.is_file() else list(root.rglob("*"))
+
+        for path in paths:
+            # Skip non-files and directories we should not descend into
+            if not path.is_file():
+                continue
+            # Skip any path component that is an excluded dir
+            if any(part in skip_dirs for part in path.parts):
+                continue
+            # Skip this test file itself (it references the bad pattern as a literal)
+            if path.resolve() == Path(__file__).resolve():
+                continue
+
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if bad_pattern.search(line):
+                    hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+
+    assert not hits, (
+        f"Found {len(hits)} stale /paperwiki: reference(s) — use /paper-wiki: instead.\n"
+        + "\n".join(hits)
     )

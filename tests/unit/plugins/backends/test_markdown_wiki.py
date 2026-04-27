@@ -157,7 +157,7 @@ class TestUpsertSource:
 
         body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Key Takeaways block points at wiki-ingest.
-        assert "/paperwiki:wiki-ingest" in body
+        assert "/paper-wiki:wiki-ingest" in body
         # Figures block points at the (forthcoming) extract-images workflow.
         body_lower = body.lower()
         assert "extract" in body_lower
