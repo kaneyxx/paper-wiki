@@ -38,7 +38,14 @@ do not pile up.
    `paperwiki._internal.normalize` helpers if the user gave a URL.
 2. **Run the planner.** Invoke
    `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_ingest_plan
-   <vault> <canonical-id>`. Read the JSON.
+   <vault> <canonical-id>`. **If the user (or upstream digest auto-chain)
+   passed the `--auto-bootstrap` flag, append it to this CLI invocation:**
+   `... <vault> <canonical-id> --auto-bootstrap`. The flag tells the
+   runner to auto-stub any concepts in `suggested_new_concepts` that
+   don't yet exist, BEFORE the affected-concepts loop runs — so a fresh
+   vault doesn't dead-end on paper #1. Read the JSON; with the flag set,
+   it includes a `created_stubs` field listing the freshly-created
+   concept names.
 3. **Honor `source_exists`.** If `source_exists` is `false`, stop and
    ask the user to run `/paper-wiki:analyze <id>` first; ingest cannot
    work without a source file under `Wiki/sources/`.
@@ -50,10 +57,20 @@ do not pile up.
    Persist via
    `MarkdownWikiBackend.upsert_concept(name=..., body=..., sources=[...],
    confidence=..., status="draft")`.
-5. **Optionally bootstrap suggested concepts.** Walk
-   `suggested_concepts`. For each, ask the user whether to create the
-   concept (yes/no/skip-all). If yes, generate a first draft body
-   and call `upsert_concept` with `status="draft"`.
+5. **Optionally bootstrap suggested concepts.** **If you invoked the
+   runner with `--auto-bootstrap` in Step 2 (the digest auto-chain path),
+   SKIP this step entirely** — the runner already wrote stubs for each
+   name in `suggested_new_concepts`, and the Step 4 update loop already
+   folded the source citation into each newly-stubbed concept. Just
+   include the `created_stubs` count in your summary. Do NOT write any
+   inline Python (`<<PYEOF`, `python -c`, etc.) to manually call
+   `MarkdownWikiBackend.upsert_concept` — that is the v0.3.7 black-magic
+   workaround the v0.3.9 runner specifically replaces.
+
+   Otherwise (manual `/paper-wiki:wiki-ingest <id>` invocation, no flag),
+   walk `suggested_concepts` and, for each, ask the user whether to
+   create the concept (yes/no/skip-all). If yes, generate a first draft
+   body and call `upsert_concept` with `status="draft"`.
 6. **Append to `_log.md`.** Add a single line:
    `- <iso8601-utc> wiki-ingest <canonical-id> -> <n> concepts updated`.
 

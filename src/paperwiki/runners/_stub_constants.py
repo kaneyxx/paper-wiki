@@ -8,8 +8,7 @@ never drift.
 from __future__ import annotations
 
 AUTO_CREATED_SENTINEL_BODY = (
-    "_Auto-created during digest auto-ingest. "
-    "Lint with /paper-wiki:wiki-lint to flag for review._"
+    "_Auto-created during digest auto-ingest. Lint with /paper-wiki:wiki-lint to flag for review._"
 )
 
 # Individually-typed constants (preferred — used by runner)

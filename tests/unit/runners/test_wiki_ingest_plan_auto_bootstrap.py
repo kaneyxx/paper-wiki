@@ -78,9 +78,7 @@ class TestAutoBootstrapCreateStubs:
             )
         )
 
-        plan = await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        plan = await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         # Stubs reported
         assert set(plan.created_stubs) == {"vision-multimodal", "diffusion-models"}
@@ -99,9 +97,7 @@ class TestAutoBootstrapCreateStubs:
             _rec("arxiv:0001.0001", "Foundation", matched_topics=["vision-multimodal"])
         )
 
-        await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         stub_path = tmp_path / "Wiki" / "concepts" / "vision-multimodal.md"
         assert stub_path.is_file()
@@ -115,9 +111,7 @@ class TestAutoBootstrapCreateStubs:
             _rec("arxiv:0001.0001", "Foundation", matched_topics=["diffusion-models"])
         )
 
-        await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         stub_path = tmp_path / "Wiki" / "concepts" / "diffusion-models.md"
         content = stub_path.read_text(encoding="utf-8")
@@ -137,9 +131,7 @@ class TestAutoBootstrapThenUpdates:
             _rec("arxiv:0001.0001", "Foundation", matched_topics=["vision-multimodal"])
         )
 
-        plan = await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        plan = await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         # created_stubs AND affected_concepts both list the new concept
         assert "vision-multimodal" in plan.created_stubs
@@ -152,9 +144,7 @@ class TestAutoBootstrapThenUpdates:
             _rec("arxiv:0001.0001", "Foundation", matched_topics=["vision-multimodal"])
         )
 
-        await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         concepts = await backend.list_concepts()
         vision = next((c for c in concepts if "vision-multimodal" in c.title.lower()), None)
@@ -174,9 +164,7 @@ class TestAutoBootstrapThenUpdates:
             )
         )
 
-        plan = await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        plan = await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         assert len(plan.created_stubs) == 2
         assert len(plan.affected_concepts) >= 2
@@ -202,9 +190,7 @@ class TestAutoBootstrapSkipsExisting:
             sources=[],
         )
 
-        plan = await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        plan = await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         # Not created as a stub
         assert "vision-multimodal" not in plan.created_stubs
@@ -226,9 +212,7 @@ class TestAutoBootstrapSkipsExisting:
             sources=[],
         )
 
-        plan = await ingest_runner.plan_ingest(
-            tmp_path, "arxiv:0001.0001", auto_bootstrap=True
-        )
+        plan = await ingest_runner.plan_ingest(tmp_path, "arxiv:0001.0001", auto_bootstrap=True)
 
         # Pre-existing concept appears in affected_concepts (it references source now)
         assert "vision-multimodal" in plan.affected_concepts

@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.10"
+    assert data["version"] == "0.3.11"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -192,6 +192,35 @@ def test_digest_skill_describes_auto_ingest_top_chaining() -> None:
     assert "auto_ingest_top" in body, "digest SKILL must reference the auto_ingest_top recipe field"
     assert "/paper-wiki:wiki-ingest" in body, (
         "digest SKILL must call out the chained wiki-ingest invocation"
+    )
+
+
+def test_wiki_ingest_skill_appends_auto_bootstrap_flag_to_runner_cli() -> None:
+    """When wiki-ingest is invoked with --auto-bootstrap, Step 2 must
+    instruct the LLM to append the flag to the runner CLI invocation —
+    otherwise the flag is dropped between SKILL hop-levels and the
+    runner doesn't bootstrap (regression seen in v0.3.10 smoke)."""
+    body = (REPO_ROOT / "skills" / "wiki-ingest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+    assert "<canonical-id> --auto-bootstrap" in flat, (
+        "wiki-ingest SKILL Step 2 must show the runner CLI with --auto-bootstrap appended"
+    )
+    assert "append it to this CLI invocation" in flat, (
+        "wiki-ingest SKILL Step 2 must explicitly tell the LLM to append the flag"
+    )
+
+
+def test_wiki_ingest_skill_forbids_inline_python_fallback() -> None:
+    """The runner now handles bootstrap natively (v0.3.9). Step 5 must
+    explicitly forbid inline Python (<<PYEOF, python -c) as a manual
+    fallback — that was v0.3.7 black-magic the runner replaces."""
+    body = (REPO_ROOT / "skills" / "wiki-ingest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+    assert "Do NOT write any inline Python" in flat, (
+        "wiki-ingest SKILL must explicitly forbid inline Python fallback in Step 5"
+    )
+    assert "PYEOF" in flat, (
+        "wiki-ingest SKILL must name the specific anti-pattern (<<PYEOF / python -c)"
     )
 
 

@@ -1,0 +1,125 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1777224552671,
+  "projectRoot": "/Users/fangyi/Projects/paper-wiki",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "src",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1777224552662,
+      "keyFiles": [
+        "paperclip-setup.md",
+        "wiki.md"
+      ]
+    },
+    "hooks": {
+      "path": "hooks",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1777224552662,
+      "keyFiles": [
+        "README.md",
+        "ensure-env.sh",
+        "hooks.json"
+      ]
+    },
+    "recipes": {
+      "path": "recipes",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1777224552663,
+      "keyFiles": [
+        "README.md",
+        "biomedical-weekly.yaml",
+        "daily-arxiv.yaml",
+        "sources-only.yaml",
+        "weekly-deep-dive.yaml"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1777224552663,
+      "keyFiles": []
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1777224552664,
+      "keyFiles": []
+    },
+    "tasks": {
+      "path": "tasks",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1777224552664,
+      "keyFiles": [
+        "plan.md",
+        "todo.md"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 2,
+      "lastAccessed": 1777224552664,
+      "keyFiles": [
+        "conftest.py",
+        "test_smoke.py"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

@@ -9,6 +9,33 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-04-27
+
+### Fixed
+
+- **wiki-ingest SKILL now actually invokes the runner with
+  `--auto-bootstrap`** when called by digest auto-chain. v0.3.9 added
+  the flag to the runner; v0.3.10 made digest pass `--auto-bootstrap`
+  in the SKILL prose; but the wiki-ingest SKILL.md Step 2 still showed
+  the runner CLI shape WITHOUT the flag, so the LLM dropped the flag
+  when invoking the runner — falling back to `<<PYEOF python -c ...`
+  inline blocks to manually create stubs (the very black magic v0.3.9
+  was supposed to replace). Step 2 now explicitly says "append
+  `--auto-bootstrap` to the CLI when caller passed the flag", and Step 5
+  explicitly says "if you used `--auto-bootstrap` in Step 2, SKIP this
+  step entirely; do NOT write inline Python".
+- **CI `ruff format --check`**: `_stub_constants.py` and
+  `test_wiki_ingest_plan_auto_bootstrap.py` (added in v0.3.9) failed
+  format check on the v0.3.10 release. Reformatted both files.
+
+### Tests
+
+- `test_wiki_ingest_skill_appends_auto_bootstrap_flag_to_runner_cli`
+  pins Step 2's flag-append pattern.
+- `test_wiki_ingest_skill_forbids_inline_python_fallback` pins Step 5's
+  no-inline-Python contract so the v0.3.7 black-magic regression can't
+  resurface.
+
 ## [0.3.10] - 2026-04-27
 
 ### Fixed
