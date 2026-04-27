@@ -214,7 +214,9 @@ async def _fold_citations(
             continue
         frontmatter, body = await _read_concept(concept_path)
         raw_sources = frontmatter.get("sources")
-        sources: list[str] = [str(s) for s in (raw_sources if isinstance(raw_sources, list) else [])]
+        sources: list[str] = [
+            str(s) for s in (raw_sources if isinstance(raw_sources, list) else [])
+        ]
         if source_id in sources:
             continue  # idempotent — already present, skip
         sources.append(source_id)
