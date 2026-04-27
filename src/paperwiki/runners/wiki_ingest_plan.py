@@ -13,6 +13,16 @@ Returns a JSON ``IngestPlan`` describing:
 * suggested concept names — pulled from the source's ``related_concepts``
   frontmatter — that aren't yet concepts in the wiki.
 
+When ``--auto-bootstrap`` is set, the runner also:
+
+1. Creates a stub file for every suggested-but-missing concept using the
+   sentinel body and frontmatter from ``paperwiki.runners._stub_constants``.
+2. Re-inspects the wiki so the freshly-stubbed concepts appear in
+   ``affected_concepts`` (they now exist and reference the source).
+3. Returns both ``created_stubs`` (new concept names written this run) and
+   ``affected_concepts`` (all concepts that reference the source, including
+   the just-stubbed ones).
+
 The runner does not regenerate any prose. The SKILL reads this plan,
 fetches the source, walks the affected concepts, asks Claude to update
 each one, and writes back through ``MarkdownWikiBackend.upsert_concept``.
@@ -24,15 +34,25 @@ import asyncio
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
+import aiofiles
 import typer
+import yaml
 from loguru import logger
 
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
+from paperwiki.runners._stub_constants import (
+    AUTO_CREATED_CONFIDENCE,
+    AUTO_CREATED_FLAG,
+    AUTO_CREATED_SENTINEL_BODY,
+    AUTO_CREATED_STATUS,
+    AUTO_CREATED_TAGS,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -52,6 +72,7 @@ class IngestPlan:
     source_exists: bool
     affected_concepts: list[str] = field(default_factory=list)
     suggested_concepts: list[str] = field(default_factory=list)
+    created_stubs: list[str] = field(default_factory=list)
 
 
 async def plan_ingest(
@@ -59,8 +80,16 @@ async def plan_ingest(
     source_id: str,
     *,
     wiki_subdir: str = WIKI_SUBDIR,
+    auto_bootstrap: bool = False,
 ) -> IngestPlan:
-    """Inspect the wiki and return the ingest plan for ``source_id``."""
+    """Inspect the wiki and return the ingest plan for ``source_id``.
+
+    When ``auto_bootstrap`` is ``True``, any concept names in
+    ``suggested_concepts`` that do not yet exist on disk are written as
+    stub files before the affected-concept query is re-run. This ensures
+    a fresh vault does not dead-end with an empty ``affected_concepts``
+    list on the first ingest.
+    """
     backend = MarkdownWikiBackend(vault_path=vault_path, wiki_subdir=wiki_subdir)
     sources = await backend.list_sources()
     concepts = await backend.list_concepts()
@@ -76,9 +105,11 @@ async def plan_ingest(
             source_exists=False,
             affected_concepts=affected,
             suggested_concepts=[],
+            created_stubs=[],
         )
 
-    existing_names = {c.title.lower() for c in concepts}
+    existing_by_lower: dict[str, str] = {c.title.lower(): c.title for c in concepts}
+    existing_names = set(existing_by_lower)
     suggested: list[str] = []
     seen: set[str] = set()
     for raw in source.related_concepts:
@@ -91,12 +122,110 @@ async def plan_ingest(
         seen.add(key)
         suggested.append(clean)
 
+    created_stubs: list[str] = []
+
+    if auto_bootstrap:
+        # Compute all concept names the source hints at, whether or not
+        # they already exist on disk.
+        all_hinted: list[str] = []
+        seen_all: set[str] = set()
+        for raw in source.related_concepts:
+            clean = _extract_wikilink_target(raw)
+            if not clean:
+                continue
+            key = clean.lower()
+            if key in seen_all:
+                continue
+            seen_all.add(key)
+            all_hinted.append(clean)
+
+        # Concepts in all_hinted that do NOT yet exist → stub them.
+        missing = [n for n in all_hinted if n.lower() not in existing_names]
+
+        if missing:
+            created_stubs = await _bootstrap_missing_concepts(
+                backend=backend,
+                concept_names=missing,
+                source_id=source_id,
+            )
+
+        # Re-query so freshly-stubbed concepts appear in affected.
+        concepts = await backend.list_concepts()
+        affected = [c.title for c in concepts if source_id in c.sources]
+
+        # Also include pre-existing hinted concepts that don't yet cite
+        # the source — the SKILL's update loop will fold the citation in.
+        hinted_lower = {n.lower() for n in all_hinted}
+        affected_set = set(affected)
+        for concept in concepts:
+            if (
+                concept.title.lower() in hinted_lower
+                and source_id not in concept.sources
+                and concept.title not in affected_set
+            ):
+                affected.append(concept.title)
+                affected_set.add(concept.title)
+
     return IngestPlan(
         source_id=source_id,
         source_exists=True,
         affected_concepts=sorted(affected),
         suggested_concepts=suggested,
+        created_stubs=created_stubs,
     )
+
+
+async def _bootstrap_missing_concepts(
+    *,
+    backend: MarkdownWikiBackend,
+    concept_names: list[str],
+    source_id: str,
+) -> list[str]:
+    """Write stub files for each name in ``concept_names``.
+
+    Returns the list of names that were actually written (skips any that
+    already exist on disk, which should not happen in practice since the
+    caller filters by existing_names, but guards against races).
+    """
+    created: list[str] = []
+    for name in concept_names:
+        concept_path = backend._concept_path(name)
+        if concept_path.exists():
+            continue
+        concept_path.parent.mkdir(parents=True, exist_ok=True)
+        frontmatter: dict[str, object] = {
+            "title": name,
+            "status": AUTO_CREATED_STATUS,
+            "confidence": round(AUTO_CREATED_CONFIDENCE, 4),
+            "sources": [source_id],
+            "related_concepts": [],
+            "auto_created": AUTO_CREATED_FLAG,
+            "tags": list(AUTO_CREATED_TAGS),
+            "last_synthesized": _today_utc(),
+        }
+        rendered = (
+            "---\n"
+            + yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)
+            + "---\n\n"
+            + AUTO_CREATED_SENTINEL_BODY
+            + "\n"
+        )
+        async with aiofiles.open(concept_path, "w", encoding="utf-8") as fh:
+            await fh.write(rendered)
+
+        created.append(name)
+        logger.debug(
+            "wiki_ingest_plan.stub_created",
+            concept=name,
+            source_id=source_id,
+        )
+
+    return created
+
+
+def _today_utc() -> str:
+    """Return today's UTC date as ``YYYY-MM-DD``."""
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _extract_wikilink_target(value: str) -> str:
@@ -115,10 +244,21 @@ def _extract_wikilink_target(value: str) -> str:
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     source_id: Annotated[str, typer.Argument(help="Canonical id, e.g. arxiv:2506.13063")],
+    auto_bootstrap: Annotated[
+        bool,
+        typer.Option(
+            "--auto-bootstrap/--no-auto-bootstrap",
+            help=(
+                "When set, auto-create stub concept files for every suggested-but-missing "
+                "concept before the update loop runs. For use by the digest auto-chain only; "
+                "do not pass for interactive /paper-wiki:wiki-ingest invocations."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run the ingest plan and emit JSON on stdout."""
     try:
-        plan = asyncio.run(plan_ingest(vault, source_id))
+        plan = asyncio.run(plan_ingest(vault, source_id, auto_bootstrap=auto_bootstrap))
     except PaperWikiError as exc:
         logger.error("wiki_ingest_plan.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc

@@ -9,6 +9,49 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-04-27
+
+### Fixed
+
+- **`wiki-ingest` runner now actually accepts `--auto-bootstrap`** as advertised by the
+  SKILL since v0.3.7. Previously the runner ignored the flag entirely; the SKILL fell back
+  to writing inline Python (`asyncio.run(MarkdownWikiBackend.upsert_concept(...))` blocks)
+  to manually create stubs, which was fragile and bypassed runner architecture per SPEC §6.
+  Auto-chained digest invocations now go through the proper runner path.
+
+### Added
+
+- **`paperwiki.runners._stub_constants` module** exposes `AUTO_CREATED_SENTINEL_BODY` and
+  `AUTO_CREATED_FRONTMATTER_FIELDS` as a single source of truth — wiki-ingest writes them,
+  future wiki-lint changes (Task 9.12) will detect them, no string-literal drift possible.
+
+### Changed
+
+- **`skills/wiki-ingest/SKILL.md`** Process simplified: the runner now handles
+  `--auto-bootstrap` directly. No inline-Python fallback fragments required.
+- **`skills/digest/SKILL.md`** Step 8 (auto-chain wiki-ingest): the chained command
+  invokes the runner directly with `--auto-bootstrap`; no `<<PY ... PY>>` blocks.
+
+### Tests
+
+- `test_wiki_ingest_plan_auto_bootstrap_creates_stubs_for_missing_concepts` — with empty
+  `Wiki/concepts/`, invoking the runner with `auto_bootstrap=True` for a source that
+  suggests N concepts creates N stub files, each with `auto_created: true` frontmatter and
+  the sentinel body.
+- `test_wiki_ingest_plan_auto_bootstrap_then_updates_concepts` — after stubs are created,
+  the update loop folds the source's `canonical_id` into each stub's `sources:` list;
+  output plan has both `created_stubs` and `affected_concepts` populated.
+- `test_wiki_ingest_plan_auto_bootstrap_skips_existing_concepts` — pre-existing concept
+  (without `auto_created`) is NOT given `auto_created: true`; user content preserved.
+- `test_wiki_ingest_plan_without_auto_bootstrap_preserves_existing_safeguard` — without
+  the flag, fresh vault returns `affected_concepts: []`, `suggested_concepts: [...]`, no
+  files created.
+- `test_stub_constants_module_exposes_sentinel_and_frontmatter` — asserts the constants
+  module exists and exposes both `AUTO_CREATED_SENTINEL_BODY` and
+  `AUTO_CREATED_FRONTMATTER_FIELDS`.
+- `test_wiki_ingest_runner_accepts_auto_bootstrap_flag` — `python -m
+  paperwiki.runners.wiki_ingest_plan --help` shows `--auto-bootstrap` in help text.
+
 ## [0.3.8] - 2026-04-27
 
 ### Fixed
