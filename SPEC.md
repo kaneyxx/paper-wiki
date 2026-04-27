@@ -63,7 +63,7 @@ self-installs into a private virtualenv on first session via the
 
 ### Success looks like
 
-A user opens Claude Code, types `/paperwiki:digest`, and within ~60
+A user opens Claude Code, types `/paper-wiki:digest`, and within ~60
 seconds gets a curated Markdown digest written into their vault — with
 no duplicates against earlier digests or existing notes — produced by
 SKILLs that compose pipeline plugins under the hood, all in English by
@@ -80,11 +80,11 @@ is a thin wrapper that activates one or more SKILLs.
 
 | Command | Purpose |
 |---------|---------|
-| `/paperwiki:digest` | Build a research digest using a recipe |
-| `/paperwiki:analyze` | Deep-analyze a single paper into a wiki entry |
-| `/paperwiki:wiki-update` | Re-index the wiki, surface stale entries, suggest cross-links |
-| `/paperwiki:wiki-query` | Keyword query across the wiki |
-| `/paperwiki:setup` | First-run setup helper (env check, vault path, recipe selection) |
+| `/paper-wiki:digest` | Build a research digest using a recipe |
+| `/paper-wiki:analyze` | Deep-analyze a single paper into a wiki entry |
+| `/paper-wiki:wiki-update` | Re-index the wiki, surface stale entries, suggest cross-links |
+| `/paper-wiki:wiki-query` | Keyword query across the wiki |
+| `/paper-wiki:setup` | First-run setup helper (env check, vault path, recipe selection) |
 
 Slash commands are kebab-case under the `paperwiki:` namespace to avoid
 collisions with other plugins.
@@ -97,11 +97,11 @@ SKILL may also be invoked explicitly by a slash command.
 
 | SKILL | Activates when |
 |-------|----------------|
-| `digest` | User says "build today's digest", or `/paperwiki:digest` |
-| `analyze` | User says "analyze this paper", or `/paperwiki:analyze` |
-| `wiki-update` | User says "refresh the wiki", or `/paperwiki:wiki-update` |
-| `wiki-query` | User says "search my wiki", or `/paperwiki:wiki-query` |
-| `setup` | First session detected, or `/paperwiki:setup` |
+| `digest` | User says "build today's digest", or `/paper-wiki:digest` |
+| `analyze` | User says "analyze this paper", or `/paper-wiki:analyze` |
+| `wiki-update` | User says "refresh the wiki", or `/paper-wiki:wiki-update` |
+| `wiki-query` | User says "search my wiki", or `/paper-wiki:wiki-query` |
+| `setup` | First session detected, or `/paper-wiki:setup` |
 | `paper-source-author` | User asks "how do I add a new source plugin?" |
 
 ### Internal Python entry points (called by SKILLs, not by users)

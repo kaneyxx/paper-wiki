@@ -1,6 +1,6 @@
 ---
 name: wiki-query
-description: Answers a research question by searching the wiki and synthesizing an answer with citations. Use when /paperwiki:wiki-query is invoked, when the user asks "what does my wiki say about X", or when the user wants a literature-aware answer drawn from previously-ingested sources.
+description: Answers a research question by searching the wiki and synthesizing an answer with citations. Use when /paper-wiki:wiki-query is invoked, when the user asks "what does my wiki say about X", or when the user wants a literature-aware answer drawn from previously-ingested sources.
 ---
 
 # paper-wiki Wiki Query
@@ -18,7 +18,7 @@ reason the user has been ingesting papers at all.
 
 ## When to Use
 
-- The user types `/paperwiki:wiki-query <question>`.
+- The user types `/paper-wiki:wiki-query <question>`.
 - The user asks any natural-language research question that the wiki
   might answer ("what foundation models cover pathology?", "summarize
   what I know about CIC mutations").
@@ -27,7 +27,7 @@ reason the user has been ingesting papers at all.
 **Do not use** when the user wants to add knowledge (route to
 `wiki-ingest`) or check wiki health (route to `wiki-lint`). Do not
 use as a general-purpose search engine for things that aren't in the
-wiki — say so honestly and suggest `/paperwiki:digest` to ingest more
+wiki — say so honestly and suggest `/paper-wiki:digest` to ingest more
 sources first.
 
 ## Process

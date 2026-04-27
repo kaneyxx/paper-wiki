@@ -1,6 +1,6 @@
 ---
 name: extract-images
-description: Pulls real paper figures from arXiv source tarballs and embeds them in the source's Wiki/sources/<id>.md file. Use when the user invokes /paperwiki:extract-images, asks to "show me the figures from <paper>", "pull the architecture diagram", "extract images from <id>", or follows up on a digest entry that has an empty Figures section.
+description: Pulls real paper figures from arXiv source tarballs and embeds them in the source's Wiki/sources/<id>.md file. Use when the user invokes /paper-wiki:extract-images, asks to "show me the figures from <paper>", "pull the architecture diagram", "extract images from <id>", or follows up on a digest entry that has an empty Figures section.
 ---
 
 # paper-wiki Extract Images
@@ -16,12 +16,12 @@ Obsidian wikilink-with-width syntax.
 
 This SKILL is the visual half of the per-paper note story. The text
 half (frontmatter + Core Information + Abstract + Key Takeaways +
-Notes) is filled by `/paperwiki:digest`, `/paperwiki:analyze`, and
-`/paperwiki:wiki-ingest`.
+Notes) is filled by `/paper-wiki:digest`, `/paper-wiki:analyze`, and
+`/paper-wiki:wiki-ingest`.
 
 ## When to Use
 
-- The user types `/paperwiki:extract-images <canonical-id>`.
+- The user types `/paper-wiki:extract-images <canonical-id>`.
 - The user says "show me the figures for <paper>", "pull the
   architecture diagram from <id>", "what does the method look like".
 - The user is reviewing a fresh digest and wants the figures from a
@@ -45,7 +45,7 @@ one). Surface that to the user instead of running the runner.
 3. **Surface the result.** Confirm `image_count` to the user. If
    `image_count == 0`, tell them the paper is probably PDF-only on
    arXiv (legitimate, no failure) and offer next steps:
-   `/paperwiki:analyze` for a Claude-written deep dive based on the
+   `/paper-wiki:analyze` for a Claude-written deep dive based on the
    abstract, or download the PDF themselves.
 4. **Optionally preview.** If the user asks "show me the teaser" or
    similar, render one or two of the embedded figures in a chat
@@ -53,7 +53,7 @@ one). Surface that to the user instead of running the runner.
    capability so this is just the wikilink, not actual image
    rendering.
 5. **Hand off to wiki-ingest.** Suggest the user run
-   `/paperwiki:wiki-ingest <id>` next so the freshly imaged source
+   `/paper-wiki:wiki-ingest <id>` next so the freshly imaged source
    folds into concept articles with the figure references intact.
 
 ## Common Rationalizations
@@ -71,8 +71,8 @@ one). Surface that to the user instead of running the runner.
   arXiv source URL. Surface this and offer alternatives instead of
   running the runner.
 - `Wiki/sources/<id>.md` doesn't exist — the runner errors with
-  `UserError`. Tell the user to run `/paperwiki:digest` or
-  `/paperwiki:analyze` first to create the source stub.
+  `UserError`. Tell the user to run `/paper-wiki:digest` or
+  `/paper-wiki:analyze` first to create the source stub.
 - `image_count` is suspiciously high (> 30) — usually means the
   source bundle has glyph rasters or figure subsets we accidentally
   caught. Eyeball the list before suggesting wiki-ingest.

@@ -18,9 +18,9 @@ yourself.
 
 After surfacing the hits, offer to:
 
-- analyze a specific result via `/paperwiki:analyze`
+- analyze a specific result via `/paper-wiki:analyze`
 - save selected results as `Wiki/sources/<id>.md` files (and chain to
-  `/paperwiki:wiki-ingest` so concepts stay current)
+  `/paper-wiki:wiki-ingest` so concepts stay current)
 - refine the search
 
 Do not paraphrase abstracts — show the paperclip output verbatim so

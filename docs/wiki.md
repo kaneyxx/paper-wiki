@@ -26,7 +26,7 @@ under `Wiki/sources/<canonical-id>.md` are the per-paper summaries
 written by the analyze SKILL or the digest reporter when
 `wiki_backend: true` is set. Concepts under `Wiki/concepts/<name>.md`
 are the synthesized topic articles Claude writes during
-`/paperwiki:wiki-ingest`.
+`/paper-wiki:wiki-ingest`.
 
 ## Frontmatter convention
 
@@ -65,7 +65,7 @@ The dedup filter and `wiki_lint` rely on these fields.
                        SOURCES
                           │
                           ▼
-       ┌───── /paperwiki:wiki-ingest ─────┐
+       ┌───── /paper-wiki:wiki-ingest ─────┐
        │                                  │
        │   plan affected concepts         │
        │   regenerate prose via Claude    │
@@ -73,16 +73,16 @@ The dedup filter and `wiki_lint` rely on these fields.
        │                                  │
        └──────────────┬───────────────────┘
                       ▼
-                 CONCEPTS  ◄────── /paperwiki:wiki-query
+                 CONCEPTS  ◄────── /paper-wiki:wiki-query
                       │
                       ▼
-       /paperwiki:wiki-compile (rebuild index.md)
+       /paper-wiki:wiki-compile (rebuild index.md)
                       │
                       ▼
                   index.md
                       │
                       ▼
-       /paperwiki:wiki-lint (orphans, stale, broken links)
+       /paper-wiki:wiki-lint (orphans, stale, broken links)
 ```
 
 ### `paperwiki:wiki-ingest`

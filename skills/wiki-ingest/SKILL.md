@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Ingests a new source paper into the wiki by regenerating affected concept articles. Use when /paperwiki:wiki-ingest is invoked, when a fresh source lands in Wiki/sources/ via analyze or digest, or when the user says "fold this paper into the wiki" or "update the wiki with X".
+description: Ingests a new source paper into the wiki by regenerating affected concept articles. Use when /paper-wiki:wiki-ingest is invoked, when a fresh source lands in Wiki/sources/ via analyze or digest, or when the user says "fold this paper into the wiki" or "update the wiki with X".
 ---
 
 # paper-wiki Wiki Ingest
@@ -20,7 +20,7 @@ do not pile up.
 
 ## When to Use
 
-- The user types `/paperwiki:wiki-ingest <canonical-id>`.
+- The user types `/paper-wiki:wiki-ingest <canonical-id>`.
 - The `analyze` SKILL has just written a new file under `Sources/` and
   passes control here.
 - The `digest` reporter ran with `wiki_backend: true` and dropped new
@@ -40,7 +40,7 @@ do not pile up.
    `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_ingest_plan
    <vault> <canonical-id>`. Read the JSON.
 3. **Honor `source_exists`.** If `source_exists` is `false`, stop and
-   ask the user to run `/paperwiki:analyze <id>` first; ingest cannot
+   ask the user to run `/paper-wiki:analyze <id>` first; ingest cannot
    work without a source file under `Wiki/sources/`.
 4. **Update affected concepts.** For each name in `affected_concepts`:
    read the existing concept body, fetch the new source's content,
@@ -87,5 +87,5 @@ do not pile up.
 - Each affected concept's `sources` list contains the ingested
   canonical id at most once.
 - `_log.md` gains exactly one new line.
-- `/paperwiki:wiki-lint` shows no `BROKEN_LINK` findings introduced
+- `/paper-wiki:wiki-lint` shows no `BROKEN_LINK` findings introduced
   by the new prose.

@@ -1,6 +1,6 @@
 ---
 name: wiki-lint
-description: Runs a health check on the wiki and surfaces orphans, stale entries, oversized files, broken wikilinks, and status mismatches. Use when /paperwiki:wiki-lint is invoked, before a release of the wiki to others, or periodically to keep concept articles trustworthy.
+description: Runs a health check on the wiki and surfaces orphans, stale entries, oversized files, broken wikilinks, and status mismatches. Use when /paper-wiki:wiki-lint is invoked, before a release of the wiki to others, or periodically to keep concept articles trustworthy.
 ---
 
 # paper-wiki Wiki Lint
@@ -19,7 +19,7 @@ proposed fix.
 
 ## When to Use
 
-- The user types `/paperwiki:wiki-lint`.
+- The user types `/paper-wiki:wiki-lint`.
 - After a batch ingest (3+ sources in a session) — periodic health
   check catches drift early.
 - Before the user shares the wiki externally or commits changes.

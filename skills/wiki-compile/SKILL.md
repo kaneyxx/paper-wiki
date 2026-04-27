@@ -1,6 +1,6 @@
 ---
 name: wiki-compile
-description: Rebuilds Wiki/index.md deterministically from current concept and source articles. Use when /paperwiki:wiki-compile is invoked, after a wiki-ingest run, before sharing the wiki, or whenever the user wants the index refreshed.
+description: Rebuilds Wiki/index.md deterministically from current concept and source articles. Use when /paper-wiki:wiki-compile is invoked, after a wiki-ingest run, before sharing the wiki, or whenever the user wants the index refreshed.
 ---
 
 # paper-wiki Wiki Compile
@@ -19,7 +19,7 @@ churning on every run.
 
 ## When to Use
 
-- The user types `/paperwiki:wiki-compile`.
+- The user types `/paper-wiki:wiki-compile`.
 - Right after a `wiki-ingest` run, so the index reflects new concepts
   and sources.
 - Before the user shares the wiki externally.

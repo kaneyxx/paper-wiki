@@ -11,7 +11,7 @@
 #
 # This recipe demonstrates the wiki_backend handoff: each top-K paper
 # lands as a `Wiki/sources/<id>.md` file alongside the daily digest, so
-# /paperwiki:wiki-ingest can fold it straight into your concept
+# /paper-wiki:wiki-ingest can fold it straight into your concept
 # articles.
 
 name: biomedical-weekly
@@ -75,7 +75,7 @@ reporters:
     config:
       vault_path: ~/Documents/Obsidian-Vault
       daily_subdir: Daily
-      # Drop top-K hits into Wiki/sources/ so /paperwiki:wiki-ingest
+      # Drop top-K hits into Wiki/sources/ so /paper-wiki:wiki-ingest
       # can fold them into concept articles. Recommended for the
       # weekly cadence — 10 sources/week is comfortable to ingest.
       wiki_backend: true

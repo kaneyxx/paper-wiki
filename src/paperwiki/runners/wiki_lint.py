@@ -117,7 +117,7 @@ async def lint_wiki(
                     path=str(source.path.relative_to(vault_path)),
                     message=(
                         f"Source {source.canonical_id!r} isn't referenced by any "
-                        "concept; run /paperwiki:wiki-ingest to fold it in."
+                        "concept; run /paper-wiki:wiki-ingest to fold it in."
                     ),
                 )
             )

@@ -104,7 +104,7 @@ def _render_index(
     parts.append(
         "# Wiki Index\n\n"
         "_Auto-generated. Edit at your own risk; "
-        "`/paperwiki:wiki-compile` overwrites this file._\n"
+        "`/paper-wiki:wiki-compile` overwrites this file._\n"
     )
 
     if concepts:

@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Deep-analyzes a single paper into a wiki entry. Use when the user invokes /paperwiki:analyze, asks "tell me more about <paper>", wants a per-paper breakdown of methods and contributions, or is following up on a recommendation from /paperwiki:digest.
+description: Deep-analyzes a single paper into a wiki entry. Use when the user invokes /paper-wiki:analyze, asks "tell me more about <paper>", wants a per-paper breakdown of methods and contributions, or is following up on a recommendation from /paper-wiki:digest.
 ---
 
 # paper-wiki Analyze
@@ -22,8 +22,8 @@ have a durable note about it in my vault".
 
 ## When to Use
 
-- The user types `/paperwiki:analyze <id-or-title>` or
-  `/paperwiki:analyze` after picking a paper from a digest.
+- The user types `/paper-wiki:analyze <id-or-title>` or
+  `/paper-wiki:analyze` after picking a paper from a digest.
 - The user says "analyze this paper", "summarize <title>", "give me
   a deep dive on <paper>".
 - The user asks for "the methods" or "the contributions" of a specific
@@ -54,7 +54,7 @@ overviews or topic surveys (no SKILL covers that yet).
    PARA users may override the subdir name in their recipe; the
    constant is the single source of truth.
 6. **Hand off to wiki-ingest.** Immediately invoke
-   `/paperwiki:wiki-ingest <canonical-id>` so the new source is
+   `/paper-wiki:wiki-ingest <canonical-id>` so the new source is
    folded into the user's concept articles. Skipping this step
    leaves a `DANGLING_SOURCE` finding the next time `wiki-lint`
    runs.
@@ -84,9 +84,9 @@ overviews or topic surveys (no SKILL covers that yet).
   `SOURCES_SUBDIR` is configured to in the active recipe).
 - Frontmatter parses as YAML and contains at least `canonical_id`,
   `title`, `tags`, `status`, and `confidence`.
-- `/paperwiki:wiki-ingest` ran on the new canonical id and reported
+- `/paper-wiki:wiki-ingest` ran on the new canonical id and reported
   zero `BROKEN_LINK` findings.
-- `/paperwiki:wiki-lint` does not flag the new source with
+- `/paper-wiki:wiki-lint` does not flag the new source with
   `DANGLING_SOURCE` (a concept now references it).
-- The next `/paperwiki:digest` run dedupes the analyzed paper out of
+- The next `/paper-wiki:digest` run dedupes the analyzed paper out of
   recommendations (it should not surface again).

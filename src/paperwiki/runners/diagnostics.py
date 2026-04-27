@@ -86,7 +86,7 @@ def build_report() -> DiagnosticsReport:
     config_path = _resolve_config_path()
     config_exists = config_path.is_file()
     if not config_exists:
-        issues.append(f"config not found at {config_path}; run /paperwiki:setup to create one.")
+        issues.append(f"config not found at {config_path}; run /paper-wiki:setup to create one.")
 
     bundled_recipes = (
         sorted(p.name for p in _RECIPES_DIR.glob("*.yaml")) if _RECIPES_DIR.is_dir() else []

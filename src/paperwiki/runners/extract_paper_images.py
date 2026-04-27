@@ -107,8 +107,8 @@ async def extract_paper_images(
             relative = source_path
         msg = (
             f"extract_paper_images: source file not found at "
-            f"Wiki/sources/{relative.name}. Run `/paperwiki:digest` or "
-            "`/paperwiki:analyze` first to create it."
+            f"Wiki/sources/{relative.name}. Run `/paper-wiki:digest` or "
+            "`/paper-wiki:analyze` first to create it."
         )
         raise UserError(msg)
 

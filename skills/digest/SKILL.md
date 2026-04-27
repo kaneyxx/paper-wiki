@@ -1,6 +1,6 @@
 ---
 name: digest
-description: Builds a research-paper digest from a recipe, writing it to disk via the configured reporters. Use when the user asks for "today's papers", invokes /paperwiki:digest, requests a daily/weekly research roundup, or wants to refresh their paper-wiki vault.
+description: Builds a research-paper digest from a recipe, writing it to disk via the configured reporters. Use when the user asks for "today's papers", invokes /paper-wiki:digest, requests a daily/weekly research roundup, or wants to refresh their paper-wiki vault.
 ---
 
 # paper-wiki Digest
@@ -18,7 +18,7 @@ plugin builds on the same recipe + pipeline foundation.
 
 ## When to Use
 
-- The user types `/paperwiki:digest` or `/paperwiki:digest <recipe>`.
+- The user types `/paper-wiki:digest` or `/paper-wiki:digest <recipe>`.
 - The user asks for "today's papers", "this week's papers", "what
   should I read today", or any phrasing of "give me a research digest".
 - The user wants to refresh their daily Obsidian note with newly
@@ -42,7 +42,7 @@ to `paperwiki:setup`.
    Default ``<name>`` is ``daily``. If the user said "weekly", default
    to ``weekly-deep-dive``; if "biomedical" / "bio", default to
    ``biomedical-weekly``. Confirm the resolved path exists; if not,
-   surface a clear error and offer to run ``/paperwiki:setup``.
+   surface a clear error and offer to run ``/paper-wiki:setup``.
 2. **Source secrets if present.** If
    ``~/.config/paper-wiki/secrets.env`` exists, source it (or ``export``
    each ``KEY=value`` line) before the runner so any
@@ -66,7 +66,7 @@ to `paperwiki:setup`.
 7. **Auto-chain wiki-ingest when configured.** Read the recipe's
    `auto_ingest_top` field. If `> 0`, take the top
    `min(auto_ingest_top, top_k)` papers from the digest and chain
-   `/paperwiki:wiki-ingest <canonical-id>` for each, in score order.
+   `/paper-wiki:wiki-ingest <canonical-id>` for each, in score order.
    The wiki-ingest SKILL handles its own idempotence (no-op when a
    source is already folded into all relevant concepts), so safe to
    run on every digest. Surface the per-paper outcome briefly to the
@@ -74,9 +74,9 @@ to `paperwiki:setup`.
    suggested 1 new concept" rather than a silent block of activity.
    When `auto_ingest_top` is `0` (the default), skip this step.
 8. **Suggest a follow-up.** If the user has not configured a vault,
-   suggest `/paperwiki:setup`. If a paper looks interesting and was
-   not auto-ingested, suggest `/paperwiki:analyze <paper-id>` for a
-   deeper dive or `/paperwiki:wiki-ingest <paper-id>` to fold it
+   suggest `/paper-wiki:setup`. If a paper looks interesting and was
+   not auto-ingested, suggest `/paper-wiki:analyze <paper-id>` for a
+   deeper dive or `/paper-wiki:wiki-ingest <paper-id>` to fold it
    into concept articles.
 
 ## Common Rationalizations

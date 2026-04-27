@@ -12,10 +12,10 @@ URLs and must be handled separately.
 Run
 `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.extract_paper_images
 <vault> <canonical-id>` and surface the JSON result. If
-`image_count > 0`, point the user at `/paperwiki:wiki-ingest` to fold
+`image_count > 0`, point the user at `/paper-wiki:wiki-ingest` to fold
 the now-illustrated source into concept articles. If
 `image_count == 0`, tell the user the paper is PDF-only on arXiv
-(legitimate, not a failure) and offer `/paperwiki:analyze` as the
+(legitimate, not a failure) and offer `/paper-wiki:analyze` as the
 text-only fallback.
 
 Do NOT manually edit the `## Figures` section — the runner owns it

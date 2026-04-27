@@ -273,7 +273,7 @@ class MarkdownWikiBackend:
 
         The five sections are stable so SKILLs (analyze, wiki-ingest,
         extract-images) can target them deterministically. Empty
-        sections include "(Run /paperwiki:<skill>)" hints so users know
+        sections include "(Run /paper-wiki:<skill>)" hints so users know
         what fills them.
         """
         paper = rec.paper
@@ -310,13 +310,13 @@ class MarkdownWikiBackend:
             "\n"
             "## Key Takeaways\n"
             "\n"
-            "_Run `/paperwiki:wiki-ingest "
+            "_Run `/paper-wiki:wiki-ingest "
             f"{paper.canonical_id}` to fold this paper into concept articles "
             "and replace this placeholder with synthesized takeaways._\n"
             "\n"
             "## Figures\n"
             "\n"
-            "_Run `/paperwiki:extract-images "
+            "_Run `/paper-wiki:extract-images "
             f"{paper.canonical_id}` to download the arXiv source tarball "
             "and embed real paper figures here._\n"
             "\n"

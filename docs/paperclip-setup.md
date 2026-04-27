@@ -62,7 +62,7 @@ Verify the registration:
 claude mcp list
 ```
 
-You should see `paperclip` listed. paper-wiki's `/paperwiki:setup`
+You should see `paperclip` listed. paper-wiki's `/paper-wiki:setup`
 SKILL surfaces this state via `paperwiki.runners.diagnostics`.
 
 > **Important**: paper-wiki's setup SKILL **never auto-runs**
@@ -75,7 +75,7 @@ After registration, the bio-search SKILL becomes available
 (Phase 7.3, shipping in v0.3.0):
 
 ```
-/paperwiki:bio-search "vision-language foundation models in pathology"
+/paper-wiki:bio-search "vision-language foundation models in pathology"
 ```
 
 If paperclip MCP is missing, the SKILL surfaces an actionable error
@@ -87,7 +87,7 @@ pointing back at this document — paper-wiki itself stays usable.
 claude mcp remove paperclip
 ```
 
-paper-wiki notices the absence on the next `/paperwiki:setup` run and
+paper-wiki notices the absence on the next `/paper-wiki:setup` run and
 silently drops paperclip from its capabilities list. No state cleanup
 needed on paper-wiki's side.
 

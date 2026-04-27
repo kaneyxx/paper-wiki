@@ -1,6 +1,6 @@
 ---
 name: migrate-sources
-description: Upgrades existing Wiki/sources/<id>.md files to the current source-stub format while preserving user-edited content in Notes / Key Takeaways / Figures sections. Use when /paperwiki:migrate-sources is invoked, after upgrading paper-wiki to a new minor version, when wiki-lint surfaces stale-format warnings, or when the user notices their old source files lack the Core Information / Key Takeaways / Figures section structure.
+description: Upgrades existing Wiki/sources/<id>.md files to the current source-stub format while preserving user-edited content in Notes / Key Takeaways / Figures sections. Use when /paper-wiki:migrate-sources is invoked, after upgrading paper-wiki to a new minor version, when wiki-lint surfaces stale-format warnings, or when the user notices their old source files lack the Core Information / Key Takeaways / Figures section structure.
 ---
 
 # paper-wiki Migrate Sources
@@ -22,7 +22,7 @@ current format are skipped (no-op).
 
 ## When to Use
 
-- The user types ``/paperwiki:migrate-sources``.
+- The user types ``/paper-wiki:migrate-sources``.
 - The user just upgraded paper-wiki and notices old digest entries
   look "ugly" or "different" from new ones.
 - ``wiki-lint`` reports a STALE_FORMAT-like finding (currently a
@@ -47,8 +47,8 @@ touched — they already have a different schema).
 3. **Run the migration.** Drop ``--dry-run`` and re-invoke the
    runner. Surface the final report.
 4. **Suggest follow-up.** Once migration is done, suggest the user
-   re-run ``/paperwiki:wiki-lint`` to confirm the upgraded files
-   pass health checks, and ``/paperwiki:wiki-compile`` to refresh
+   re-run ``/paper-wiki:wiki-lint`` to confirm the upgraded files
+   pass health checks, and ``/paper-wiki:wiki-compile`` to refresh
    the index.
 
 ## Common Rationalizations
@@ -64,7 +64,7 @@ touched — they already have a different schema).
 
 - The runner reports ``checked == 0`` — the vault has no
   ``Wiki/sources/*.md`` files. The user probably hasn't run
-  ``/paperwiki:digest`` yet; route them there.
+  ``/paper-wiki:digest`` yet; route them there.
 - An unfamiliar file appears in ``migrated_paths`` (e.g., something
   the user manually wrote with a custom schema) — pause and let the
   user inspect before rewriting.
@@ -83,5 +83,5 @@ touched — they already have a different schema).
 - For any file that previously had user content in ``## Notes``,
   ``## Key Takeaways``, or ``## Figures``, that content survives
   verbatim under the same heading after migration.
-- ``/paperwiki:wiki-lint`` still passes (no new ``BROKEN_LINK``s
+- ``/paper-wiki:wiki-lint`` still passes (no new ``BROKEN_LINK``s
   from the rewrite).

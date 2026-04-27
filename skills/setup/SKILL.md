@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Interactive first-run wizard. Verifies paper-wiki's Python environment, walks the user through five questions to build their personal recipe (vault path, topics, S2 API key, auto-ingest preference), writes the config files, and surfaces optional MCP servers. Use when the user invokes /paperwiki:setup, when no personal recipe exists yet at ~/.config/paper-wiki/recipes/, or when downstream paperwiki SKILLs report missing config.
+description: Interactive first-run wizard. Verifies paper-wiki's Python environment, walks the user through five questions to build their personal recipe (vault path, topics, S2 API key, auto-ingest preference), writes the config files, and surfaces optional MCP servers. Use when the user invokes /paper-wiki:setup, when no personal recipe exists yet at ~/.config/paper-wiki/recipes/, or when downstream paperwiki SKILLs report missing config.
 ---
 
 # paper-wiki Setup
@@ -18,14 +18,14 @@ Setup is the first-run onboarding wizard. It does three things:
    - `~/.config/paper-wiki/recipes/daily.yaml` — the personal recipe
    - `~/.config/paper-wiki/secrets.env` — the API keys (chmod 600)
 
-After setup, the user runs `/paperwiki:digest` and everything Just
+After setup, the user runs `/paper-wiki:digest` and everything Just
 Works — Claude finds the personal recipe, sources the secrets, runs
 the pipeline, and (if `auto_ingest_top > 0`) folds top papers into
 concept articles.
 
 ## When to Use
 
-- The user types `/paperwiki:setup`.
+- The user types `/paper-wiki:setup`.
 - A paper-wiki SKILL fails because no personal recipe exists at
   `~/.config/paper-wiki/recipes/daily.yaml`.
 - The user reports broken Python imports inside
@@ -346,7 +346,7 @@ Show the user a summary:
 - Secrets saved to `~/.config/paper-wiki/secrets.env` (if any)
 - paperclip MCP: registered / not registered / declined
 
-Then suggest: `/paperwiki:digest` to run their first morning digest.
+Then suggest: `/paper-wiki:digest` to run their first morning digest.
 
 ## Common Rationalizations
 
@@ -418,6 +418,6 @@ Then suggest: `/paperwiki:digest` to run their first morning digest.
   or "Done" option — Claude Code provides these automatically.
 - The topics question uses `multiSelect: true` so users can select
   multiple themes in a single interaction without re-prompting.
-- `/paperwiki:digest` (the next-step command) loads the recipe
+- `/paper-wiki:digest` (the next-step command) loads the recipe
   successfully — confirm by running it once at the end of setup if
   the user is willing.

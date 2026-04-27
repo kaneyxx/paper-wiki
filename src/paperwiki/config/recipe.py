@@ -67,7 +67,7 @@ class RecipeSchema(BaseModel):
     scorer: PluginSpec
     reporters: list[PluginSpec] = Field(min_length=1)
     top_k: int | None = Field(default=None, ge=1)
-    # Auto-chain ``/paperwiki:wiki-ingest`` for the top-N papers right
+    # Auto-chain ``/paper-wiki:wiki-ingest`` for the top-N papers right
     # after the digest writes. ``0`` (the default) means no chaining —
     # the user invokes wiki-ingest manually per-paper. The hard upper
     # bound of 20 prevents pathological "ingest the entire feed" runs
