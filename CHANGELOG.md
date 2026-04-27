@@ -9,6 +9,22 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-04-27
+
+### Fixed
+
+- **digest SKILL no longer asks "shall I chain wiki-ingest?"** when
+  `auto_ingest_top: N` is set. The recipe field IS the user's
+  pre-approval — re-prompting every digest defeats the configuration.
+  v0.3.10 makes the contract imperative ("**immediately and without
+  asking the user**") and adds a Common Rationalizations row killing
+  the "I'll ask first to be safe" instinct.
+
+### Tests
+
+- New `test_digest_skill_forbids_asking_before_auto_chain` pins the
+  contract.
+
 ## [0.3.9] - 2026-04-27
 
 ### Fixed

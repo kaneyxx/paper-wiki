@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.9"
+    assert data["version"] == "0.3.10"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -192,6 +192,22 @@ def test_digest_skill_describes_auto_ingest_top_chaining() -> None:
     assert "auto_ingest_top" in body, "digest SKILL must reference the auto_ingest_top recipe field"
     assert "/paper-wiki:wiki-ingest" in body, (
         "digest SKILL must call out the chained wiki-ingest invocation"
+    )
+
+
+def test_digest_skill_forbids_asking_before_auto_chain() -> None:
+    """``auto_ingest_top: N`` is the user's pre-approval — the SKILL must
+    fire the chain immediately, not prompt 'shall I chain?' or 'want me to
+    ingest?'. Pins this against LLM caution drift."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    # Markdown line-wraps may insert whitespace mid-phrase; collapse to be robust.
+    flat = " ".join(body.split())
+    assert "without asking the user" in flat, (
+        "digest SKILL must explicitly tell the LLM not to prompt before auto-chain"
+    )
+    assert "pre-approval" in flat, (
+        "digest SKILL must frame auto_ingest_top as user pre-approval, "
+        "not a hint that the LLM should re-confirm"
     )
 
 

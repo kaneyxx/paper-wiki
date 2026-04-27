@@ -80,19 +80,22 @@ to `paperwiki:setup`.
    read. Keep prose Obsidian-readable (callout-friendly: short
    paragraphs, bullet-able if helpful).
 8. **Auto-chain wiki-ingest when configured.** Read the recipe's
-   `auto_ingest_top` field. If `> 0`, take the top
-   `min(auto_ingest_top, top_k)` papers from the digest and chain
-   `/paper-wiki:wiki-ingest <canonical-id> --auto-bootstrap` for each,
-   in score order. The `--auto-bootstrap` flag tells wiki-ingest to
-   auto-stub any new concepts the source suggests, so a fresh vault
-   doesn't dead-end on paper #1 — missing concept articles are stubbed
-   automatically before the normal update loop runs. The wiki-ingest
-   SKILL handles its own idempotence (no-op when a source is already
-   folded into all relevant concepts), so safe to run on every digest.
-   Surface the per-paper outcome briefly to the user — they should see
-   "ingesting paper #1 → created 2 stubs, updated 1 concept" rather
-   than a silent block of activity. When `auto_ingest_top` is `0` (the
-   default), skip this step.
+   `auto_ingest_top` field. If `> 0`, **immediately and without asking
+   the user**, take the top `min(auto_ingest_top, top_k)` papers from
+   the digest and chain `/paper-wiki:wiki-ingest <canonical-id>
+   --auto-bootstrap` for each, in score order. The user setting
+   `auto_ingest_top: N` IS their pre-approval — do NOT prompt
+   "shall I chain?" or "want me to ingest?". Just do it. The
+   `--auto-bootstrap` flag tells wiki-ingest to auto-stub any new
+   concepts the source suggests, so a fresh vault doesn't dead-end on
+   paper #1 — missing concept articles are stubbed automatically before
+   the normal update loop runs. The wiki-ingest SKILL handles its own
+   idempotence (no-op when a source is already folded into all relevant
+   concepts), so safe to run on every digest. Surface the per-paper
+   outcome briefly to the user — they should see "ingesting paper #1 →
+   created 2 stubs, updated 1 concept" rather than a silent block of
+   activity. When `auto_ingest_top` is `0` (the default), skip this
+   step.
 
    **Note:** interactive `/paper-wiki:wiki-ingest <id>` invocations
    keep the manual confirm prompt — only the digest auto-chain uses
@@ -113,6 +116,7 @@ to `paperwiki:setup`.
 | "Top 3 summary is fluff." | Without it the user re-opens the digest file to find anything notable. The summary makes the SKILL useful end-to-end. |
 | "I'll claim a trend even if only one paper supports it — sounds smarter." | One paper is not a trend. Cite specifically: "#3 explores X" rather than "the field is moving toward X". Every trend claim needs at least two papers. |
 | "I'll skip the `#N` citations — they look ugly." | Citations are how the user can verify and follow up. Without them the overview is ungrounded prose that erodes trust in the digest. |
+| "I'll ask the user before chaining wiki-ingest — being safe." | NO. `auto_ingest_top: N` in the recipe IS the user's pre-approval. Asking "want me to chain?" defeats the whole point of the field — they configured it precisely so they don't have to answer that prompt every morning. Just do it. (If they don't want auto-chain, they set `auto_ingest_top: 0`.) |
 
 ## Red Flags
 
