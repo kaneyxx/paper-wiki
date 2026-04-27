@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.12"
+    assert data["version"] == "0.3.13"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -815,4 +815,30 @@ def test_readme_does_not_recommend_manual_cache_nuke() -> None:
         "upgrade flow — use '/plugin uninstall' + '/plugin install' instead. "
         "The rm -rf instructions were a workaround for the missing 'skills' "
         "declaration in plugin.json (fixed in v0.3.8)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.16 — wiki-ingest SKILL auto-chain uses only runner (v0.3.13)
+# ---------------------------------------------------------------------------
+
+
+def test_wiki_ingest_skill_auto_chain_path_uses_only_runner() -> None:
+    """Auto-bootstrap path must NOT Read or Edit concept files — the runner
+    now folds citations atomically. Pin three invariants in SKILL.md so the
+    4-minute-hang regression cannot resurface."""
+    body = (REPO_ROOT / "skills" / "wiki-ingest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    assert "Do NOT Read or Edit those concept files yourself" in flat, (
+        "wiki-ingest SKILL Step 4 must tell the LLM not to Read or Edit concept files "
+        "when in auto-bootstrap mode — the runner already did it"
+    )
+    assert "the runner did it" in flat, (
+        "wiki-ingest SKILL Step 4 must state 'the runner did it' so the LLM "
+        "doesn't re-do the citation folding via Edit calls"
+    )
+    assert "folded_citations" in body, (
+        "wiki-ingest SKILL must reference the 'folded_citations' JSON field "
+        "so the LLM knows which field to read from runner output"
     )

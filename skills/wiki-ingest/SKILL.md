@@ -49,23 +49,31 @@ do not pile up.
 3. **Honor `source_exists`.** If `source_exists` is `false`, stop and
    ask the user to run `/paper-wiki:analyze <id>` first; ingest cannot
    work without a source file under `Wiki/sources/`.
-4. **Update affected concepts.** For each name in `affected_concepts`:
-   read the existing concept body, fetch the new source's content,
-   and synthesize an updated body that incorporates the new evidence
-   without dropping prior synthesis. Respect `status: reviewed` —
-   merge into a draft section rather than overwriting reviewed prose.
-   Persist via
+4. **Read the runner's summary.** The runner's JSON output now contains
+   `folded_citations: [...]` listing concepts whose `sources:` list was
+   atomically updated by the runner with the new source's canonical_id.
+   Do NOT Read or Edit those concept files yourself — the runner did it.
+   Surface a one-line summary to the user:
+   `"folded source into N pre-existing concepts: <names>"`.
+
+4b. **(Manual mode only — no `--auto-bootstrap`.)** For each name in
+   `affected_concepts`: read the existing concept body, fetch the new
+   source's content, and synthesize an updated body that incorporates
+   the new evidence without dropping prior synthesis. Respect
+   `status: reviewed` — merge into a draft section rather than
+   overwriting reviewed prose. Persist via
    `MarkdownWikiBackend.upsert_concept(name=..., body=..., sources=[...],
    confidence=..., status="draft")`.
+
 5. **Optionally bootstrap suggested concepts.** **If you invoked the
    runner with `--auto-bootstrap` in Step 2 (the digest auto-chain path),
    SKIP this step entirely** — the runner already wrote stubs for each
-   name in `suggested_new_concepts`, and the Step 4 update loop already
-   folded the source citation into each newly-stubbed concept. Just
-   include the `created_stubs` count in your summary. Do NOT write any
-   inline Python (`<<PYEOF`, `python -c`, etc.) to manually call
-   `MarkdownWikiBackend.upsert_concept` — that is the v0.3.7 black-magic
-   workaround the v0.3.9 runner specifically replaces.
+   name in `suggested_new_concepts`, and the runner already folded the
+   source citation into each pre-existing concept via `folded_citations`.
+   Just include the `created_stubs` and `folded_citations` counts in your
+   summary. Do NOT write any inline Python (`<<PYEOF`, `python -c`, etc.)
+   to manually call `MarkdownWikiBackend.upsert_concept` — that is the
+   v0.3.7 black-magic workaround the v0.3.9 runner specifically replaces.
 
    Otherwise (manual `/paper-wiki:wiki-ingest <id>` invocation, no flag),
    walk `suggested_concepts` and, for each, ask the user whether to
