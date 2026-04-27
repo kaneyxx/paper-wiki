@@ -280,7 +280,36 @@ slice (lint / mypy / pytest / `claude plugin validate`).
   version bump in `pyproject.toml`, `__init__.py`, `plugin.json`;
   tag `v0.3.8`.
 
-### Phase 9 — Release v0.3.9 (per-paper synthesis + auto images)
+### Phase 9 — Release v0.3.9 (close auto-bootstrap runner gap)
+
+- [ ] **9.10 — Implement `--auto-bootstrap` properly in the runner.**
+  Plan §10.2 Task 9.10. Complexity **M**. Extend
+  `paperwiki.runners.wiki_ingest_plan` to accept `--auto-bootstrap`:
+  when set and `source_exists`, create `Wiki/concepts/<name>.md`
+  stubs (frontmatter `auto_created: true`, sentinel body) for every
+  entry in `suggested_concepts`; move stubbed names into
+  `affected_concepts`; add `created_stubs: list[str]` to the JSON
+  output. Simplify the `skills/wiki-ingest/SKILL.md` Auto-bootstrap
+  Process to a runner pass-through; remove the inline-Python
+  `MarkdownWikiBackend.upsert_concept` fallback prose. Add Common
+  Rationalizations row about bypassing the runner. Add unit tests:
+  `test_auto_bootstrap_creates_stubs_for_suggested_concepts`,
+  `test_auto_bootstrap_skips_existing_concepts`,
+  `test_auto_bootstrap_no_op_when_source_missing`,
+  `test_auto_bootstrap_unset_preserves_legacy_behavior`. Update
+  smoke test `test_wiki_ingest_skill_describes_auto_bootstrap_mode`
+  to assert the runner-invocation form, not the upsert_concept form.
+  **Acceptance check**: `python -m paperwiki.runners.wiki_ingest_plan
+  <vault> <id> --auto-bootstrap` creates stubs and emits
+  `created_stubs` in JSON; manual `rm -rf <vault>/Wiki && /paper-wiki:digest
+  daily` with `auto_ingest_top: 3` shows no inline-Python fallback in
+  the SKILL trace.
+- [ ] **v0.3.9 Gate**: same as v0.3.6 gate; manual auto-bootstrap
+  smoke test on a fresh vault produces 3 stubs via the runner with
+  no `asyncio.run` fallback observed; CHANGELOG `[0.3.9]` entry
+  notes the new `created_stubs` JSON field; tag `v0.3.9`.
+
+### Phase 9 — Release v0.3.10 (per-paper synthesis + auto images)
 
 - [ ] **9.4 — Per-paper Detailed report synthesis.** Plan §10.2 Task
   9.4. Complexity **M-L**. Extend `skills/digest/SKILL.md` Process
@@ -306,9 +335,66 @@ slice (lint / mypy / pytest / `claude plugin validate`).
   `wiki-ingest` in the right order; manual run with `auto_ingest_top=3`
   populates `Wiki/sources/<id>/images/` for top-3 papers; the next
   digest run inlines `![[...|700]]` teasers in those entries.
-- [ ] **v0.3.9 Gate**: same as v0.3.6 gate; manual full-cycle smoke
+- [ ] **v0.3.10 Gate**: same as v0.3.6 gate; manual full-cycle smoke
   test (run digest twice on a fresh vault; second run should have
-  inline figures + per-paper synthesis); tag `v0.3.9`.
+  inline figures + per-paper synthesis); tag `v0.3.10`.
+
+### Phase 9 — Release v0.3.11 (digest quality refinements)
+
+- [ ] **9.9 — Concept matching threshold + recipe tightening.** Plan
+  §10.2 Task 9.9. Complexity **M**. Extend
+  `CompositeScorer._compute_relevance` to populate
+  `ScoreBreakdown.notes["topic_strengths"]` with per-topic strength
+  using the same saturating curve (`1 - 0.5**hits`). Update
+  `MarkdownWikiBackend.upsert_source` to accept
+  `topic_strength_threshold: float = 0.3` and filter
+  `matched_topics` → `related_concepts` accordingly. Plumb a
+  `wiki_topic_strength_threshold` recipe-config field on the
+  `obsidian` reporter. Tighten `skills/setup/SKILL.md` Q2 keyword
+  template for "Biomedical & Pathology" — drop `foundation model`,
+  consolidate the WSI duplicates, add biomedical-specific terms;
+  add a Common Rationalizations row about generic-keyword leakage.
+  Add smoke tests
+  `test_composite_scorer_emits_per_topic_strengths`,
+  `test_wiki_upsert_source_filters_by_topic_strength`,
+  `test_setup_skill_biomedical_keywords_exclude_generic_terms`.
+  **Acceptance check**: a manually-rebuilt personal recipe via
+  `/paper-wiki:setup` Branch 2 → Topics → Biomedical & Pathology
+  no longer contains `foundation model`; running the daily digest
+  with the new threshold keeps an `OccDirector`-style autonomous-driving
+  paper out of the `biomedical-pathology` concept's `sources:` list.
+- [ ] **9.11 — Quiet `dedup.vault.missing` warnings on absent paths.**
+  Plan §10.2 Task 9.11. Complexity **S**. Downgrade
+  `src/paperwiki/plugins/filters/dedup.py:160` from
+  `logger.warning("dedup.vault.missing", path=...)` to
+  `logger.info("dedup.vault.absent", path=..., note="vault path
+  not yet created; dedup uses empty key set")`. Keep the OSError
+  branch at line 170 at WARNING. Add
+  `test_dedup_loader_logs_info_when_vault_path_absent`.
+  **Acceptance check**: fresh-vault `/paper-wiki:digest daily`
+  surfaces zero `WARNING` lines for missing vault paths; the
+  structured log still records the event at INFO with the
+  `dedup.vault.absent` event name.
+- [ ] **9.12 — Improve auto-stub UX (sentinel body + wiki-lint
+  message).** Plan §10.2 Task 9.12. Complexity **S**. Update the
+  `skills/wiki-ingest/SKILL.md` Auto-bootstrap sentinel body to a
+  two-paragraph version that explicitly tells the user to run
+  `/paper-wiki:wiki-ingest <source-id>` to fold real content in.
+  Update `skills/wiki-lint/SKILL.md` Process Step 2 to clarify that
+  auto-created stubs are intentionally empty until wiki-ingest is
+  invoked. If Task 9.10 has shipped, define the sentinel as a shared
+  constant in `paperwiki.runners._stub_constants` referenced by both
+  the runner and the SKILL test. Add smoke tests
+  `test_wiki_ingest_sentinel_body_explains_next_step`,
+  `test_wiki_lint_explains_auto_stub_intent`.
+  **Acceptance check**: opening any new auto-stub shows the
+  two-paragraph guidance; `/paper-wiki:wiki-lint` "Needs review"
+  message contains the intent clarification.
+- [ ] **v0.3.11 Gate**: same as v0.3.6 gate; manual smoke (fresh
+  vault, run digest, inspect `biomedical-pathology` concept's
+  source list — should be empty or biomedical-only; check log
+  output for zero `WARNING` lines on missing vault paths; open an
+  auto-stub and confirm new sentinel guidance); tag `v0.3.11`.
 
 ### Phase 9 — Final checklist
 
@@ -318,8 +404,10 @@ slice (lint / mypy / pytest / `claude plugin validate`).
 - [ ] `ruff check src tests` clean.
 - [ ] `ruff format --check src tests` clean.
 - [ ] `claude plugin validate .` passes.
-- [ ] CHANGELOG entries for `[0.3.6]`, `[0.3.7]`, `[0.3.8]`, `[0.3.9]` complete.
-- [ ] Tag each release in turn: `v0.3.6`, `v0.3.7`, `v0.3.8`, `v0.3.9`.
+- [ ] CHANGELOG entries for `[0.3.6]`, `[0.3.7]`, `[0.3.8]`, `[0.3.9]`,
+  `[0.3.10]`, `[0.3.11]` complete.
+- [ ] Tag each release in turn: `v0.3.6`, `v0.3.7`, `v0.3.8`, `v0.3.9`,
+  `v0.3.10`, `v0.3.11`.
 
 ---
 
@@ -336,9 +424,11 @@ slice (lint / mypy / pytest / `claude plugin validate`).
   - `0.2.0` after Phase 6 ✅
   - `0.3.0` after Phase 7 ✅
   - `0.3.5` after README rewrite ✅
-  - `0.3.6` → `0.3.7` → `0.3.8` after Phase 9 (digest quality)
+  - `0.3.6` → `0.3.7` → `0.3.8` → `0.3.9` → `0.3.10` → `0.3.11` after
+    Phase 9 (digest quality)
   - `0.4.0` after Phase 8 (when promoted from candidate)
 - [ ] README, SPEC §3, recipes/README updated.
 - [ ] Tag `v0.2.0` after Phase 6 ✅, `v0.3.0` after Phase 7 ✅,
   `v0.3.5` after README rewrite ✅, then `v0.3.6` / `v0.3.7` /
-  `v0.3.8` per Phase 9, then `v0.4.0` after Phase 8 (if promoted).
+  `v0.3.8` / `v0.3.9` / `v0.3.10` / `v0.3.11` per Phase 9, then
+  `v0.4.0` after Phase 8 (if promoted).

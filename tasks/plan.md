@@ -1387,8 +1387,449 @@ remove the field. README change is documentation-only. Tests are
 read-only assertions.
 
 **Note**: tasks 9.4 (per-paper synthesis) and 9.5 (auto image
-extraction), originally planned for v0.3.8, are deferred to v0.3.9 so
+extraction), originally planned for v0.3.8, are deferred to v0.3.10 so
 v0.3.8 stays small and focused on the upgrade-UX fix.
+
+---
+
+#### Task 9.9 — Concept matching threshold + recipe tightening → v0.3.11
+
+**Problem (discovered during 2026-04-27 v0.3.7+0.3.8 smoke run)**:
+The `biomedical-pathology` concept article ended up listing all three
+top recommendations as sources during the auto-ingest chain — but those
+top three were `OccDirector` (autonomous driving), `PokeVLA` (robot
+manipulation), and `ChangeQuery` (remote sensing). None are biomedical.
+
+Two layers of root cause:
+
+1. **Recipe template too generic**: `skills/setup/SKILL.md:180-182`
+   maps the "Biomedical & Pathology" theme to keywords that include
+   `foundation model`. Any "foundation model" paper in cs.CV / cs.LG
+   trips a match for the biomedical topic. The keyword list also
+   includes the duplicate pair `WSI` / `whole-slide image` /
+   `whole slide image`, which is fine, but the bare `foundation model`
+   token is the offender. (`foundation model` is also listed under
+   "Vision & Multimodal" — it's the generic-AI overlap that pollutes
+   the biomedical bucket.)
+
+2. **Filter does not gate by per-topic strength**: `CompositeScorer.
+   _compute_relevance` (`src/paperwiki/plugins/scorers/composite.py:145-169`)
+   returns a SINGLE aggregate `relevance` score across all topics plus
+   a `matched_topics: list[str]` of every topic that hit at least one
+   keyword or category. A paper that hits `foundation model` once gets
+   added to `matched_topics` for the biomedical-pathology topic with no
+   per-topic score attached. Downstream, `MarkdownWikiBackend.
+   upsert_source` (`markdown_wiki.py:110`) writes those topic names
+   into `related_concepts`, and the wiki-ingest auto-bootstrap chain
+   stubs / updates concept articles based on `related_concepts` —
+   ferrying the weakly-matched paper into the biomedical-pathology
+   concept on the strength of one generic keyword.
+
+The `Recommendation` model has `matched_topics: list[str]` and
+`score: ScoreBreakdown` but no per-topic breakdown. We need to add a
+per-topic strength signal and gate by it.
+
+**Solution** (two layers, ship together):
+
+- **Recipe-level**: tighten the setup SKILL's keyword template for
+  "Biomedical & Pathology". Drop `foundation model` (too generic);
+  collapse the WSI duplicates; bias toward biomedical-specific terms
+  (`pathology`, `histopathology`, `WSI`, `clinical AI`,
+  `digital pathology`, `medical imaging`, plus the existing
+  `q-bio.QM` / `eess.IV` categories which carry the bio signal). Add
+  a Common Rationalizations row in `setup/SKILL.md` calling out
+  "generic AI keywords leak into specialized concept buckets" so
+  future template edits stay sane. Note that we cannot rewrite users'
+  existing personal recipes silently; document the reassessment
+  prompt in setup's Branch 2 (Edit one piece → Topics) and surface a
+  one-time warning when a personal recipe still contains the legacy
+  generic-keyword list.
+
+- **Filter-level**: extend `CompositeScorer._compute_relevance` to
+  return a per-topic strength dict (e.g. `{"vision-multimodal": 0.85,
+  "biomedical-pathology": 0.18}`) and stash it on
+  `Recommendation.score_breakdown.notes` (existing field) using the
+  key `topic_strengths`. Then update `MarkdownWikiBackend.
+  upsert_source` to filter `matched_topics` → `related_concepts` by a
+  configurable threshold (default 0.30) before writing the source's
+  `related_concepts` frontmatter. Configurable via the `obsidian`
+  reporter config: `wiki_topic_strength_threshold: 0.3` so power
+  users can tune. Below threshold, the topic stays in
+  `matched_topics` (still informational on the digest's per-paper
+  callout) but is dropped from the source frontmatter that drives
+  auto-ingest.
+
+This puts the gate at the source→concept mapping (option 2 of the
+three layers in the brief), which is the right boundary: scoring stays
+in the scorer; auto-ingest behavior stays controllable per reporter.
+Layer 1 (filter-side topic drop) would lose useful info for the
+digest's per-paper "matched: [vision-language, biomedical-pathology]"
+callout. Layer 3 (wiki-ingest SKILL recipient-side) would mean the
+SKILL has to re-derive per-topic strength from text, which is a
+re-implementation of the scorer in prose.
+
+**Acceptance criteria**:
+
+- **AC-9.9.1** `ScoreBreakdown.notes` populated with key
+  `topic_strengths` mapping each topic name to a float in `[0, 1]`
+  whenever the composite scorer ran. Per-topic strength uses the
+  same saturating curve as the aggregate relevance, but evaluated on
+  a single topic's hits (so a topic with 0 keyword hits + 0 category
+  match has strength `0.0`).
+- **AC-9.9.2** `MarkdownWikiBackend.upsert_source` accepts a
+  `topic_strength_threshold: float = 0.3` keyword argument and
+  filters `related_concepts` accordingly. When the recommendation
+  has no `topic_strengths` populated (legacy data), behave as today
+  (no gating).
+- **AC-9.9.3** `ObsidianReporter` plumbs a `wiki_topic_strength_threshold`
+  recipe-config field (default 0.3) into `upsert_source`.
+- **AC-9.9.4** `skills/setup/SKILL.md` Q2 keyword table updated:
+  "Biomedical & Pathology" keyword list drops `foundation model`,
+  consolidates the WSI variants, adds biomedical-leaning terms.
+  Common Rationalizations gains a row about generic-keyword leakage.
+- **AC-9.9.5** Smoke tests:
+  - `test_composite_scorer_emits_per_topic_strengths` — scorer returns
+    a `topic_strengths` notes entry covering every configured topic.
+  - `test_wiki_upsert_source_filters_by_topic_strength` — given a
+    recommendation with `topic_strengths={"a": 0.9, "b": 0.15}` and
+    threshold `0.3`, the source frontmatter's `related_concepts`
+    contains `a` only.
+  - `test_setup_skill_biomedical_keywords_exclude_generic_terms` —
+    asserts the bundled-template biomedical-pathology keyword list
+    does NOT contain `foundation model`.
+- **AC-9.9.6** Existing tests continue to pass (the new threshold
+  defaults are non-breaking when `topic_strengths` is absent).
+
+**Verification**:
+
+- `pytest -q tests/unit/plugins/scorers/test_composite.py
+  tests/unit/plugins/backends/test_markdown_wiki.py
+  tests/test_smoke.py -k "topic_strength or biomedical_keywords"`
+  green.
+- Manual: rebuild the user's personal recipe via `/paper-wiki:setup`
+  Branch 2 → Topics → Biomedical & Pathology; verify the keyword
+  list no longer contains `foundation model`. Run
+  `/paper-wiki:digest daily`; confirm an `OccDirector`-style
+  autonomous-driving paper does NOT land in the
+  `biomedical-pathology` concept's `sources:` list.
+
+**Complexity**: M (45-75 min). Scorer change + new
+`ScoreBreakdown.notes` key + reporter plumbing + SKILL prose +
+3 smoke tests.
+
+**Dependencies**:
+- Soft: Task 9.10 (the auto-bootstrap runner) ideally lands first so
+  the new threshold gates the runner's stub creation; but if 9.10
+  ships standalone, 9.9 still works against the SKILL's manual
+  stub-write fallback.
+- Independent of 9.11 / 9.12.
+
+**Risk**: medium. Default threshold `0.3` is a guess; too high drops
+legitimate matches, too low fails to stop pollution. Mitigation:
+ship behind the configurable reporter field; add a Common
+Rationalizations note that the right number is "tune by inspecting
+2–3 days of digest output, then lock it". Document in CHANGELOG.
+
+---
+
+#### Task 9.10 — Implement `--auto-bootstrap` properly in the runner → v0.3.9
+
+**Problem (discovered during 2026-04-27 v0.3.7+0.3.8 smoke run)**:
+Task 9.7 added `--auto-bootstrap` mode to `skills/wiki-ingest/SKILL.md`
+(documentation) and to `skills/digest/SKILL.md` (auto-chain step), and
+two smoke tests assert the flag is mentioned in both SKILLs:
+
+- `tests/test_smoke.py:608` —
+  `test_wiki_ingest_skill_describes_auto_bootstrap_mode`
+- `tests/test_smoke.py:635` —
+  `test_digest_skill_passes_auto_bootstrap_to_wiki_ingest`
+
+But `grep -rn '\-\-auto-bootstrap' src/` returns **zero** hits. The
+underlying runner `paperwiki.runners.wiki_ingest_plan` does NOT accept
+`--auto-bootstrap`. During the smoke run, the SKILL fell back to
+inline-Python `asyncio.run` + direct `MarkdownWikiBackend.upsert_concept`
+calls (the SKILL Process Step says "Walk `suggested_new_concepts`; for
+each that has no existing concept article, write a stub …" — Claude
+implements that with whatever ad-hoc tool it can reach). The smoke run
+hit two `ImportError` dead-ends mid-attempt because the SKILL's
+fallback path is fragile and bypasses the runner architecture per
+SPEC §6.
+
+This is a **partial-implementation bug** carried from v0.3.7, not a
+new feature. Closing it lands in v0.3.9 alongside everything else.
+
+**Solution**: extend the existing `wiki_ingest_plan` runner with a
+`--auto-bootstrap` flag (option 1 of the brief — more contained than
+adding a separate `bootstrap_concepts.py` runner, and the planner
+already has the `MarkdownWikiBackend` instance + `suggested_concepts`
+list).
+
+When `--auto-bootstrap` is set:
+
+1. After computing `IngestPlan`, if `source_exists` is `true`, walk
+   `suggested_concepts` and create a stub for each one that does not
+   yet exist on disk. Stub frontmatter:
+   ```yaml
+   ---
+   name: <concept-name>
+   tags: [auto-created]
+   created: <YYYY-MM-DD>
+   auto_created: true
+   ---
+   ```
+   Stub body (the new sentinel from Task 9.12):
+   ```
+   _Auto-created during digest auto-ingest._
+
+   _Run `/paper-wiki:wiki-ingest <source-id>` on a relevant paper to
+   fold its content into this concept._
+   ```
+2. Move each stubbed concept name from `suggested_concepts` into
+   `affected_concepts` so the SKILL's downstream update loop will
+   fold the source citation in (no separate code path needed).
+3. Add a `created_stubs: list[str]` field to the JSON output so the
+   SKILL can surface "created N stubs, updated M concepts" in its
+   summary line.
+
+The runner stays LLM-free (file I/O only, per SPEC §6). The SKILL's
+"auto-bootstrap" Process section becomes a thin pass-through:
+"invoke the runner with `--auto-bootstrap`; surface its
+`created_stubs` count to the user". The fragile inline-Python
+fallback is removed.
+
+**Acceptance criteria**:
+
+- **AC-9.10.1** `paperwiki.runners.wiki_ingest_plan` accepts a
+  `--auto-bootstrap` (boolean flag) Typer option.
+- **AC-9.10.2** When the flag is set and `source_exists` is `true`,
+  the runner creates stub files at
+  `<vault>/Wiki/concepts/<filename>.md` for every entry in
+  `suggested_concepts` that does not already exist. Stubs use the
+  frontmatter and body shape specified above. Filename normalization
+  goes through the same `MarkdownWikiBackend` helpers (no
+  duplication).
+- **AC-9.10.3** Stubbed concept names are moved from
+  `suggested_concepts` into `affected_concepts` in the JSON output.
+  The new `created_stubs: list[str]` field carries the same names
+  for explicit reporting.
+- **AC-9.10.4** When the flag is set and `source_exists` is `false`,
+  the runner does NOT create stubs (still emits an empty
+  `affected_concepts` and a clear error). Stubs are bound to a real
+  source.
+- **AC-9.10.5** When the flag is unset, behavior is unchanged
+  (backwards-compatible with v0.3.7).
+- **AC-9.10.6** `skills/wiki-ingest/SKILL.md` "Auto-bootstrap mode"
+  Process simplifies to: "invoke
+  `paperwiki.runners.wiki_ingest_plan <vault> <id> --auto-bootstrap`;
+  read `created_stubs` from the JSON; the normal update loop now
+  finds the new stubs and folds the source in." The
+  `MarkdownWikiBackend.upsert_concept` direct-call language goes
+  away. Common Rationalizations gains a row: "I can write the stub
+  files directly via Python — saves a runner call." (Wrong: SPEC §6
+  keeps file I/O in runners; SKILL stays Claude-side orchestration.)
+- **AC-9.10.7** Tests:
+  - `tests/unit/runners/test_wiki_ingest_plan.py` gains
+    `test_auto_bootstrap_creates_stubs_for_suggested_concepts`,
+    `test_auto_bootstrap_skips_existing_concepts` (idempotent),
+    `test_auto_bootstrap_no_op_when_source_missing`,
+    `test_auto_bootstrap_unset_preserves_legacy_behavior`.
+  - The existing `test_wiki_ingest_skill_describes_auto_bootstrap_mode`
+    smoke test (test_smoke.py:612) is updated: it now asserts the
+    SKILL mentions invoking the **runner** with `--auto-bootstrap`,
+    not direct `upsert_concept` calls.
+
+**Verification**:
+
+- `pytest -q tests/unit/runners/test_wiki_ingest_plan.py
+  tests/test_smoke.py -k auto_bootstrap` green.
+- Manual: `rm -rf <vault>/Wiki && /paper-wiki:digest daily` with
+  `auto_ingest_top: 3`. Confirm the wiki-ingest auto-chain runs the
+  runner with `--auto-bootstrap`, creates stubs, and the SKILL prints
+  "created N stubs, updated M concepts" with no inline `asyncio.run`
+  fallback.
+
+**Complexity**: M (60-90 min). Runner: ~30 LoC + 4 unit tests.
+SKILL prose: ~10 line trim. One smoke test update.
+
+**Dependencies**:
+- Hard: Task 9.7 (the SKILL contract that the flag exists). 9.7
+  shipped in v0.3.7; 9.10 closes its runner-side gap.
+- Soft: Task 9.12 (sentinel body update). If 9.12 ships in the same
+  release, the runner uses the new sentinel from day one; if not,
+  the runner uses today's sentinel and 9.12 updates it later.
+
+**Risk**: low-medium. Risk is mostly schema drift — if the JSON
+output gains `created_stubs` and a downstream SKILL doesn't read it,
+nothing breaks (silent degrade). Rollback = revert the runner +
+SKILL change; SKILL falls back to inline-Python again (today's
+behavior).
+
+---
+
+#### Task 9.11 — Quiet `dedup.vault.missing` warnings on absent paths → v0.3.11
+
+**Problem (discovered during 2026-04-27 v0.3.7+0.3.8 smoke run)**:
+On a fresh-vault first run, the user sees three identical warnings:
+
+```
+WARNING  | paperwiki.plugins.filters.dedup:load:160 - dedup.vault.missing
+WARNING  | paperwiki.plugins.filters.dedup:load:160 - dedup.vault.missing
+WARNING  | paperwiki.plugins.filters.dedup:load:160 - dedup.vault.missing
+```
+
+These come from `MarkdownVaultKeyLoader.load`
+(`src/paperwiki/plugins/filters/dedup.py:158-161`):
+
+```python
+async def load(self, ctx: RunContext) -> DedupKeys:
+    if not self.root.exists() or not self.root.is_dir():
+        logger.warning("dedup.vault.missing", path=str(self.root))
+        return DedupKeys.empty()
+```
+
+The user's personal recipe configures three `vault_paths`
+(`<vault>/Daily`, `<vault>/Sources`, `<vault>/Wiki/sources`,
+`<vault>/Wiki/concepts`); on a first-ever run none exist yet. The
+function-level behavior is correct (an empty vault has nothing to
+dedup against), but `WARNING` is the wrong severity for the expected
+first-run state. The user reasonably wonders whether something is
+broken.
+
+**Solution**: downgrade the absent-path branch to `INFO`. Keep
+`WARNING` for actual `OSError`s (line 170 — those are real read
+failures). Update the message slightly to make the empty-vault
+intent obvious.
+
+```python
+# Before:
+logger.warning("dedup.vault.missing", path=str(self.root))
+# After:
+logger.info(
+    "dedup.vault.absent",
+    path=str(self.root),
+    note="vault path not yet created; dedup uses empty key set",
+)
+```
+
+The event name change (`missing` → `absent`) is intentional: it
+distinguishes "path doesn't exist yet" (info) from "path was
+expected but disappeared" (which would be the warning case if we
+ever add one).
+
+**Acceptance criteria**:
+
+- **AC-9.11.1** `dedup.py:160` uses `logger.info(...)` not
+  `logger.warning(...)` when the vault root does not exist.
+- **AC-9.11.2** The `OSError` branch at line 170
+  (`dedup.vault.read_error`) stays at `logger.warning` — that's a
+  real failure.
+- **AC-9.11.3** Test
+  `test_dedup_loader_logs_info_when_vault_path_absent` (new)
+  asserts the level. Use loguru's testing utilities (or
+  `caplog` if loguru is configured to propagate to the std logging
+  handler in tests) to capture and inspect.
+- **AC-9.11.4** Existing tests continue to pass — none assert on
+  the warning level explicitly today (verified by grep), so this
+  is a pure level downgrade with no contract break.
+
+**Verification**:
+
+- `pytest -q tests/unit/plugins/filters/test_dedup.py -k absent`
+  green.
+- Manual: on a fresh vault, `/paper-wiki:digest daily` no longer
+  surfaces `WARNING` for missing vault paths. The structured log
+  still records the event at INFO so observability isn't lost.
+
+**Complexity**: S (15-20 min). 1 line change + 1 test.
+
+**Dependencies**: none. Independent of every other Phase 9 task.
+
+**Risk**: very low. Pure log-level change. Rollback = revert. No
+behavioral change for filters or dedup keys.
+
+---
+
+#### Task 9.12 — Auto-stub UX (sentinel body + wiki-lint message) → v0.3.11
+
+**Problem (discovered during 2026-04-27 v0.3.7+0.3.8 smoke run)**:
+After Task 9.7 / 9.10 land, auto-bootstrap creates concept stubs
+whose entire body is:
+
+```
+_Auto-created during digest auto-ingest. Lint with /paper-wiki:wiki-lint to flag for review._
+```
+
+When the user later runs `/paper-wiki:wiki-lint`, they see "Needs
+review (auto-created stubs): N concepts" — but opening any concept
+file shows nothing to review yet. The intended path is "user runs
+`/paper-wiki:wiki-ingest <id>` manually to fold real content in",
+but neither the sentinel nor the wiki-lint message makes this
+obvious.
+
+**Solution** (SKILL prose only, no Python):
+
+1. Update the sentinel body in `skills/wiki-ingest/SKILL.md` (and in
+   the new runner from Task 9.10) to explicitly tell the user the
+   next step:
+   ```
+   _Auto-created during digest auto-ingest._
+
+   _This stub has no synthesized content yet. To fold a relevant
+   paper into this concept, run `/paper-wiki:wiki-ingest <source-id>`
+   on a paper from the digest. To prune unwanted stubs in batch, see
+   `/paper-wiki:wiki-lint`._
+   ```
+2. Update `skills/wiki-lint/SKILL.md` Process Step 2 (the
+   "Surface auto-created stubs first" section) to clarify intent:
+   ```
+   "Auto-created stubs are intentionally empty until you run
+   /paper-wiki:wiki-ingest on a relevant paper. Stubs that no
+   longer match an interest area can be deleted with `rm
+   <vault>/Wiki/concepts/<name>.md`."
+   ```
+3. The `auto_created: true` frontmatter contract stays unchanged.
+
+**Acceptance criteria**:
+
+- **AC-9.12.1** `skills/wiki-ingest/SKILL.md` Auto-bootstrap section
+  documents the new two-paragraph sentinel body; the smoke test
+  pinning the sentinel string is updated.
+- **AC-9.12.2** `skills/wiki-lint/SKILL.md` Process Step 2 contains
+  the new clarification prose ("intentionally empty until you run
+  /paper-wiki:wiki-ingest").
+- **AC-9.12.3** New smoke tests:
+  - `test_wiki_ingest_sentinel_body_explains_next_step` — asserts
+    the sentinel mentions both `/paper-wiki:wiki-ingest` and
+    "stub" (or equivalent guidance).
+  - `test_wiki_lint_explains_auto_stub_intent` — asserts the
+    wiki-lint Process documents that stubs are intentionally
+    empty.
+- **AC-9.12.4** Task 9.10 runner uses the new sentinel body when
+  creating stubs (or a constant shared between the runner and the
+  SKILL test).
+
+**Verification**:
+
+- `pytest -q tests/test_smoke.py -k "sentinel or auto_stub_intent"`
+  green.
+- Manual: after a fresh-vault digest auto-ingest, open one of the
+  generated stubs; the body explicitly tells you to run
+  `/paper-wiki:wiki-ingest <id>`. Run `/paper-wiki:wiki-lint`; the
+  "Needs review" message includes the intent clarification.
+
+**Complexity**: S (20-30 min). Two SKILL prose edits + 2 smoke
+tests. If 9.10 also ships in the same window, the runner sentinel
+constant should live in one place (e.g. `paperwiki.runners._stub_constants`)
+and be referenced by both the runner and the SKILL test.
+
+**Dependencies**:
+- Soft: Task 9.10. If 9.10 ships first with the OLD sentinel, 9.12
+  updates it. If both ship together, single change.
+- Independent of 9.9 / 9.11.
+
+**Risk**: very low. Pure documentation / SKILL prose change.
+Rollback = revert. No effect on already-created stubs in user vaults
+(those keep the v0.3.7 sentinel; harmless).
 
 ---
 
@@ -1398,12 +1839,20 @@ v0.3.8 stays small and focused on the upgrade-UX fix.
 9.1 (namespace fix) ────┬──> 9.6 (invariant test, same commit)        v0.3.6
                         │
                         ├──> 9.7 (auto-ingest bootstrap)              v0.3.7
+                        │       │
+                        │       └──> 9.10 (runner --auto-bootstrap)   v0.3.9
+                        │               │
+                        │               └──> 9.12 (sentinel + lint UX)  v0.3.11
                         │
 9.2 (skeleton markers) ─┼──> 9.3 (overview synthesis)                 v0.3.7
                         │       │
-                        │       └──> 9.4 (per-paper synthesis)        v0.3.8
+                        │       └──> 9.4 (per-paper synthesis)        v0.3.10
                         │
-                        └──> 9.5 (auto image extraction)              v0.3.8
+                        ├──> 9.5 (auto image extraction)              v0.3.10
+                        │
+                        └──> 9.9 (concept matching threshold)         v0.3.11
+                                │
+                                └─> 9.11 (dedup log level, indep.)    v0.3.11
 ```
 
 - **Sequenced strictly**: 9.1 → 9.2 → 9.3 → 9.4. Each builds on the
@@ -1412,9 +1861,17 @@ v0.3.8 stays small and focused on the upgrade-UX fix.
   different SKILL files (digest vs wiki-ingest); only conflict point is
   digest SKILL Process step 7 — write 9.7 first, then 9.3 layers
   in the overview-synthesis step alongside.
-- **Parallelizable in v0.3.8**: 9.5 can land in parallel with 9.4 —
+- **v0.3.9 is 9.10 alone** — the standalone "close the runner gap left
+  by 9.7" release. No other tasks touch the same files, so it ships
+  without blocking the bigger v0.3.10 batch.
+- **Parallelizable in v0.3.10**: 9.5 can land in parallel with 9.4 —
   different files; only conflict point is digest SKILL Process, same
   pattern as above.
+- **Parallelizable in v0.3.11**: 9.9 / 9.11 / 9.12 are mutually
+  independent. 9.9 touches scorer + reporter + setup SKILL; 9.11 is a
+  one-line dedup log change; 9.12 is two SKILL prose edits. Land in
+  any order; bundle as one release for cohesion ("digest quality
+  refinements").
 - **9.6 lands in the same PR as 9.1** — the test would fail before the
   rewrite; bundling them keeps CI green at every commit.
 
@@ -1425,11 +1882,14 @@ v0.3.8 stays small and focused on the upgrade-UX fix.
 | v0.3.6  | 9.1 + 9.2 + 9.6 | Stale namespace gone; new digests have machine-targetable skeleton markers (no more "run SKILL after runner" prose); future regressions blocked by the invariant test. |
 | v0.3.7  | 9.3 + 9.7 | Today's Overview callout actually has cross-paper synthesis; auto-ingest no longer dies on fresh vaults — concept stubs are bootstrapped automatically with a sentinel marker for later review. |
 | v0.3.8  | 9.8 | Plugin upgrade UX fixed: `"skills"` declaration added to `plugin.json`; standard `/plugin uninstall` + `/plugin install` flow now works without manual cache cleanup. |
-| v0.3.9  | 9.4 + 9.5 | Per-paper Detailed report has synthesized takeaways; auto-ingest-top papers get figures extracted automatically (visible on day 2). |
+| v0.3.9  | 9.10 | Auto-bootstrap moved into the `wiki_ingest_plan` runner per SPEC §6 — the SKILL no longer falls back to fragile inline-Python `upsert_concept` calls. Closes the v0.3.7 partial-implementation gap. |
+| v0.3.10 | 9.4 + 9.5 | Per-paper Detailed report has synthesized takeaways; auto-ingest-top papers get figures extracted automatically (visible on day 2). |
+| v0.3.11 | 9.9 + 9.11 + 9.12 | Concept-matching threshold stops generic-keyword leakage (no more autonomous-driving papers in the biomedical bucket); fresh-vault `dedup.vault.missing` warnings drop to INFO; auto-stub bodies + wiki-lint message tell the user how to fold real content in. |
 
-Three small releases, each independently shippable. Total estimated
-work: 7 tasks at 15-60 min each = **3-4.5 hours of focused work**.
-Comfortably fits the user's "1 release per 30 min" cadence.
+Six small releases, each independently shippable. Total estimated work:
+11 tasks at 15-90 min each = **5.5-8.5 hours of focused work** for
+Phase 9 in total. The 4 new tasks (9.9-9.12) add ~2.5-4.5 hours on top
+of the original 7-task baseline.
 
 ### 10.5 Risks (Phase 9)
 
@@ -1442,6 +1902,12 @@ Comfortably fits the user's "1 release per 30 min" cadence.
 | HTML comment markers appear in Obsidian preview as visible glitches | Ugly digest UI | Obsidian hides HTML comments by default; verify on first v0.3.6 build. Fallback: switch to a YAML-fenced block as the marker. |
 | Image extraction fails silently for one paper, the SKILL keeps going, user never finds out which | Half-imaged digest | SKILL Process step requires a one-line summary at the end ("3/3 succeeded, 0 failed"). |
 | Task 9.7 auto-bootstrap pollutes vault with empty concept stubs the user later abandons | Vault clutter | `auto_created: true` frontmatter + sentinel body string; wiki-lint surfaces stubs in a dedicated "needs review" bucket the user can prune en masse. Manual `/paper-wiki:wiki-ingest` keeps the original confirmation prompt. |
+| Task 9.9 default threshold (0.30) drops legitimate matches | Useful papers vanish from concept articles | Configurable via `wiki_topic_strength_threshold` recipe field; doc explicitly tells users to inspect 2-3 days of digest output and tune. Add Common Rationalizations note. |
+| Task 9.9 per-topic strength is mis-saturated for tiny-keyword topics | A topic with only 1 keyword always reads "weak" | Use the same saturating curve `1 - 0.5**hits` whether scoring globally or per-topic; a single hit for a single-keyword topic still scores 0.5 (above default 0.3 threshold). |
+| Task 9.10 runner schema change (`created_stubs`, moved fields) breaks third-party SKILLs reading the JSON | External SKILL silently degrades | Field is additive; old fields preserved. CHANGELOG entry surfaces the new field; smoke test asserts both old and new fields present. |
+| Task 9.10 auto-bootstrap creates stubs for noisy `suggested_concepts` (compounds with 9.9 unless both ship) | Vault clutter on first run | Ship 9.10 in v0.3.9 alone (no threshold gating yet); 9.9 in v0.3.11 adds the gate. Document in v0.3.9 CHANGELOG that "concept-strength gating ships in v0.3.11". |
+| Task 9.11 log-level downgrade hides a real misconfiguration (user typo'd vault path) | User wonders why dedup never fires | INFO line still includes the path verbatim; structured log key change (`dedup.vault.absent`) makes it filterable. Add a Red Flags entry to digest SKILL: "if a recipe's `vault_paths` are ALL absent across multiple runs, prompt user to re-run setup." |
+| Task 9.12 sentinel body diverges between runner (Task 9.10) and SKILL (Task 9.7 docs) | Inconsistent bodies in user vaults | Define the sentinel as a constant in `paperwiki.runners._stub_constants`; runner imports it; smoke test asserts both SKILL.md and runner constant match. |
 
 ### 10.6 Rollback notes
 
@@ -1458,6 +1924,22 @@ Comfortably fits the user's "1 release per 30 min" cadence.
   them findable: `grep -rl "Auto-created during digest auto-ingest"
   <vault>/Wiki/concepts/`); user can `rm -rf` them en masse or keep
   them as scaffolding.
+- **9.9**: `git revert` on scorer + reporter + setup SKILL. Existing
+  source files keep their pre-9.9 `related_concepts` lists (no
+  rewrite). Users with custom `wiki_topic_strength_threshold` in
+  their recipes get a YAML "unknown field" warning on next run —
+  document a one-liner removal in CHANGELOG.
+- **9.10**: `git revert` on runner + SKILL. Stubs already created by
+  the runner stay in user vaults (same sentinel-grep cleanup as
+  9.7). SKILL falls back to today's inline-Python path; v0.3.7
+  fragility returns. Mitigation: rolling back 9.10 alone is rare —
+  if it lands buggy, prefer a forward fix.
+- **9.11**: `git revert`. The structured log key changes back to
+  `dedup.vault.missing`; warning level returns. Pure observability
+  change.
+- **9.12**: `git revert`. Stubs created with the new sentinel keep
+  it in user vaults (harmless prose); the SKILL Process reverts to
+  the pre-9.12 prose.
 
 ### 10.7 Out of scope (Phase 9)
 
