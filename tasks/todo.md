@@ -261,7 +261,26 @@ slice (lint / mypy / pytest / `claude plugin validate`).
   on a fresh vault produces a meaningful overview AND auto-ingest
   creates concept stubs end-to-end without prompts; tag `v0.3.7`.
 
-### Phase 9 — Release v0.3.8 (per-paper synthesis + auto images)
+### Phase 9 — Release v0.3.8 (upgrade UX)
+
+- [ ] **9.8 — Standard upgrade flow (OMC-style).** Plan §10.2 Task 9.8.
+  Complexity **S**. Add `"skills": "./skills/"` to
+  `.claude-plugin/plugin.json`; rewrite README upgrade section to
+  document standard `/plugin uninstall paper-wiki@paper-wiki` + `/plugin
+  install paper-wiki@paper-wiki` + fresh `claude` session flow; remove
+  `rm -rf cache` language. Add three contract smoke tests:
+  `test_plugin_manifest_declares_skills_directory`,
+  `test_readme_documents_standard_upgrade_flow`,
+  `test_readme_does_not_recommend_manual_cache_nuke`. Version bump
+  0.3.7 → 0.3.8. CHANGELOG `[0.3.8]` entry.
+  **Acceptance check**: `pytest -x -q` green; `ruff check` clean;
+  `mypy --strict` clean; plugin.json has `"skills"` field.
+- [ ] **v0.3.8 Gate**: `pytest -q`, `ruff check`, `mypy --strict`,
+  `claude plugin validate .` all green; CHANGELOG `[0.3.8]` entry;
+  version bump in `pyproject.toml`, `__init__.py`, `plugin.json`;
+  tag `v0.3.8`.
+
+### Phase 9 — Release v0.3.9 (per-paper synthesis + auto images)
 
 - [ ] **9.4 — Per-paper Detailed report synthesis.** Plan §10.2 Task
   9.4. Complexity **M-L**. Extend `skills/digest/SKILL.md` Process
@@ -287,9 +306,9 @@ slice (lint / mypy / pytest / `claude plugin validate`).
   `wiki-ingest` in the right order; manual run with `auto_ingest_top=3`
   populates `Wiki/sources/<id>/images/` for top-3 papers; the next
   digest run inlines `![[...|700]]` teasers in those entries.
-- [ ] **v0.3.8 Gate**: same as v0.3.6 gate; manual full-cycle smoke
+- [ ] **v0.3.9 Gate**: same as v0.3.6 gate; manual full-cycle smoke
   test (run digest twice on a fresh vault; second run should have
-  inline figures + per-paper synthesis); tag `v0.3.8`.
+  inline figures + per-paper synthesis); tag `v0.3.9`.
 
 ### Phase 9 — Final checklist
 
@@ -299,8 +318,8 @@ slice (lint / mypy / pytest / `claude plugin validate`).
 - [ ] `ruff check src tests` clean.
 - [ ] `ruff format --check src tests` clean.
 - [ ] `claude plugin validate .` passes.
-- [ ] CHANGELOG entries for `[0.3.6]`, `[0.3.7]`, `[0.3.8]` complete.
-- [ ] Tag each release in turn: `v0.3.6`, `v0.3.7`, `v0.3.8`.
+- [ ] CHANGELOG entries for `[0.3.6]`, `[0.3.7]`, `[0.3.8]`, `[0.3.9]` complete.
+- [ ] Tag each release in turn: `v0.3.6`, `v0.3.7`, `v0.3.8`, `v0.3.9`.
 
 ---
 

@@ -1314,6 +1314,84 @@ user can prune en masse.
 
 ---
 
+#### Task 9.8 — Standard upgrade flow (OMC-style) → v0.3.8
+
+**Problem (discovered during v0.3.5–0.3.7 upgrade cycle)**:
+paper-wiki's `.claude-plugin/plugin.json` was missing the `"skills":
+"./skills/"` declaration that Claude Code uses to locate SKILL files at
+install time. Without it, `/plugin install` could leave the cache
+populated but the plugin metadata unable to resolve SKILL paths —
+producing the "already installed globally" + "Unknown command" failure
+mode that appeared repeatedly during 0.3.5–0.3.7 upgrades. The
+workaround was manual `rm -rf ~/.claude/plugins/cache/paper-wiki/` plus
+JSON editing — fragile and undiscoverable.
+
+OMC's `plugin.json` carries the declaration:
+
+```json
+"skills": "./skills/"
+```
+
+paper-wiki must do the same.
+
+**Solution**:
+
+1. Add `"skills": "./skills/"` to `.claude-plugin/plugin.json`. This
+   tells the Claude Code plugin loader where SKILLs live, making
+   `/plugin install` and `/plugin uninstall` + reinstall fully
+   idempotent.
+2. Rewrite the README upgrade section to document the **standard**
+   flow: `/plugin uninstall paper-wiki@paper-wiki` +
+   `/plugin install paper-wiki@paper-wiki` + fresh `claude` session.
+   Remove all language that instructs users to manually `rm -rf` cache
+   or edit JSON files (those were workarounds for the missing
+   declaration).
+3. Add three contract tests that pin the new shape so future
+   refactors cannot drop the declaration or regress the upgrade docs.
+
+**Acceptance criteria**:
+
+- **AC-9.8.1** `.claude-plugin/plugin.json` has a `"skills"` field
+  whose value is `"./skills/"` (or starts with `./skills`).
+- **AC-9.8.2** README contains the literal commands
+  `/plugin uninstall paper-wiki@paper-wiki` and
+  `/plugin install paper-wiki@paper-wiki` and the warning about
+  `claude -c` for post-upgrade sessions.
+- **AC-9.8.3** README does NOT contain `rm -rf` paired with
+  `cache/paper-wiki` as a normal upgrade step (manual JSON editing may
+  appear as a last-resort fallback note, but not in the primary flow).
+- **AC-9.8.4** `test_plugin_manifest_declares_skills_directory` green.
+- **AC-9.8.5** `test_readme_documents_standard_upgrade_flow` green.
+- **AC-9.8.6** `test_readme_does_not_recommend_manual_cache_nuke` green.
+- **AC-9.8.7** Full test suite passes (`pytest -x -q`); `ruff check`
+  and `mypy --strict` clean.
+
+**Verification**:
+
+- `pytest tests/test_smoke.py -k "upgrade or skills_directory or
+  cache_nuke"` green.
+- After v0.3.8 publishes to GitHub:
+  `/plugin uninstall paper-wiki@paper-wiki` →
+  `/plugin install paper-wiki@paper-wiki` →
+  fully exit + `claude` (no `-c`) →
+  `/paper-wiki:setup` resolves. No manual JSON editing required.
+
+**Complexity**: S (~15 min). One-line JSON fix + README prose +
+3 smoke tests. No Python source changes.
+
+**Dependencies**:
+- None. Independent of 9.1–9.7; can ship standalone as v0.3.8.
+
+**Risk**: very low. The JSON fix is a one-field addition; rollback =
+remove the field. README change is documentation-only. Tests are
+read-only assertions.
+
+**Note**: tasks 9.4 (per-paper synthesis) and 9.5 (auto image
+extraction), originally planned for v0.3.8, are deferred to v0.3.9 so
+v0.3.8 stays small and focused on the upgrade-UX fix.
+
+---
+
 ### 10.3 Dependency graph + parallelization
 
 ```
@@ -1346,7 +1424,8 @@ user can prune en masse.
 |---------|---------------|------------------|
 | v0.3.6  | 9.1 + 9.2 + 9.6 | Stale namespace gone; new digests have machine-targetable skeleton markers (no more "run SKILL after runner" prose); future regressions blocked by the invariant test. |
 | v0.3.7  | 9.3 + 9.7 | Today's Overview callout actually has cross-paper synthesis; auto-ingest no longer dies on fresh vaults — concept stubs are bootstrapped automatically with a sentinel marker for later review. |
-| v0.3.8  | 9.4 + 9.5 | Per-paper Detailed report has synthesized takeaways; auto-ingest-top papers get figures extracted automatically (visible on day 2). |
+| v0.3.8  | 9.8 | Plugin upgrade UX fixed: `"skills"` declaration added to `plugin.json`; standard `/plugin uninstall` + `/plugin install` flow now works without manual cache cleanup. |
+| v0.3.9  | 9.4 + 9.5 | Per-paper Detailed report has synthesized takeaways; auto-ingest-top papers get figures extracted automatically (visible on day 2). |
 
 Three small releases, each independently shippable. Total estimated
 work: 7 tasks at 15-60 min each = **3-4.5 hours of focused work**.
