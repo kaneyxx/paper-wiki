@@ -63,17 +63,41 @@ to `paperwiki:setup`.
 6. **Summarize the outcome.** Read the reporter output paths from the
    recipe and report: how many recommendations were emitted, where
    they were written, and the titles + composite scores of the top 3.
-7. **Auto-chain wiki-ingest when configured.** Read the recipe's
+7. **Synthesize Today's Overview.** Read the digest file at the path
+   emitted by the runner (the obsidian reporter's `output_dir`). Find
+   the line `<!-- paper-wiki:overview-slot -->` inside the
+   `> [!summary] Today's Overview` callout. Replace that single line
+   with 60–200 words of synthesized prose covering:
+   - Top trends across the N recommendations (e.g. "3 papers explore
+     VLA models, 2 explore diffusion-based generation")
+   - Quality / score distribution (e.g. "scores skew high; median 0.74")
+   - Suggested reading order (e.g. "start with #2 for the foundation
+     paper, then #5 for the application")
+
+   Every factual claim MUST cite the paper(s) it comes from using `#N`
+   markers matching the digest's paper indices (e.g. "...as in #1 and
+   #4"). Do not invent claims. Use only what's in the digest you just
+   read. Keep prose Obsidian-readable (callout-friendly: short
+   paragraphs, bullet-able if helpful).
+8. **Auto-chain wiki-ingest when configured.** Read the recipe's
    `auto_ingest_top` field. If `> 0`, take the top
    `min(auto_ingest_top, top_k)` papers from the digest and chain
-   `/paper-wiki:wiki-ingest <canonical-id>` for each, in score order.
-   The wiki-ingest SKILL handles its own idempotence (no-op when a
-   source is already folded into all relevant concepts), so safe to
-   run on every digest. Surface the per-paper outcome briefly to the
-   user — they should see "ingesting paper #1 → updated 2 concepts,
-   suggested 1 new concept" rather than a silent block of activity.
-   When `auto_ingest_top` is `0` (the default), skip this step.
-8. **Suggest a follow-up.** If the user has not configured a vault,
+   `/paper-wiki:wiki-ingest <canonical-id> --auto-bootstrap` for each,
+   in score order. The `--auto-bootstrap` flag tells wiki-ingest to
+   auto-stub any new concepts the source suggests, so a fresh vault
+   doesn't dead-end on paper #1 — missing concept articles are stubbed
+   automatically before the normal update loop runs. The wiki-ingest
+   SKILL handles its own idempotence (no-op when a source is already
+   folded into all relevant concepts), so safe to run on every digest.
+   Surface the per-paper outcome briefly to the user — they should see
+   "ingesting paper #1 → created 2 stubs, updated 1 concept" rather
+   than a silent block of activity. When `auto_ingest_top` is `0` (the
+   default), skip this step.
+
+   **Note:** interactive `/paper-wiki:wiki-ingest <id>` invocations
+   keep the manual confirm prompt — only the digest auto-chain uses
+   `--auto-bootstrap`.
+9. **Suggest a follow-up.** If the user has not configured a vault,
    suggest `/paper-wiki:setup`. If a paper looks interesting and was
    not auto-ingested, suggest `/paper-wiki:analyze <paper-id>` for a
    deeper dive or `/paper-wiki:wiki-ingest <paper-id>` to fold it
@@ -87,6 +111,8 @@ to `paperwiki:setup`.
 | "If the runner exits non-zero, the message is enough." | Exit codes are coarse. Read the structured log line (`digest.failed`) and explain the failure in plain English. |
 | "Skipping the env check is fine; venv usually exists." | First runs and venv corruption are exactly when this SKILL gets called. Always confirm the `.installed` stamp before invoking the runner. |
 | "Top 3 summary is fluff." | Without it the user re-opens the digest file to find anything notable. The summary makes the SKILL useful end-to-end. |
+| "I'll claim a trend even if only one paper supports it — sounds smarter." | One paper is not a trend. Cite specifically: "#3 explores X" rather than "the field is moving toward X". Every trend claim needs at least two papers. |
+| "I'll skip the `#N` citations — they look ugly." | Citations are how the user can verify and follow up. Without them the overview is ungrounded prose that erodes trust in the digest. |
 
 ## Red Flags
 
@@ -99,6 +125,10 @@ to `paperwiki:setup`.
 - The recipe references a `vault_path` that does not exist: dedup
   silently degrades to no-op. Warn the user before they wonder why
   duplicates are showing up.
+- **Today's Overview synthesis claims a topic that doesn't appear in
+  any paper's matched_topics or abstract** → STOP. The synthesis is
+  hallucinating. Re-read the digest carefully and re-synthesize using
+  only present claims.
 
 ## Verification
 

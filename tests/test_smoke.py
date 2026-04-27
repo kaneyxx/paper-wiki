@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.6"
+    assert data["version"] == "0.3.7"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -601,4 +601,103 @@ def test_no_stale_paperwiki_namespace() -> None:
     assert not hits, (
         f"Found {len(hits)} stale /paperwiki: reference(s) — use /paper-wiki: instead.\n"
         + "\n".join(hits)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.7 — auto-bootstrap mode (v0.3.7)
+# ---------------------------------------------------------------------------
+
+
+def test_wiki_ingest_skill_describes_auto_bootstrap_mode() -> None:
+    """wiki-ingest SKILL.md must document the --auto-bootstrap flag, the
+    auto_created: true frontmatter sentinel, the sentinel body string, and
+    the stub-then-update two-step flow."""
+    body = (REPO_ROOT / "skills" / "wiki-ingest" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "--auto-bootstrap" in body, "wiki-ingest SKILL.md must mention the --auto-bootstrap flag"
+    assert "auto_created: true" in body, (
+        "wiki-ingest SKILL.md must document the auto_created: true frontmatter sentinel"
+    )
+    assert "Auto-created during digest auto-ingest" in body, (
+        "wiki-ingest SKILL.md must include the sentinel body string "
+        "'Auto-created during digest auto-ingest'"
+    )
+    # Verify the two-step stub-then-update flow is documented
+    assert "stub" in body.lower(), (
+        "wiki-ingest SKILL.md must describe the stub step in the two-step flow"
+    )
+    assert "update" in body.lower(), (
+        "wiki-ingest SKILL.md must describe the update step in the two-step flow"
+    )
+
+
+def test_digest_skill_passes_auto_bootstrap_to_wiki_ingest() -> None:
+    """digest SKILL.md Process step 7 (auto-chain wiki-ingest) must pass
+    --auto-bootstrap when invoking /paper-wiki:wiki-ingest."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "--auto-bootstrap" in body, (
+        "digest SKILL.md must mention --auto-bootstrap near the auto-chained "
+        "/paper-wiki:wiki-ingest invocation"
+    )
+    # Both the flag and the command should appear in the same document
+    assert "/paper-wiki:wiki-ingest" in body, (
+        "digest SKILL.md must reference /paper-wiki:wiki-ingest"
+    )
+
+
+def test_wiki_lint_skill_surfaces_auto_created_stubs() -> None:
+    """wiki-lint SKILL.md must mention auto_created: true and a dedicated
+    'Needs review' bucket / category for auto-created stubs."""
+    body = (REPO_ROOT / "skills" / "wiki-lint" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "auto_created: true" in body, (
+        "wiki-lint SKILL.md must mention the auto_created: true frontmatter sentinel"
+    )
+    assert "needs review" in body.lower(), (
+        "wiki-lint SKILL.md must describe a 'Needs review' bucket for auto-created stubs"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.3 — Today's Overview synthesis (v0.3.7)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_describes_overview_synthesis() -> None:
+    """digest SKILL.md must document the Today's Overview synthesis step with:
+    - reference to the overview-slot marker
+    - Today's Overview callout context
+    - instruction to read the digest file from disk
+    - instruction to write back (replace the marker)
+    - #N cite-marker requirement
+    - 60-200 word target length
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "paper-wiki:overview-slot" in body, (
+        "digest SKILL.md must reference the 'paper-wiki:overview-slot' marker "
+        "(the slot to replace in the Today's Overview callout)"
+    )
+    assert "Today's Overview" in body, (
+        "digest SKILL.md must mention 'Today's Overview' callout context"
+    )
+    # Must instruct to read the digest file after the runner finishes
+    assert "read" in body.lower(), (
+        "digest SKILL.md must instruct to read the digest file from disk after the runner finishes"
+    )
+    # Must instruct to write back / replace the marker
+    assert "replace" in body.lower(), (
+        "digest SKILL.md must instruct to replace the marker with synthesized prose"
+    )
+    assert "#N" in body, (
+        "digest SKILL.md must document the #N cite-marker requirement (every claim cites a paper)"
+    )
+    # Check for 60-200 word target length
+    assert "60" in body, (
+        "digest SKILL.md must specify the 60-word minimum target length for the overview"
+    )
+    assert "200" in body, (
+        "digest SKILL.md must specify the 200-word maximum target length for the overview"
     )
