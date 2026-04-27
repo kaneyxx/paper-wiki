@@ -89,13 +89,8 @@ def render_obsidian_digest(
 
 
 def _render_overview_callout() -> str:
-    """Top-of-digest synthesis placeholder (Claude side fills it in)."""
-    return (
-        "> [!summary] Today's Overview\n"
-        "> _Run `/paperwiki:digest` SKILL after this runner to fill in the\n"
-        "> cross-paper synthesis here — overall trends, quality distribution,\n"
-        "> research hotspots, suggested reading order._\n"
-    )
+    """Top-of-digest synthesis slot (SKILL fills this in via paper-wiki:overview-slot)."""
+    return "> [!summary] Today's Overview\n> <!-- paper-wiki:overview-slot -->\n"
 
 
 def _render_frontmatter(target_date: str, count: int) -> str:
@@ -131,8 +126,9 @@ def _render_recommendation(
        has files (extract-images was run for this paper).
     4. ``### Abstract`` — abstract under a proper heading so Obsidian's
        outline pane shows it as a collapsible block.
-    5. ``### Detailed report`` — pointer at ``/paperwiki:analyze`` for
-       a six-section deep-dive note in ``Sources/``.
+    5. ``### Detailed report`` — HTML-comment marker
+       ``<!-- paper-wiki:per-paper-slot:{canonical_id} -->`` that SKILL
+       synthesis passes (v0.3.7+) will replace with synthesized content.
     """
     paper = rec.paper
     score = rec.score
@@ -172,12 +168,7 @@ def _render_recommendation(
 
     abstract_block = "### Abstract\n\n" + paper.abstract.strip()
 
-    detailed = (
-        "### Detailed report\n\n"
-        f"_Run `/paperwiki:analyze {canonical_id}` for a six-section deep-dive "
-        f"in ``Sources/``, or click [[{source_filename}]] to jump to the "
-        "wiki source stub (which holds figures, abstract, and your notes)._"
-    )
+    detailed = f"### Detailed report\n\n<!-- paper-wiki:per-paper-slot:{canonical_id} -->"
 
     blocks = [
         f"## {index}. {title_link}\n",
@@ -221,7 +212,7 @@ class ObsidianReporter:
     recommendation as a per-paper source file under
     ``vault_path/Wiki/sources/`` via :class:`MarkdownWikiBackend`. This is
     the digest-side half of the wiki ingest loop — concept synthesis is
-    still driven by ``/paperwiki:wiki-ingest`` afterwards.
+    still driven by ``/paper-wiki:wiki-ingest`` afterwards.
     """
 
     name = "obsidian"
