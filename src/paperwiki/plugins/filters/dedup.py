@@ -157,7 +157,11 @@ class MarkdownVaultKeyLoader:
 
     async def load(self, ctx: RunContext) -> DedupKeys:
         if not self.root.exists() or not self.root.is_dir():
-            logger.warning("dedup.vault.missing", path=str(self.root))
+            # Fresh-vault first-run is the dominant case here; a real
+            # configuration mistake will show up as zero dedup entries
+            # across many runs (caught by digest SKILL Red Flags). DEBUG
+            # keeps the user's transcript clean on day one.
+            logger.debug("dedup.vault.missing", path=str(self.root))
             return DedupKeys.empty()
 
         arxiv_ids: set[str] = set()

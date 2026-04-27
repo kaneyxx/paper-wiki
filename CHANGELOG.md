@@ -9,6 +9,26 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-04-27
+
+### Fixed
+
+- **Quiet runner DEBUG noise leaking to user transcript.** The
+  `wiki_ingest_plan` runner emitted a `logger.debug(
+  "wiki_ingest_plan.stub_created", ...)` per stub created. With loguru's
+  default DEBUG level, this leaked into every digest auto-chain run as
+  three lines per paper of `2026-... | DEBUG | __main__:_bootstrap_
+  missing_concepts:217 - wiki_ingest_plan.stub_created`. The
+  `created_stubs` field in the JSON output already conveys the same
+  information; deleted the redundant log call.
+- **Quiet `dedup.vault.missing` warnings on fresh-vault first-run.**
+  (Plan Task 9.11 partial.) When a recipe references vault subdirs that
+  don't exist yet (the dominant case during first-time setup), the
+  dedup loader logged WARNING for each missing path — three scary lines
+  before the real work even started. Downgraded to DEBUG; a real
+  misconfiguration still surfaces as zero dedup entries which the
+  digest SKILL Red Flags catch.
+
 ## [0.3.11] - 2026-04-27
 
 ### Fixed

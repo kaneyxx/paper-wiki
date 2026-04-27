@@ -214,11 +214,6 @@ async def _bootstrap_missing_concepts(
             await fh.write(rendered)
 
         created.append(name)
-        logger.debug(
-            "wiki_ingest_plan.stub_created",
-            concept=name,
-            source_id=source_id,
-        )
 
     return created
 
