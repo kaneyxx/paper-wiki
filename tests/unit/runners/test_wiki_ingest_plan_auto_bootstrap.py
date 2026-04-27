@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -273,6 +274,7 @@ class TestCliAutoBootstrapFlag:
             [sys.executable, "-m", "paperwiki.runners.wiki_ingest_plan", "--help"],
             capture_output=True,
             text=True,
+            env={**os.environ, "NO_COLOR": "1", "TERM": "dumb"},
         )
         assert result.returncode == 0, result.stderr
         assert "--auto-bootstrap" in result.stdout, (
@@ -286,6 +288,7 @@ class TestCliAutoBootstrapFlag:
             [sys.executable, "-m", "paperwiki.runners.wiki_ingest_plan", "--help"],
             capture_output=True,
             text=True,
+            env={**os.environ, "NO_COLOR": "1", "TERM": "dumb"},
         )
         assert result.returncode == 0, result.stderr
         assert flag_form in result.stdout
