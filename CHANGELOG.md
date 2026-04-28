@@ -9,6 +9,161 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.29] - 2026-04-28
+
+### Changed
+
+- **Centralised paper-wiki venv at `${PAPERWIKI_HOME}/venv`** (Task 9.31,
+  D-9.31.1 — D-9.31.4). Previously each plugin version lived under its
+  own `~/.claude/plugins/cache/paper-wiki/paper-wiki/<ver>/.venv/`. The
+  v0.3.28 user smoke surfaced two pain points: (1) `/reload-plugins`
+  never bootstraps the venv (only SessionStart does), so the first
+  `paperwiki <X>` call after upgrade crashed with
+  `.venv/bin/paperwiki: No such file or directory`; (2) `.bak/` cache
+  directories accumulated forever with no cleanup path. Both addressed
+  in this release.
+
+  All paper-wiki user state now co-locates under one root:
+
+  ```
+  ${PAPERWIKI_HOME:-~/.config/paper-wiki}/
+  ├── recipes/         # YAML recipes (existing v0.3.4+)
+  ├── secrets.env      # API keys (existing v0.3.4+)
+  └── venv/            # NEW — shared venv across plugin versions
+  ```
+
+  Override via `$PAPERWIKI_HOME` (preferred), or the legacy
+  `$PAPERWIKI_CONFIG_DIR` (still honored as alias for backward compat),
+  or finer-grained `$PAPERWIKI_VENV_DIR` for users who want config in
+  the default but venv elsewhere.
+
+  `${CLAUDE_PLUGIN_ROOT}/.venv` is now a **symlink** to
+  `${PAPERWIKI_HOME}/venv`, so existing SKILL invocations
+  (`${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.X`)
+  keep working without changes.
+
+  Migration on first v0.3.29 upgrade: any legacy per-version `.venv/`
+  directory is COPIED to the shared path (preserving already-synced
+  deps), then replaced with the symlink. No re-sync needed.
+
+### Added
+
+- **Self-bootstrapping `~/.local/bin/paperwiki` shim** (Task 9.32 /
+  D-9.32.1). When the shared venv is missing, the shim now inline-invokes
+  `${CLAUDE_PLUGIN_ROOT}/hooks/ensure-env.sh` before exec, so users
+  hitting the `/reload-plugins` UX trap still get a working
+  `paperwiki <X>` from a fresh terminal. One-time cost ~5-10s on the
+  first cold run after a brand-new install; subsequent calls are
+  fast-path noop. The shim respects the full env-var precedence chain
+  (`PAPERWIKI_VENV_DIR > PAPERWIKI_HOME > PAPERWIKI_CONFIG_DIR > default`).
+
+- **`paperwiki gc-bak` runner + `PAPERWIKI_BAK_KEEP=3` retention**
+  (Task 9.33 / D-9.33.1 — D-9.33.3). Power users no longer have to
+  manually `rm -rf` historic cache directories.
+
+  ```
+  paperwiki gc-bak [--keep-recent N] [--max-age-days N]
+                   [--dry-run] [-v]
+  ```
+
+  - Default `--keep-recent` resolves from `$PAPERWIKI_BAK_KEEP`
+    (fallback `3`). Rationale for 3: 1 = no rollback target;
+    2 = single-step rollback; 3 = current + two backup targets,
+    covering "I forgot which version I came from" cases.
+  - Combined modes: when both `--keep-recent` and `--max-age-days`
+    are passed, a `.bak` is removed only if it falls outside the
+    recent-N window AND is older than the age threshold (intersection
+    — preserves recent-but-old caches you might still need).
+  - Filename pattern guard
+    (`^\d+\.\d+\.\d+\.bak\.\d{8}T\d{6}Z$`) — user-added directories
+    in the cache root are surfaced under `skipped_unrecognized` and
+    never touched.
+  - `paperwiki update` now auto-prunes after a successful upgrade,
+    keeping the most-recent N `.bak` directories per
+    `$PAPERWIKI_BAK_KEEP`. `PAPERWIKI_BAK_KEEP=0` is the escape hatch
+    (preserve all `.bak`, useful for power users who manage retention
+    themselves).
+  - JSON output mirrors the v0.3.28 `gc-archive` shape.
+
+- **`paperwiki where` CLI subcommand** (Task 9.35 / D-9.31.5). Prints
+  every paper-wiki path on disk with sizes:
+
+  ```
+  $ paperwiki where
+  config + venv (PAPERWIKI_HOME): /Users/.../paper-wiki  (252.8 MB)
+    ├── recipes/        (3 files, 12.4 KB)
+    ├── secrets.env     (256 B)
+    └── venv/           (252.4 MB, deps for 0.3.29)
+  plugin cache                  : /Users/.../paper-wiki  (38.2 MB)
+    ├── 0.3.29/        (current)
+    ├── 0.3.28.bak.20260428T150731Z
+    ├── 0.3.27.bak.20260301T120000Z
+    └── 0.3.26.bak.20260101T000000Z
+  marketplace clone             : /Users/.../paper-wiki  (8.1 MB)
+  shim                          : /Users/.../paperwiki  (562 B)
+
+  total disk used: 299.1 MB
+  ```
+
+  `--json` emits the same data as a machine-parseable shape for
+  cron / scripting. Replaces the user's mental "where is everything?"
+  check with one command. Pairs with `paperwiki gc-bak --dry-run` for
+  pre-cleanup audit and `paperwiki uninstall` + `rm -rf
+  $PAPERWIKI_HOME` for the full nuke recipe.
+
+- **`paperwiki status` 4th line: `bak directories : N kept; oldest <date>`**
+  surfaces the retention state at a glance so users see the cleanup
+  history without having to invoke `where` or `gc-bak`.
+
+- **3 new internal helpers** in `paperwiki._internal.paths`:
+  `resolve_paperwiki_home()`, `resolve_paperwiki_venv_dir()`,
+  `resolve_paperwiki_recipes_dir()` — single source of truth for the
+  env-var precedence chain consumed by both Python runners and bash
+  hooks.
+
+### Documentation
+
+- README "Upgrading" section calls out explicitly that
+  **`/reload-plugins` is INSUFFICIENT** for first-run-after-version-change
+  (paired with the `.venv/bin/paperwiki: No such file or directory`
+  troubleshooting row, D-9.34.1).
+- README new section "Where paper-wiki keeps your stuff (v0.3.29+)"
+  documents the single-root layout, `PAPERWIKI_HOME` override, and
+  `paperwiki where` workflow. Notes the trade-off for dotfiles
+  managers / Time Machine users (the venv lives under `~/.config/`,
+  add to ignore list / exclude from backup if needed).
+- README troubleshooting gains 3 new rows covering the venv-missing
+  symptom, `.bak/` accumulation cleanup, and the `paperwiki where`
+  inventory command.
+- `skills/update/SKILL.md` Process Step 3 spells out the
+  `/reload-plugins` insufficiency with the exact failure mode users
+  will encounter.
+- `skills/uninstall/SKILL.md` notes the deeper-clean recipe
+  (`paperwiki gc-bak --keep-recent 0` + `rm -rf $PAPERWIKI_HOME`)
+  paired with `paperwiki where` as the safe inventory step.
+
+### Tests
+
+- 14 new unit tests in `tests/unit/_internal/test_paths.py` for the
+  full env-var precedence chain (default, `PAPERWIKI_HOME` override,
+  legacy `PAPERWIKI_CONFIG_DIR` alias, finer-grained
+  `PAPERWIKI_VENV_DIR`, empty-string handling, `~` expansion).
+- 8 new integration tests in `tests/integration/test_venv_migration.py`
+  pinning the legacy → shared migration end-to-end (real-dir → symlink,
+  copy semantics, idempotency, all override paths).
+- 16 new unit tests in `tests/unit/runners/test_gc_bak.py` covering
+  filename guard, keep-recent N, max-age-days, combined modes,
+  dry-run, idempotency, missing cache root, CLI exit codes,
+  `PAPERWIKI_BAK_KEEP` env var honoring.
+- 13 new unit tests in `tests/unit/runners/test_where.py` covering
+  PathReport sizing, build_where_report aggregation, JSON output
+  shape, missing-path graceful handling.
+- 4 new unit tests in `tests/unit/test_cli.py` (auto-prune in
+  `update`, status 4th line, expanded subcommand surface to 14
+  commands).
+- 2 new smoke tests in `tests/test_smoke.py` pin the v0.3.29 shim
+  tag-line + self-bootstrap branch + env-var precedence chain.
+
 ## [0.3.28] - 2026-04-28
 
 ### Added

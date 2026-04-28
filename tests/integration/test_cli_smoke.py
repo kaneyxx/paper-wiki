@@ -37,6 +37,8 @@ _EXPECTED_COMMANDS: tuple[str, ...] = (
     "extract-images",
     "migrate-sources",
     "gc-archive",
+    "gc-bak",
+    "where",
 )
 
 
@@ -98,6 +100,8 @@ class TestPythonModuleParity:
             "paperwiki.runners.migrate_sources",
             "paperwiki.runners.migrate_recipe",
             "paperwiki.runners.gc_digest_archive",
+            "paperwiki.runners.gc_bak",
+            "paperwiki.runners.where",
         ],
     )
     def test_python_dash_m_help_still_works(self, runner_module: str) -> None:

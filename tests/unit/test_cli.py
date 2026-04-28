@@ -284,7 +284,156 @@ _EXPECTED_PAPERWIKI_COMMANDS: tuple[str, ...] = (
     "extract-images",
     "migrate-sources",
     "gc-archive",
+    "gc-bak",
+    "where",
 )
+
+
+def _make_bak_dir(cache_base: Path, name: str) -> Path:
+    """Synthesise a fake `.bak.<ts>` directory under cache_base for tests."""
+    cache_base.mkdir(parents=True, exist_ok=True)
+    bak = cache_base / name
+    bak.mkdir()
+    (bak / "sentinel.txt").write_text("seed", encoding="utf-8")
+    return bak
+
+
+class TestCliUpdateAutoPruneBak:
+    """Task 9.33 / D-9.33.2: `paperwiki update` auto-prunes old .bak after success."""
+
+    def test_keeps_recent_n_when_paperwiki_bak_keep_set(
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import paperwiki.cli as cli_mod
+
+        paths = _patch_cli_paths(claude_home)
+        marketplace_dir = paths["default_marketplace"]
+        _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
+        _make_installed_plugins("0.3.29", paths["installed_plugins"])
+        _make_settings(paths["settings"], enabled=True)
+        cache_dir = paths["cache_base"] / "0.3.29"
+        cache_dir.mkdir(parents=True)
+
+        # Seed 5 historic .bak directories.
+        for i in range(5):
+            _make_bak_dir(paths["cache_base"], f"0.3.{20 + i}.bak.2026010{i + 1}T000000Z")
+
+        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
+        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+        monkeypatch.setattr(cli_mod, "_git_pull", _noop_git_pull)
+        monkeypatch.setenv("PAPERWIKI_BAK_KEEP", "2")
+
+        from typer.testing import CliRunner
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["update", "--marketplace-dir", str(marketplace_dir)]
+        )
+        assert result.exit_code == 0, result.output
+        # The cache rename creates a new bak (0.3.29.bak.<ts>); after prune
+        # we should keep the newest 2 (one of which is the new bak).
+        remaining = sorted(p.name for p in paths["cache_base"].iterdir() if p.is_dir())
+        bak_dirs = [n for n in remaining if ".bak." in n]
+        assert len(bak_dirs) == 2, (
+            f"expected 2 bak dirs after prune (PAPERWIKI_BAK_KEEP=2); got {bak_dirs}"
+        )
+
+    def test_paperwiki_bak_keep_zero_skips_prune(
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import paperwiki.cli as cli_mod
+
+        paths = _patch_cli_paths(claude_home)
+        marketplace_dir = paths["default_marketplace"]
+        _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
+        _make_installed_plugins("0.3.29", paths["installed_plugins"])
+        _make_settings(paths["settings"], enabled=True)
+        cache_dir = paths["cache_base"] / "0.3.29"
+        cache_dir.mkdir(parents=True)
+
+        for i in range(3):
+            _make_bak_dir(paths["cache_base"], f"0.3.{20 + i}.bak.2026010{i + 1}T000000Z")
+
+        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
+        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+        monkeypatch.setattr(cli_mod, "_git_pull", _noop_git_pull)
+        monkeypatch.setenv("PAPERWIKI_BAK_KEEP", "0")
+
+        from typer.testing import CliRunner
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["update", "--marketplace-dir", str(marketplace_dir)]
+        )
+        assert result.exit_code == 0, result.output
+        # All 3 historic baks + the new bak from this update preserved.
+        bak_dirs = [
+            p.name for p in paths["cache_base"].iterdir() if p.is_dir() and ".bak." in p.name
+        ]
+        assert len(bak_dirs) >= 3, (
+            f"PAPERWIKI_BAK_KEEP=0 must skip prune; expected >= 3 bak dirs, got {bak_dirs}"
+        )
+
+
+class TestCliStatusBakLine:
+    """Task 9.33: `paperwiki status` shows a 4th line with .bak retention state."""
+
+    def test_no_bak_shows_no_backups(
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import paperwiki.cli as cli_mod
+
+        paths = _patch_cli_paths(claude_home)
+        marketplace_dir = paths["default_marketplace"]
+        _make_plugin_json("0.3.29", marketplace_dir / ".claude-plugin")
+        _make_installed_plugins("0.3.29", paths["installed_plugins"])
+        _make_settings(paths["settings"], enabled=True)
+        paths["cache_base"].mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
+        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+
+        from typer.testing import CliRunner
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["status", "--marketplace-dir", str(marketplace_dir)]
+        )
+        assert result.exit_code == 0, result.output
+        assert "bak directories" in result.output
+        assert "no backups" in result.output
+
+    def test_bak_count_and_oldest_date(
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import paperwiki.cli as cli_mod
+
+        paths = _patch_cli_paths(claude_home)
+        marketplace_dir = paths["default_marketplace"]
+        _make_plugin_json("0.3.29", marketplace_dir / ".claude-plugin")
+        _make_installed_plugins("0.3.29", paths["installed_plugins"])
+        _make_settings(paths["settings"], enabled=True)
+
+        _make_bak_dir(paths["cache_base"], "0.3.27.bak.20260101T000000Z")
+        _make_bak_dir(paths["cache_base"], "0.3.28.bak.20260301T120000Z")
+
+        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
+        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+
+        from typer.testing import CliRunner
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["status", "--marketplace-dir", str(marketplace_dir)]
+        )
+        assert result.exit_code == 0, result.output
+        assert "2 kept" in result.output
+        # The oldest bak was 2026-01-01 — date should appear human-formatted.
+        assert "2026-01-01" in result.output
 
 
 class TestCliSubcommandSurface:
@@ -340,6 +489,7 @@ class TestCliRunnerImports:
             _digest_app,
             _extract_images_app,
             _gc_archive_app,
+            _gc_bak_app,
             _migrate_recipe_app,
             _migrate_sources_app,
             _wiki_compile_app,
@@ -352,6 +502,7 @@ class TestCliRunnerImports:
             ("digest", _digest_app),
             ("extract-images", _extract_images_app),
             ("gc-archive", _gc_archive_app),
+            ("gc-bak", _gc_bak_app),
             ("migrate-recipe", _migrate_recipe_app),
             ("migrate-sources", _migrate_sources_app),
             ("wiki-compile", _wiki_compile_app),

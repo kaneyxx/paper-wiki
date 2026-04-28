@@ -72,6 +72,21 @@ Substitute `${CLAUDE_PLUGIN_ROOT}/.venv/bin/paperwiki uninstall` if the
 user reports `paperwiki: command not found` (their PATH doesn't
 include `~/.local/bin`).
 
+If the user asks for a deeper clean (recover disk space, switch
+machines, etc.), surface the full path list via `paperwiki where`
+and tell them which directories to remove manually:
+
+- `paperwiki gc-bak --keep-recent 0` — drops every historical
+  `<ver>.bak.<ts>` cache directory (run BEFORE `paperwiki uninstall`
+  if disk recovery is the priority).
+- `rm -rf ~/.config/paper-wiki/` — wipes the user-controlled root
+  (`PAPERWIKI_HOME`): recipes + secrets + shared venv. Reinstalling
+  later will recreate the venv but recipes / secrets must be
+  rebuilt with `/paper-wiki:setup`.
+
+`paperwiki where` is the safe inventory before any of this — run it
+first so the user can SEE what would be lost.
+
 ### Step 2 — Do NOT shell out
 
 Even if the user insists "just do it from here", explain that the

@@ -79,9 +79,14 @@ claude         # open a fresh session
 /plugin install paper-wiki@paper-wiki
 ```
 
-> **Note**: don't use `claude -c` after an upgrade — slash command and
-> SKILL changes only take effect in fresh sessions. This applies to all
-> Claude Code plugins, not just paper-wiki.
+> **Required after a version bump**: `/exit` then a brand-new `claude`
+> process. **`/reload-plugins` is NOT enough.** SessionStart hooks
+> (which bootstrap the plugin venv) only fire on fresh sessions; without
+> them the new version's `paperwiki` binary may not be set up in time
+> and SKILLs that shell out will fail with
+> `.venv/bin/paperwiki: No such file or directory`. The v0.3.29+ shim
+> auto-bootstraps from a fresh terminal, but inside-Claude SKILL
+> invocations still rely on SessionStart firing.
 
 ### Manual upgrade (fallback)
 
@@ -98,19 +103,63 @@ Then fully exit and start a fresh session. If `/plugin install` says
 `paper-wiki@paper-wiki` from `~/.claude/plugins/installed_plugins.json`
 manually before reinstalling.
 
-### Advanced: custom config location (dotfiles users)
+### Where paper-wiki keeps your stuff (v0.3.29+)
 
-By default paper-wiki stores your personal recipe and secrets under
-`~/.config/paper-wiki/`. If you keep your config under a custom path
-(e.g. `~/dotfiles/paper-wiki/`), set the `PAPERWIKI_CONFIG_DIR`
-environment variable **before** running the setup wizard and paper-wiki
-will use that directory instead. Resolution priority:
+Run `paperwiki where` to see every paper-wiki path on disk with sizes:
+
+```bash
+paperwiki where           # human-readable indented tree
+paperwiki where --json    # machine-parseable
+```
+
+Default layout:
 
 ```
-1. $PAPERWIKI_CONFIG_DIR          (if set)
-2. $XDG_CONFIG_HOME/paper-wiki    (if XDG_CONFIG_HOME is set)
-3. ~/.config/paper-wiki           (default)
+${PAPERWIKI_HOME:-~/.config/paper-wiki}/   # YOU control this root
+├── recipes/        # YAML recipes from /paper-wiki:setup
+├── secrets.env     # API keys (chmod 600)
+└── venv/           # shared venv across plugin versions
+
+~/.claude/plugins/cache/paper-wiki/paper-wiki/   # Claude Code controls this
+├── <current>/      # active install
+├── <ver>.bak.<ts>  # rollback target (PAPERWIKI_BAK_KEEP=3 by default)
+├── <ver>.bak.<ts>
+...
+
+~/.local/bin/paperwiki   # version-agnostic CLI shim
 ```
+
+Override the user-controlled root with `PAPERWIKI_HOME`:
+
+```bash
+export PAPERWIKI_HOME=~/dotfiles/paper-wiki
+```
+
+Resolution priority (precedence chain):
+
+```
+1. $PAPERWIKI_VENV_DIR           # finer-grained: only the venv
+2. $PAPERWIKI_HOME               # canonical root (recipes + secrets + venv)
+3. $PAPERWIKI_CONFIG_DIR         # legacy alias (v0.3.4–v0.3.28); still works
+4. ~/.config/paper-wiki          # default
+```
+
+To clean every paper-wiki user-controlled file:
+
+```bash
+paperwiki where           # see what's there
+paperwiki uninstall       # removes Claude-Code-managed cache + JSON
+rm -rf ~/.config/paper-wiki   # nukes user-controlled root (recipes + secrets + venv)
+```
+
+Bak retention is configurable via `PAPERWIKI_BAK_KEEP` (default `3`)
+and can be inspected/cleaned anytime via `paperwiki gc-bak --dry-run`.
+
+> **Note for dotfiles / Time Machine users**: `${PAPERWIKI_HOME}/venv/`
+> contains a Python virtualenv (~250 MB). Add it to your dotfiles
+> manager's ignore list (e.g. chezmoi `ignore`, yadm `gitignore`),
+> and remember that macOS Time Machine will back it up unless you
+> exclude it manually (`tmutil addexclusion ~/.config/paper-wiki/venv`).
 
 ## First-run walkthrough
 
@@ -320,6 +369,9 @@ contradictions and stale entries.
 | `/plugin install` says "already installed" but `/paper-wiki:setup` says "Unknown command" | Stale plugin state — cache and metadata are out of sync | Run `/plugin uninstall paper-wiki@paper-wiki`, then `/plugin install paper-wiki@paper-wiki`, then fully exit and start a fresh `claude` session (not `claude -c`). As a last resort, manually remove `paper-wiki@paper-wiki` from `~/.claude/plugins/installed_plugins.json` before reinstalling. |
 | MCP servers added via `claude mcp add` don't show in `/mcp` UI | Active session loaded MCP config at startup; doesn't hot-reload | Fully `/exit` and start a new `claude` session |
 | Setup wizard shows weird "Topics (1)/(2)" tabs or "Custom kw" labels | Pre-v0.3.4 setup SKILL violated AskUserQuestion 4-option/header schema | Upgrade plugin: `/plugin update paper-wiki` (then nuke cache + reinstall if update doesn't take) |
+| `paperwiki: line N: .venv/bin/paperwiki: No such file or directory` | New plugin version was installed via `/plugin install` + `/reload-plugins` (which doesn't fire SessionStart hooks), so the venv hasn't bootstrapped yet | v0.3.29+: simply rerun `paperwiki status` from a fresh terminal — the shim auto-bootstraps. Older versions: run `bash ~/.claude/plugins/cache/paper-wiki/paper-wiki/<ver>/hooks/ensure-env.sh` manually, or just `/exit` and start a new `claude` session. |
+| `.bak/` directories pile up under the plugin cache | `paperwiki update` retains historical caches as rollback targets | v0.3.29+: `paperwiki gc-bak --dry-run` shows what would be cleaned; default retention is 3 (configurable via `PAPERWIKI_BAK_KEEP`). |
+| Want a one-shot list of all paper-wiki paths on disk | — | `paperwiki where` (v0.3.29+) prints config / venv / cache / shim with sizes; `--json` for scripting. |
 
 ## Architecture and contributing
 

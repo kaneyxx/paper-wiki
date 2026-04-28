@@ -79,9 +79,24 @@ Next:
   3. Inside: /plugin install paper-wiki@paper-wiki
 ```
 
-Steps 1–2 must happen in a NEW terminal window — Claude Code's
-plugin-cache reload only takes effect on a fresh process. Make this
-explicit if the user asks "can I just `/plugin install` from here?".
+**Required** (Task 9.34 / D-9.34.1): Steps 1–2 must happen in a NEW
+`claude` process. **`/reload-plugins` is NOT enough** to apply the new
+version — `/reload-plugins` refreshes the loaded SKILL prose but does
+NOT trigger SessionStart hooks, which are responsible for bootstrapping
+the new version's venv. Without SessionStart, the new
+`${VENV_DIR}/bin/paperwiki` may not exist yet, and the next SKILL
+that shells out to `paperwiki <X>` will fail with
+`paperwiki: line N: .venv/bin/paperwiki: No such file or directory`.
+
+The v0.3.29 `~/.local/bin/paperwiki` shim self-heals when invoked from
+a fresh terminal (it detects the missing venv and inline-bootstraps
+via `ensure-env.sh`), so power users running `paperwiki status` from
+a new shell window are fine. But inside-Claude SKILL invocations rely
+on the SessionStart bootstrap completing first.
+
+Make this explicit if the user asks "can I just `/plugin install`
+from here?" or "what's wrong with `/reload-plugins`?". The answer is
+always: `/exit` then a brand-new `claude` session.
 
 ## Common Rationalizations
 

@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.28"
+    assert data["version"] == "0.3.29"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1453,10 +1453,10 @@ def test_ensure_env_contains_shim_tag() -> None:
     """
     script = REPO_ROOT / "hooks" / "ensure-env.sh"
     body = script.read_text(encoding="utf-8")
-    expected_tag = "# paperwiki — shim that always invokes the latest installed venv binary."
+    expected_tag = "# paperwiki shim — v0.3.29 (shared venv + self-bootstrap)."
     assert expected_tag in body, (
-        "hooks/ensure-env.sh must contain the shim tag line so the "
-        "~/.local/bin/paperwiki shim is installed on SessionStart"
+        "hooks/ensure-env.sh must contain the v0.3.29 shim tag line so "
+        "old shims get overwritten on first SessionStart after upgrade"
     )
 
 
@@ -1473,6 +1473,43 @@ def test_ensure_env_shim_block_is_idempotent_guard() -> None:
     )
 
 
+def test_ensure_env_shim_contains_self_bootstrap_branch() -> None:
+    """Task 9.32 / D-9.32.1: shim must self-bootstrap when shared venv is missing.
+
+    The heredoc in hooks/ensure-env.sh writes a shim that detects a
+    missing ``$VENV_DIR/bin/python`` and inline-invokes
+    ``ensure-env.sh`` before exec, so users hitting the
+    ``/reload-plugins`` UX trap (no SessionStart fires) still get a
+    working ``paperwiki`` from a fresh terminal.
+    """
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    assert "shared venv missing at $VENV_DIR; bootstrapping..." in body, (
+        "shim heredoc must announce missing-venv bootstrap to stderr"
+    )
+    assert 'bash "$CACHE_ROOT/$LATEST/hooks/ensure-env.sh"' in body, (
+        "shim heredoc must invoke the latest cached ensure-env.sh when the shared venv is missing"
+    )
+
+
+def test_ensure_env_shim_respects_paperwiki_home_precedence() -> None:
+    """Task 9.32: shim heredoc must honor the full env-var precedence chain.
+
+    Order: PAPERWIKI_VENV_DIR > PAPERWIKI_HOME > PAPERWIKI_CONFIG_DIR > default.
+    """
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    # The heredoc inlines the same precedence chain as the parent hook,
+    # so users can override either var.
+    assert (
+        'PAPERWIKI_HOME_RESOLVED="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"'
+        in body
+    ), "shim heredoc must resolve PAPERWIKI_HOME with legacy fallback"
+    assert 'VENV_DIR="${PAPERWIKI_VENV_DIR:-$PAPERWIKI_HOME_RESOLVED/venv}"' in body, (
+        "shim heredoc must let PAPERWIKI_VENV_DIR override the venv path"
+    )
+
+
 def test_ensure_env_shim_warns_if_local_bin_not_on_path() -> None:
     """ensure-env.sh must emit a one-time PATH warning when ~/.local/bin is missing."""
     script = REPO_ROOT / "hooks" / "ensure-env.sh"
@@ -1486,22 +1523,40 @@ def test_ensure_env_shim_warns_if_local_bin_not_on_path() -> None:
     )
 
 
+def _setup_v0329_idempotent_state(tmp_path: Path, version: str = "0.0.1") -> Path:
+    """Set up a fake plugin root + pre-bootstrapped shared venv that will
+    short-circuit ensure-env.sh's idempotent-skip branch (Task 9.31).
+
+    Returns the plugin_root path. Caller must set CLAUDE_PLUGIN_ROOT and
+    HOME accordingly.
+    """
+    plugin_root = tmp_path / "plugin"
+    init_py = plugin_root / "src" / "paperwiki" / "__init__.py"
+    init_py.parent.mkdir(parents=True)
+    init_py.write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+
+    # Pre-bootstrapped shared venv at the default location (under
+    # PAPERWIKI_HOME = $HOME/.config/paper-wiki). Stamp matches version
+    # + symlink at $PLUGIN_ROOT/.venv -> shared.
+    shared_venv = tmp_path / ".config" / "paper-wiki" / "venv"
+    (shared_venv / "bin").mkdir(parents=True)
+    (shared_venv / ".installed").write_text(version, encoding="utf-8")
+    (plugin_root / ".venv").symlink_to(shared_venv)
+
+    return plugin_root
+
+
 def test_ensure_env_shim_integration(tmp_path: Path) -> None:
     """Integration: running ensure-env.sh in a temp HOME creates the shim.
 
-    Sets up a fake plugin root with a .venv/.installed stamp so the venv
-    creation step is skipped, then asserts the shim is written and executable.
+    Pre-creates a v0.3.29 shared-venv state (matching stamp + symlink in
+    place) so the bootstrap exits early; only the shim emission block
+    runs and is asserted.
     """
     import stat
     import subprocess
 
-    # Build a fake plugin root with a .venv/.installed stamp so the early-exit
-    # branch fires for the venv step but the shim step still runs.
-    plugin_root = tmp_path / "plugin"
-    venv_bin = plugin_root / ".venv" / "bin"
-    venv_bin.mkdir(parents=True)
-    stamp = plugin_root / ".venv" / ".installed"
-    stamp.touch()
+    plugin_root = _setup_v0329_idempotent_state(tmp_path)
 
     # Also create a fake versioned paperwiki binary so the shim has something to exec.
     fake_cache = (
@@ -1540,8 +1595,8 @@ def test_ensure_env_shim_integration(tmp_path: Path) -> None:
     assert os.access(shim, os.X_OK), "shim must be executable"
 
     body = shim.read_text(encoding="utf-8")
-    assert "paperwiki — shim that always invokes the latest installed venv binary." in body, (
-        "shim must contain the expected tag line"
+    assert "paperwiki shim — v0.3.29 (shared venv + self-bootstrap)." in body, (
+        "shim must contain the v0.3.29 expected tag line"
     )
 
 
@@ -1549,9 +1604,7 @@ def test_ensure_env_shim_is_idempotent(tmp_path: Path) -> None:
     """Running ensure-env.sh twice must not change the shim (idempotent)."""
     import subprocess
 
-    plugin_root = tmp_path / "plugin"
-    (plugin_root / ".venv" / "bin").mkdir(parents=True)
-    (plugin_root / ".venv" / ".installed").touch()
+    plugin_root = _setup_v0329_idempotent_state(tmp_path)
 
     env = os.environ.copy()
     env["HOME"] = str(tmp_path)

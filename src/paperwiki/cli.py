@@ -26,9 +26,22 @@ from loguru import logger
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.runners.digest import app as _digest_app
 from paperwiki.runners.extract_paper_images import app as _extract_images_app
+from paperwiki.runners.gc_bak import (
+    BAK_FILENAME_RE,
+)
+from paperwiki.runners.gc_bak import (
+    _resolve_default_keep_recent as _resolve_bak_keep,
+)
+from paperwiki.runners.gc_bak import (
+    app as _gc_bak_app,
+)
+from paperwiki.runners.gc_bak import (
+    gc_bak as _gc_bak_run,
+)
 from paperwiki.runners.gc_digest_archive import app as _gc_archive_app
 from paperwiki.runners.migrate_recipe import app as _migrate_recipe_app
 from paperwiki.runners.migrate_sources import app as _migrate_sources_app
+from paperwiki.runners.where import app as _where_app
 from paperwiki.runners.wiki_compile import app as _wiki_compile_app
 from paperwiki.runners.wiki_ingest_plan import app as _wiki_ingest_app
 from paperwiki.runners.wiki_lint import app as _wiki_lint_app
@@ -71,6 +84,8 @@ app.add_typer(_wiki_query_app, name="wiki-query")
 app.add_typer(_extract_images_app, name="extract-images")
 app.add_typer(_migrate_sources_app, name="migrate-sources")
 app.add_typer(_gc_archive_app, name="gc-archive")
+app.add_typer(_gc_bak_app, name="gc-bak")
+app.add_typer(_where_app, name="where")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -242,10 +257,29 @@ def update(
     _drop_from_enabled_plugins(_SETTINGS_JSON)
     _drop_from_enabled_plugins(_SETTINGS_LOCAL_JSON)
 
+    # Task 9.33 / D-9.33.2: auto-prune old .bak directories per
+    # PAPERWIKI_BAK_KEEP retention. Default 3 keeps current cache + 2
+    # rollback targets. PAPERWIKI_BAK_KEEP=0 = skip auto-prune (escape
+    # hatch for power users who manage .bak themselves).
+    bak_summary = ""
+    keep_recent = _resolve_bak_keep()
+    if keep_recent > 0:
+        prune_report = _gc_bak_run(
+            _CACHE_BASE,
+            keep_recent=keep_recent,
+            dry_run=False,
+        )
+        if prune_report.removed:
+            bak_summary = (
+                f"\n(removed {len(prune_report.removed)} old .bak "
+                f"directories; kept {len(prune_report.kept)} most recent)"
+            )
+
     old_display = cache_ver if cache_ver else "not installed"
     typer.echo(
         f"paper-wiki: {old_display} → {marketplace_ver}"
         + bak_suffix
+        + bak_summary
         + "\n"
         + "\nNext:"
         + "\n  1. Exit any running session: /exit (or Ctrl-D)"
@@ -295,6 +329,41 @@ def status(
         f"enabledPlugins   : settings.json={'yes' if enabled_in_settings else 'no'}"
         f"  settings.local.json={'yes' if enabled_in_local else 'no'}"
     )
+
+    # Task 9.33: 4th line surfaces the .bak retention state at a glance.
+    bak_count, oldest_ts = _summarize_bak_state(_CACHE_BASE)
+    if bak_count == 0:
+        bak_line = "no backups"
+    else:
+        bak_line = f"{bak_count} kept; oldest {oldest_ts or 'unknown'}"
+    typer.echo(f"bak directories  : {bak_line}")
+
+
+def _summarize_bak_state(cache_root: Path) -> tuple[int, str | None]:
+    """Return (count, oldest_timestamp) for .bak directories under cache_root.
+
+    Used by ``paperwiki status`` to show retention state at a glance.
+    Returns ``(0, None)`` when the cache root is missing or empty.
+    """
+    if not cache_root.is_dir():
+        return (0, None)
+    matches: list[str] = [
+        entry.name
+        for entry in cache_root.iterdir()
+        if entry.is_dir() and BAK_FILENAME_RE.match(entry.name)
+    ]
+    if not matches:
+        return (0, None)
+    matches.sort()
+    # The oldest is the lexicographically smallest .bak.<ts> when sorted asc.
+    oldest = matches[0]
+    # Extract YYYY-MM-DD from the YYYYMMDDTHHMMSSZ suffix for readability.
+    suffix = oldest.split(".bak.", 1)[-1] if ".bak." in oldest else None
+    if suffix and len(suffix) >= 8:
+        oldest_human = f"{suffix[:4]}-{suffix[4:6]}-{suffix[6:8]}"
+    else:
+        oldest_human = oldest
+    return (len(matches), oldest_human)
 
 
 # ---------------------------------------------------------------------------
