@@ -43,23 +43,49 @@ manual setup required.
 
 ## Upgrading
 
-To pick up a new release:
+**Recommended path (v0.3.20+)**: use the `paperwiki` CLI that ships with
+the plugin. It handles version comparison, stale-cache backup, and JSON
+pruning automatically:
+
+```bash
+# From the plugin's virtual environment:
+~/.claude/plugins/cache/paper-wiki/paper-wiki/<current-version>/.venv/bin/paperwiki update
+```
+
+The command:
+1. Pulls the latest marketplace clone.
+2. Compares versions.
+3. On version drift: renames the stale cache to `<ver>.bak.<timestamp>`,
+   removes `paper-wiki@paper-wiki` from `installed_plugins.json` and both
+   `settings.json` / `settings.local.json` `enabledPlugins` arrays.
+4. Prints a `Next:` section guiding you through the reinstall.
+
+Then follow the printed instructions:
+
+```text
+/exit          # exit the current session
+claude         # open a fresh session
+/plugin install paper-wiki@paper-wiki
+```
+
+> **Note**: don't use `claude -c` after an upgrade — slash command and
+> SKILL changes only take effect in fresh sessions. This applies to all
+> Claude Code plugins, not just paper-wiki.
+
+### Manual upgrade (fallback)
+
+If the `paperwiki` CLI is not available (e.g. on a fresh machine where
+the plugin has not yet been installed), use the manual flow:
 
 ```text
 /plugin uninstall paper-wiki@paper-wiki
 /plugin install paper-wiki@paper-wiki
 ```
 
-Then fully exit (`/exit` or Ctrl-D) and start a fresh session:
-
-```text
-claude
-/paper-wiki:setup     # optional health check
-```
-
-> **Note**: don't use `claude -c` after an upgrade — slash command and
-> SKILL changes only take effect in fresh sessions. This applies to all
-> Claude Code plugins, not just paper-wiki.
+Then fully exit and start a fresh session. If `/plugin install` says
+"already installed" but SKILLs are missing, remove
+`paper-wiki@paper-wiki` from `~/.claude/plugins/installed_plugins.json`
+manually before reinstalling.
 
 ### Advanced: custom config location (dotfiles users)
 
