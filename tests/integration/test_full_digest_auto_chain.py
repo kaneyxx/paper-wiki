@@ -259,7 +259,7 @@ async def test_full_digest_auto_chain_lands_top_papers_into_wiki(
 
     for rec in top_recs:
         cid = rec.paper.canonical_id
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(
             [
                 sys.executable,
                 "-m",

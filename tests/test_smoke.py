@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.20"
+    assert data["version"] == "0.3.21"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1296,3 +1296,147 @@ def test_pyproject_declares_paperwiki_console_script() -> None:
     assert "paperwiki.cli:main" in body, (
         "pyproject.toml [project.scripts] must map paperwiki → paperwiki.cli:main"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.27 — auto-install ~/.local/bin/paperwiki shim (v0.3.21)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_env_contains_shim_tag() -> None:
+    """Static pin: hooks/ensure-env.sh must contain the shim tag line.
+
+    This check ensures that future edits cannot silently remove the shim
+    emission block from ensure-env.sh without a test failure.
+    """
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    expected_tag = "# paperwiki — shim that always invokes the latest installed venv binary."
+    assert expected_tag in body, (
+        "hooks/ensure-env.sh must contain the shim tag line so the "
+        "~/.local/bin/paperwiki shim is installed on SessionStart"
+    )
+
+
+def test_ensure_env_shim_block_is_idempotent_guard() -> None:
+    """ensure-env.sh must use a grep-based guard to skip rewriting an existing shim."""
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    assert "grep -qF" in body, (
+        "hooks/ensure-env.sh must use 'grep -qF' to check for the tag before "
+        "rewriting the shim (idempotency guard)"
+    )
+    assert "EXPECTED_TAG" in body, (
+        "hooks/ensure-env.sh must define EXPECTED_TAG for the idempotency check"
+    )
+
+
+def test_ensure_env_shim_warns_if_local_bin_not_on_path() -> None:
+    """ensure-env.sh must emit a one-time PATH warning when ~/.local/bin is missing."""
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    assert ".paperwiki-path-warned" in body, (
+        "hooks/ensure-env.sh must create a .paperwiki-path-warned marker so the "
+        "PATH warning is emitted only once"
+    )
+    assert "not on your PATH" in body, (
+        "hooks/ensure-env.sh must print a message when ~/.local/bin is not on PATH"
+    )
+
+
+def test_ensure_env_shim_integration(tmp_path: Path) -> None:
+    """Integration: running ensure-env.sh in a temp HOME creates the shim.
+
+    Sets up a fake plugin root with a .venv/.installed stamp so the venv
+    creation step is skipped, then asserts the shim is written and executable.
+    """
+    import stat
+    import subprocess
+
+    # Build a fake plugin root with a .venv/.installed stamp so the early-exit
+    # branch fires for the venv step but the shim step still runs.
+    plugin_root = tmp_path / "plugin"
+    venv_bin = plugin_root / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    stamp = plugin_root / ".venv" / ".installed"
+    stamp.touch()
+
+    # Also create a fake versioned paperwiki binary so the shim has something to exec.
+    fake_cache = (
+        tmp_path
+        / ".claude"
+        / "plugins"
+        / "cache"
+        / "paper-wiki"
+        / "paper-wiki"
+        / "0.0.1"
+        / ".venv"
+        / "bin"
+    )
+    fake_cache.mkdir(parents=True)
+    fake_bin = fake_cache / "paperwiki"
+    fake_bin.write_text("#!/usr/bin/env bash\necho 'fake paperwiki 0.0.1'\n")
+    fake_bin.chmod(fake_bin.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)
+    # Remove ~/.local/bin from PATH so the warning branch triggers cleanly.
+    env["PATH"] = ":".join(p for p in env.get("PATH", "").split(":") if ".local/bin" not in p)
+
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    result = subprocess.run(
+        ["bash", str(script)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"ensure-env.sh failed:\n{result.stderr}"
+
+    shim = tmp_path / ".local" / "bin" / "paperwiki"
+    assert shim.is_file(), "ensure-env.sh must create ~/.local/bin/paperwiki"
+    assert os.access(shim, os.X_OK), "shim must be executable"
+
+    body = shim.read_text(encoding="utf-8")
+    assert "paperwiki — shim that always invokes the latest installed venv binary." in body, (
+        "shim must contain the expected tag line"
+    )
+
+
+def test_ensure_env_shim_is_idempotent(tmp_path: Path) -> None:
+    """Running ensure-env.sh twice must not change the shim (idempotent)."""
+    import subprocess
+
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / ".venv" / "bin").mkdir(parents=True)
+    (plugin_root / ".venv" / ".installed").touch()
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)
+
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+
+    def run() -> None:
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"ensure-env.sh failed:\n{result.stderr}"
+
+    run()
+    shim = tmp_path / ".local" / "bin" / "paperwiki"
+    assert shim.is_file()
+    mtime_first = shim.stat().st_mtime
+    content_first = shim.read_text(encoding="utf-8")
+
+    run()
+    mtime_second = shim.stat().st_mtime
+    content_second = shim.read_text(encoding="utf-8")
+
+    assert content_first == content_second, "shim content must not change on second run"
+    # mtime only stays the same if the file was not rewritten; allow for
+    # filesystem resolution but content equality is the stronger invariant.
+    assert mtime_first == mtime_second, "shim must not be rewritten on second run (mtime changed)"
