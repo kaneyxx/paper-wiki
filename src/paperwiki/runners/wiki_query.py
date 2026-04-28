@@ -28,6 +28,7 @@ import aiofiles
 import typer
 from loguru import logger
 
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
@@ -154,8 +155,13 @@ def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     query: Annotated[str, typer.Argument(help="Search query (whitespace-separated terms)")],
     top_k: Annotated[int, typer.Option("--top-k", help="Maximum hits to return")] = 10,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Run a wiki keyword search and emit JSON to stdout."""
+    configure_runner_logging(verbose=verbose)
     try:
         hits = asyncio.run(query_wiki(vault, query, top_k=top_k))
     except PaperWikiError as exc:

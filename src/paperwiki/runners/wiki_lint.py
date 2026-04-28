@@ -35,6 +35,7 @@ import aiofiles
 import typer
 from loguru import logger
 
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import (
@@ -243,8 +244,13 @@ def main(
     max_lines: Annotated[
         int, typer.Option("--max-lines", help="Threshold for OVERSIZED finding")
     ] = _DEFAULT_MAX_LINES,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Run wiki lint and emit a JSON report on stdout."""
+    configure_runner_logging(verbose=verbose)
     try:
         report = asyncio.run(lint_wiki(vault, stale_days=stale_days, max_lines=max_lines))
     except PaperWikiError as exc:

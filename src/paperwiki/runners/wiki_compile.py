@@ -31,6 +31,7 @@ import typer
 from loguru import logger
 
 from paperwiki import __version__
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
@@ -163,8 +164,13 @@ def _render_frontmatter(
 @app.command()
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Rebuild Wiki/index.md and print a one-line summary."""
+    configure_runner_logging(verbose=verbose)
     try:
         result = asyncio.run(compile_wiki(vault))
     except PaperWikiError as exc:

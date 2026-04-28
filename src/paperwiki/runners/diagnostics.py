@@ -22,11 +22,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from pydantic import BaseModel, Field
 
 from paperwiki import __version__
+from paperwiki._internal.logging import configure_runner_logging
 
 _RECIPES_DIR = Path(__file__).resolve().parents[3] / "recipes"
 
@@ -196,8 +198,14 @@ def _resolve_config_path() -> Path:
 
 
 @app.callback()
-def main() -> None:
+def main(
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
+) -> None:
     """Emit the diagnostics report as JSON on stdout."""
+    configure_runner_logging(verbose=verbose)
     report = build_report()
     typer.echo(json.dumps(report.model_dump(), indent=2))
 

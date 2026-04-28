@@ -29,6 +29,7 @@ from typing import Annotated
 import typer
 from loguru import logger
 
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.recipe import instantiate_pipeline, load_recipe
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.core.models import RunContext
@@ -92,8 +93,13 @@ def main(
             help="YYYY-MM-DD; defaults to today (UTC).",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Run a digest, exiting 0 on success or PaperWikiError.exit_code on failure."""
+    configure_runner_logging(verbose=verbose)
     parsed_date = _parse_date(target_date) if target_date else None
     try:
         exit_code = asyncio.run(run_digest(recipe, parsed_date))

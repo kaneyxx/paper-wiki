@@ -47,6 +47,7 @@ from paperwiki._internal.arxiv_source import (
     extract_images_from_tarball,
 )
 from paperwiki._internal.http import build_client
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError, UserError
 from paperwiki.plugins.backends.markdown_wiki import _canonical_id_to_filename
@@ -207,8 +208,13 @@ def main(
     force: Annotated[
         bool, typer.Option("--force", help="Re-download tarball even if cached")
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Run the extractor and emit a JSON report."""
+    configure_runner_logging(verbose=verbose)
     try:
         result = asyncio.run(extract_paper_images(vault, canonical_id, force=force))
     except PaperWikiError as exc:

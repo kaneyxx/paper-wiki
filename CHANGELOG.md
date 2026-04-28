@@ -9,6 +9,30 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-04-27
+
+### Added
+
+- **Centralized logger configuration** (`src/paperwiki/_internal/logging.py`).
+  New `configure_runner_logging(*, verbose, default_level)` function resets
+  loguru's sinks and re-configures a single stderr sink at INFO by default.
+  Honors `PAPERWIKI_LOG_LEVEL` env var as the highest-priority override so CI
+  and hooks can silence runners with one variable.
+- **`--verbose / -v` flag** on every runner (`digest`, `wiki_ingest_plan`,
+  `wiki_compile`, `wiki_query`, `wiki_lint`, `extract_paper_images`,
+  `migrate_sources`, `diagnostics`). Passing `--verbose` enables DEBUG-level
+  logging; default remains INFO (no debug noise on normal runs).
+- **Unit tests** `tests/unit/_internal/test_logging.py` pin the three
+  configure contracts: INFO default, `--verbose` enables DEBUG, and
+  `PAPERWIKI_LOG_LEVEL=WARNING` silences INFO.
+
+### Fixed
+
+- Chatty internal modules (`paperwiki.plugins.filters.dedup`,
+  `paperwiki._internal.arxiv_source`) are now disabled at INFO level by
+  default; they only surface output when `--verbose` is passed or
+  `PAPERWIKI_LOG_LEVEL=DEBUG` is set.
+
 ## [0.3.14] - 2026-04-27
 
 ### Added

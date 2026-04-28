@@ -43,6 +43,7 @@ import typer
 import yaml
 from loguru import logger
 
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
@@ -302,8 +303,13 @@ def main(
             ),
         ),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Run the ingest plan and emit JSON on stdout."""
+    configure_runner_logging(verbose=verbose)
     try:
         plan = asyncio.run(plan_ingest(vault, source_id, auto_bootstrap=auto_bootstrap))
     except PaperWikiError as exc:

@@ -37,6 +37,7 @@ import typer
 import yaml
 from loguru import logger
 
+from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.core.models import Author, Paper, Recommendation, ScoreBreakdown
@@ -412,8 +413,13 @@ def _derive_pdf_url(landing_url: str) -> str | None:
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Report only; do not write")] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
 ) -> None:
     """Run the migration and emit a JSON report."""
+    configure_runner_logging(verbose=verbose)
     try:
         report = asyncio.run(migrate_vault(vault, dry_run=dry_run))
     except PaperWikiError as exc:
