@@ -39,7 +39,8 @@ filters:
   - name: dedup
     config:
       vault_paths:
-        - ~/Documents/Obsidian-Vault/Sources
+        # Replace with your vault's source-papers directory before use.
+        - <EDIT_ME_BEFORE_USE>
 
 scorer:
   name: composite
@@ -66,10 +67,12 @@ scorer:
 reporters:
   - name: markdown
     config:
-      output_dir: ~/paper-wiki/weekly
+      # Replace with the directory you want weekly digests in.
+      output_dir: <EDIT_ME_BEFORE_USE>
   - name: obsidian
     config:
-      vault_path: ~/Documents/Obsidian-Vault
+      # Replace with your Obsidian vault root before use.
+      vault_path: <EDIT_ME_BEFORE_USE>
       daily_subdir: Weekly
       filename_template: "{date}-weekly-deep-dive.md"
 

@@ -36,9 +36,11 @@ filters:
   - name: dedup
     config:
       vault_paths:
-        - ~/Documents/Obsidian-Vault/Sources
-        - ~/Documents/Obsidian-Vault/Wiki/sources
-        - ~/Documents/Obsidian-Vault/Wiki/concepts
+        # Replace each with the actual subdirectory inside your vault
+        # that you want to dedup against (Sources / Wiki/sources /
+        # Wiki/concepts are common targets). One placeholder is enough
+        # to keep the recipe parseable; add more entries as needed.
+        - <EDIT_ME_BEFORE_USE>
 
 scorer:
   name: composite
@@ -70,10 +72,12 @@ scorer:
 reporters:
   - name: markdown
     config:
-      output_dir: ~/paper-wiki/digests/biomedical
+      # Replace with the directory you want biomedical digests in.
+      output_dir: <EDIT_ME_BEFORE_USE>
   - name: obsidian
     config:
-      vault_path: ~/Documents/Obsidian-Vault
+      # Replace with your Obsidian vault root before use.
+      vault_path: <EDIT_ME_BEFORE_USE>
       daily_subdir: Daily
       # Drop top-K hits into Wiki/sources/ so /paper-wiki:wiki-ingest
       # can fold them into concept articles. Recommended for the

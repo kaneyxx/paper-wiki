@@ -32,6 +32,9 @@ scorer:
 reporters:
   - name: markdown
     config:
-      output_dir: ./out
+      # Replace with the directory you want raw-source dumps in. The
+      # placeholder is intentional — the runner fails loud if it is
+      # left in place, so users edit before invoking.
+      output_dir: <EDIT_ME_BEFORE_USE>
 
 top_k: 5

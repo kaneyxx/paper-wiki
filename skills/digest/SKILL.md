@@ -32,17 +32,39 @@ to `paperwiki:setup`.
 
 ## Process
 
-1. **Locate the recipe.** Resolution order:
-   1. **Personal recipe** at `~/.config/paper-wiki/recipes/<name>.yaml`
-      (the user's editable copy with their topics, vault paths, and
-      ``auto_ingest_top`` preference). If ``$PAPERWIKI_CONFIG_DIR`` is
-      set, look there instead of ``~/.config/paper-wiki/``.
-   2. **Bundled template** at `${CLAUDE_PLUGIN_ROOT}/recipes/<name>.yaml`.
+1. **Locate the recipe.** Run this exact bash to resolve `$RECIPE`.
+   **DO NOT** use `ls`, `find`, `cd`, or relative paths — those reliably
+   land in the plugin starter directory and pick the wrong recipe.
 
-   Default ``<name>`` is ``daily``. If the user said "weekly", default
-   to ``weekly-deep-dive``; if "biomedical" / "bio", default to
-   ``biomedical-weekly``. Confirm the resolved path exists; if not,
-   surface a clear error and offer to run ``/paper-wiki:setup``.
+   ```bash
+   CONFIG_ROOT="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
+   name="${1:-daily}"
+   case "$name" in
+     weekly)         name="weekly-deep-dive" ;;
+     bio|biomedical) name="biomedical-weekly" ;;
+   esac
+   if [ -f "$CONFIG_ROOT/recipes/$name.yaml" ]; then
+       RECIPE="$CONFIG_ROOT/recipes/$name.yaml"
+   elif [ -f "$CLAUDE_PLUGIN_ROOT/recipes/$name.yaml" ]; then
+       RECIPE="$CLAUDE_PLUGIN_ROOT/recipes/$name.yaml"
+       echo "WARN: using bundled template; no personal recipe at $CONFIG_ROOT/recipes/$name.yaml"
+   else
+       echo "ERROR: recipe '$name' not found. Run /paper-wiki:setup."
+       exit 1
+   fi
+   echo "Using recipe: $RECIPE"
+   ```
+
+   The `echo "Using recipe:"` line is **mandatory** — it gives the user
+   visibility into which recipe was actually picked. If the user passes
+   an absolute path explicitly (e.g. `/paper-wiki:digest /abs/path.yaml`),
+   skip the case mapping and assign `RECIPE="$1"` directly.
+
+   The recipe-name argument convention: `daily` (default), `weekly`,
+   `biomedical`/`bio`, or any other custom personal recipe name from
+   `~/.config/paper-wiki/recipes/`. If the user explicitly passes
+   `daily-arxiv` or `weekly-deep-dive`, treat those as exact recipe
+   names (no mapping needed) and look them up directly.
 2. **Source secrets if present.** If
    ``~/.config/paper-wiki/secrets.env`` exists, source it (or ``export``
    each ``KEY=value`` line) before the runner so any
@@ -54,8 +76,11 @@ to `paperwiki:setup`.
    `${CLAUDE_PLUGIN_ROOT}/.venv/.installed` exists. If missing, run
    `bash ${CLAUDE_PLUGIN_ROOT}/hooks/ensure-env.sh` and re-check.
 4. **Run the digest.** Invoke
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.digest <recipe-path>`
+   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.digest "$RECIPE"`
    with an optional `--target-date YYYY-MM-DD` if the user gave one.
+   Always use the `$RECIPE` variable resolved in Step 1 — never hand-pick
+   a path or interpolate a `<recipe-path>` placeholder, or you re-open
+   the v0.3.32 ambiguity that routed users to the bundled starter.
 5. **Inspect the exit code.** 0 = success, 1 = user error
    (bad recipe / bad config), 2 = system error (network, plugin
    contract). On non-zero, surface the structured log line and offer
@@ -212,6 +237,7 @@ to `paperwiki:setup`.
 | Excuse | Why it's wrong |
 |---|---|
 | "I'll just guess which recipe the user wants without checking." | Recipes diverge a lot (daily vs weekly vs sources-only). Pick wrong and the user gets the wrong window/scoring. Always confirm or default explicitly. |
+| "I'll just `ls recipes/` to see what's available." | NO. `ls` lands in plugin starter and picks the wrong recipe. Use the bash above. |
 | "If the runner exits non-zero, the message is enough." | Exit codes are coarse. Read the structured log line (`digest.failed`) and explain the failure in plain English. |
 | "Skipping the env check is fine; venv usually exists." | First runs and venv corruption are exactly when this SKILL gets called. Always confirm the `.installed` stamp before invoking the runner. |
 | "Top 3 summary is fluff." | Without it the user re-opens the digest file to find anything notable. The summary makes the SKILL useful end-to-end. |
@@ -230,6 +256,8 @@ to `paperwiki:setup`.
 
 ## Red Flags
 
+- Claude wrote `ls recipes/`, `cd ${CLAUDE_PLUGIN_ROOT}`, or used a
+  relative recipe path → STOP. Re-read Step 1.
 - The runner exits 0 but writes 0 recommendations: filters or sources
   are too tight; suggest relaxing the recipe.
 - The runner exits 2 with `IntegrationError`: external API is down or

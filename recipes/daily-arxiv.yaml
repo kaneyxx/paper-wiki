@@ -44,9 +44,10 @@ filters:
   - name: dedup
     config:
       vault_paths:
-        # Default friendly layout. Johnny.Decimal / PARA users can swap
-        # this for `~/Documents/Obsidian-Vault/20_Research/Papers` etc.
-        - ~/Documents/Obsidian-Vault/Sources
+        # Replace with your vault's source-papers directory before use.
+        # Johnny.Decimal / PARA users can swap this for e.g.
+        # `~/Documents/MyVault/20_Research/Papers`.
+        - <EDIT_ME_BEFORE_USE>
 
 scorer:
   name: composite
@@ -80,10 +81,14 @@ scorer:
 reporters:
   - name: markdown
     config:
-      output_dir: ~/paper-wiki/digests
+      # Replace with the directory you want plain-Markdown digests in.
+      output_dir: <EDIT_ME_BEFORE_USE>
   - name: obsidian
     config:
-      vault_path: ~/Documents/Obsidian-Vault
+      # Replace with your Obsidian vault root before use. The runner
+      # fails loud if this placeholder reaches it, which is intentional
+      # — bundled defaults must never silently write into a real vault.
+      vault_path: <EDIT_ME_BEFORE_USE>
       # Override to "10_Daily" if you use Johnny.Decimal / PARA numbering.
       daily_subdir: Daily
       # Opt in to the wiki backend: each top-K paper is also written to

@@ -9,6 +9,79 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.33] - 2026-04-28
+
+### Fixed
+
+User-smoke of v0.3.32's `/paper-wiki:digest daily` SKILL silently routed
+to the bundled starter recipe instead of the user's personal recipe at
+`~/.config/paper-wiki/recipes/daily.yaml`. Result: 0 recommendations
+plus a digest written into the user's UNRELATED Obsidian vault as a
+fresh `Daily/` folder. Three orthogonal fixes ship in v0.3.33:
+
+- **SKILL Step 1 hardening (skills/digest/SKILL.md).** v0.3.32 described
+  recipe resolution as prose ("personal first, then bundled"). Claude
+  executed it by running `ls recipes/` with cwd that drifted into the
+  plugin cache (`${CLAUDE_PLUGIN_ROOT}/recipes/`), listed the bundled
+  starters, and picked `daily-arxiv.yaml` because it looked closest to
+  "daily". **Fix**: replaced the prose with an explicit bash snippet
+  that uses an absolute-path lookup against
+  `${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}/recipes/`,
+  forbids `ls` / `find` / `cd` / relative paths in the lead, and emits
+  a mandatory `echo "Using recipe: $RECIPE"` for visibility. Step 4
+  now passes `"$RECIPE"` to the runner instead of a `<recipe-path>`
+  placeholder so the dependency on Step 1 is explicit. Added one
+  Common Rationalizations row + one Red Flags STOP-signal bullet so
+  Claude treats `ls recipes/` as an interrupt.
+
+- **Starter recipe defang (recipes/*.yaml).** `daily-arxiv.yaml` shipped
+  with `vault_path: ~/Documents/Obsidian-Vault` and
+  `output_dir: ~/paper-wiki/digests` as the bundled defaults. When the
+  SKILL fell through to the bundled starter, the runner happily wrote
+  into the user's UNRELATED vault. **Fix**: replaced every real default
+  in `daily-arxiv.yaml`, `weekly-deep-dive.yaml`,
+  `biomedical-weekly.yaml`, and `sources-only.yaml` with the
+  placeholder `<EDIT_ME_BEFORE_USE>` (covers reporter `vault_path` /
+  `output_dir` and dedup `vault_paths`). The runner now fails loud at
+  path resolution if the placeholder reaches it. The example doc at
+  `docs/example-recipes/personal-johnny-decimal.yaml` is intentionally
+  left as-is — it documents a real layout pattern users adapt.
+
+- **Shim tag bump (hooks/ensure-env.sh).** Bumped the shim
+  tag-line to `# paperwiki shim — v0.3.33 (...)`. Body content
+  (PYTHONPATH fallback, shared venv, self-bootstrap) carries over
+  unchanged from v0.3.32. The tag bump triggers ensure-env.sh's
+  idempotent grep guard so existing shims get rewritten on first
+  SessionStart after upgrade.
+
+### Lessons learned
+
+SKILL prose is unreliable when ambiguity space exists. "Personal first,
+then bundled" reads well to a human but lets Claude rationalize a
+shorter path (literal `ls recipes/`) that produces the wrong answer.
+Explicit bash snippets — with the resolution variables named, the
+search order encoded as `if/elif`, and forbidden tools called out in
+the lead — beat resolution-order narrative every time. Bundled
+starter recipes must never carry real path defaults; placeholders
+that fail loud are safer than friendly defaults that silently clobber
+unrelated user state.
+
+### Tests
+
+- 9 new unit tests in `tests/unit/skills/test_digest_skill_md.py`
+  pinning the explicit-bash Step 1 contract (CONFIG_ROOT precedence,
+  personal-first ordering, alias mapping, mandatory visibility echo,
+  forbidden-tool lead, no naked `ls recipes/` in Process steps,
+  Step 4 uses `$RECIPE`, rationalizations + red-flags coverage).
+- 5 new unit tests in `tests/unit/recipes/test_starter_recipes.py`
+  pinning the EDIT_ME defang for every starter recipe + flagship
+  `daily-arxiv.yaml` regression check against the real Obsidian-Vault
+  default that caused v0.3.32.
+- Updated 3 smoke-test pins for the v0.3.33 shim tag-line and the
+  manifest version.
+- 744 total tests green; mypy --strict clean; ruff check + format
+  clean.
+
 ## [0.3.32] - 2026-04-28
 
 ### Fixed
