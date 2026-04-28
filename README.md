@@ -144,13 +144,39 @@ Resolution priority (precedence chain):
 4. ~/.config/paper-wiki          # default
 ```
 
-To clean every paper-wiki user-controlled file:
+### Uninstall (v0.3.35+)
+
+`paperwiki uninstall` is flag-driven. The default still only touches
+the plugin cache + JSON entries; opt in to deeper cleanup with one or
+more of `--everything`, `--purge-vault PATH`, `--nuke-vault`, `--yes`.
+
+| Flag | What it adds |
+|---|---|
+| (none) | `~/.claude/plugins/cache/paper-wiki/`, `installed_plugins.json` paper-wiki entry, `settings.json` `enabledPlugins["paper-wiki@paper-wiki"]`. |
+| `--everything` | Adds: `~/.config/paper-wiki/` (recipes + secrets + venv), `~/.local/bin/paperwiki` shim + `.paperwiki-path-warned` marker, marketplace clone, `settings.json` `extraKnownMarketplaces.paper-wiki`. |
+| `--purge-vault PATH` | Adds: paperwiki-created files under PATH (`Daily/`, `Wiki/`, `.digest-archive/`, `.vault.lock`, `Welcome.md`). Preserves `.obsidian/`, `.DS_Store`, and anything else. PATH must exist. |
+| `--nuke-vault` | (only valid with `--purge-vault`) replaces the surgical removal with `rm -rf PATH`. |
+| `--yes` / `-y` | Skip confirmation prompts. |
+| `--verbose` / `-v` | Log each target as it is removed. |
 
 ```bash
-paperwiki where           # see what's there
-paperwiki uninstall       # removes Claude-Code-managed cache + JSON
-rm -rf ~/.config/paper-wiki   # nukes user-controlled root (recipes + secrets + venv)
+paperwiki where             # safe inventory before any uninstall
+paperwiki uninstall         # plugin layer only (asks for confirmation)
+paperwiki uninstall --everything --yes        # plugin + user config + shim + marketplace
 ```
+
+#### Fresh-user reset
+
+One command for a complete wipe before re-testing as a fresh user:
+
+```bash
+paperwiki uninstall --everything --purge-vault ~/Documents/Obsidian-Vault --nuke-vault --yes
+```
+
+This removes the plugin layer, the user-controlled config root, the
+PATH shim + marker, the marketplace clone, the `extraKnownMarketplaces`
+entry, AND the entire vault directory. Re-install with
+`/plugin install paper-wiki@paper-wiki` from a fresh `claude` session.
 
 Bak retention is configurable via `PAPERWIKI_BAK_KEEP` (default `3`)
 and can be inspected/cleaned anytime via `paperwiki gc-bak --dry-run`.

@@ -238,15 +238,27 @@ class TestCliStatus:
 
 class TestCliUninstall:
     def test_uninstall_removes_cache_and_json(
-        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        """v0.3.35: uninstall uses Path.home()-derived paths via
+        ``runners.uninstall``; we monkeypatch Path.home() and pass
+        ``--yes`` to skip the new confirmation prompt."""
         import paperwiki.cli as cli_mod
 
-        paths = _patch_cli_paths(claude_home)
-        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
-        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
-        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
-        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+        # Pin Path.home() to claude_home's parent so .claude lookups land in tmp.
+        fake_home = claude_home.parent
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        # Move claude_home to ${fake_home}/.claude so the resolver finds it.
+        target_claude = fake_home / ".claude"
+        if claude_home != target_claude:
+            target_claude.parent.mkdir(parents=True, exist_ok=True)
+            claude_home.rename(target_claude)
+        paths = {
+            "installed_plugins": target_claude / "plugins" / "installed_plugins.json",
+            "cache_base": target_claude / "plugins" / "cache" / "paper-wiki" / "paper-wiki",
+            "settings": target_claude / "settings.json",
+            "settings_local": target_claude / "settings.local.json",
+        }
 
         _make_installed_plugins("0.3.19", paths["installed_plugins"])
         _make_settings(paths["settings"], enabled=True)
@@ -257,7 +269,9 @@ class TestCliUninstall:
 
         from typer.testing import CliRunner
 
-        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(cli_mod.app, ["uninstall"])
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["uninstall", "--yes"]
+        )
         assert result.exit_code == 0, result.output
         assert not cache_dir.exists()
 

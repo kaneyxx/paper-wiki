@@ -21,15 +21,21 @@ command from a fresh terminal:
 paperwiki uninstall
 ```
 
-The CLI handles the actual teardown:
+The CLI is flag-driven (v0.3.35+). Default mode handles the
+plugin layer; `--everything` extends to the user-controlled config
+root, the PATH shim, the marketplace clone, and the marketplace
+settings entry; `--purge-vault PATH` adds paperwiki-created vault
+content; `--nuke-vault` (with `--purge-vault`) removes the entire
+vault directory:
 
-1. Removes the cache directory at
-   `~/.claude/plugins/cache/paper-wiki/paper-wiki/<version>/`.
-2. Drops the `paper-wiki@paper-wiki` entry from
-   `installed_plugins.json`.
-3. Drops the entry from both `settings.json` and `settings.local.json`
-   `enabledPlugins`.
-4. Prints next-step instructions if the user wants to reinstall.
+| Flag | What it adds |
+|---|---|
+| (none) | plugin cache, `installed_plugins.json` paper-wiki entry, `settings.json` `enabledPlugins["paper-wiki@paper-wiki"]` |
+| `--everything` | + `~/.config/paper-wiki/`, `~/.local/bin/paperwiki` shim + `.paperwiki-path-warned`, marketplace clone, `extraKnownMarketplaces.paper-wiki` |
+| `--purge-vault PATH` | + `Daily/`, `Wiki/`, `.digest-archive/`, `.vault.lock`, `Welcome.md` under PATH (preserves `.obsidian/` + everything else) |
+| `--nuke-vault` (with `--purge-vault`) | replaces surgical removal with `rm -rf PATH` |
+| `--yes` / `-y` | skip confirmation prompts |
+| `--verbose` / `-v` | log each removal |
 
 D-9.29.2: shipping this SKILL despite the "confusing UX" objection
 because users who ask `/paper-wiki:uninstall` deserve a clear pointer
@@ -48,7 +54,7 @@ checking out an older marketplace tag — out of scope for this SKILL).
 
 ## Process
 
-### Step 1 — Print the redirect message
+### Step 1 — Print the flag-driven uninstall redirect
 
 Tell the user:
 
@@ -58,11 +64,13 @@ the active session would lose its SKILLs and runners mid-execution.
 
 Run this from a fresh terminal (NOT inside `claude`):
 
-    paperwiki uninstall
+    paperwiki uninstall                  # plugin layer only (default)
+    paperwiki uninstall --everything     # + config root, shim, marketplace
+    paperwiki uninstall --everything --purge-vault PATH        # + vault content
+    paperwiki uninstall --everything --purge-vault PATH --nuke-vault   # + rm -rf vault
 
-The CLI removes the plugin cache, prunes `installed_plugins.json`,
-and clears `enabledPlugins` in both `settings.json` and
-`settings.local.json`. Reinstall any time with:
+Add --yes (or -y) to skip the confirmation prompt; -v to log each
+removal. Reinstall any time with:
 
     claude
     /plugin install paper-wiki@paper-wiki
@@ -80,20 +88,25 @@ If that still fails, the SessionStart hook didn't install the shim;
 they need to exit Claude Code and start a fresh `claude` session so
 `hooks/ensure-env.sh` re-runs.
 
-If the user asks for a deeper clean (recover disk space, switch
-machines, etc.), surface the full path list via `paperwiki where`
-and tell them which directories to remove manually:
-
-- `paperwiki gc-bak --keep-recent 0` — drops every historical
-  `<ver>.bak.<ts>` cache directory (run BEFORE `paperwiki uninstall`
-  if disk recovery is the priority).
-- `rm -rf ~/.config/paper-wiki/` — wipes the user-controlled root
-  (`PAPERWIKI_HOME`): recipes + secrets + shared venv. Reinstalling
-  later will recreate the venv but recipes / secrets must be
-  rebuilt with `/paper-wiki:setup`.
-
 `paperwiki where` is the safe inventory before any of this — run it
-first so the user can SEE what would be lost.
+first so the user can SEE what would be lost. The CLI also prints the
+removal plan and confirms before acting (unless `--yes` is given).
+
+### Step 1b — Fresh-user reset
+
+If the user explicitly asks for a "fresh-user reset" or wants to
+simulate an unconfigured machine for re-testing, the one-command
+recipe is:
+
+```bash
+paperwiki uninstall --everything --purge-vault ~/Documents/Obsidian-Vault --nuke-vault --yes
+```
+
+(Substitute the actual vault path. `--nuke-vault` removes everything
+under the vault including `.obsidian/`, so warn the user that any
+non-paperwiki content in that directory will be lost. Drop
+`--nuke-vault` for a surgical reset that keeps `.obsidian/` and other
+non-paperwiki files.)
 
 ### Step 2 — Do NOT shell out
 

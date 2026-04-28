@@ -44,6 +44,12 @@ from paperwiki.runners.gc_bak import (
 from paperwiki.runners.gc_digest_archive import main as _gc_archive_main
 from paperwiki.runners.migrate_recipe import main as _migrate_recipe_main
 from paperwiki.runners.migrate_sources import main as _migrate_sources_main
+from paperwiki.runners.uninstall import (
+    UninstallOpts,
+)
+from paperwiki.runners.uninstall import (
+    uninstall as _uninstall_run,
+)
 from paperwiki.runners.where import main as _where_main
 from paperwiki.runners.wiki_compile import main as _wiki_compile_main
 from paperwiki.runners.wiki_ingest_plan import main as _wiki_ingest_main
@@ -445,33 +451,65 @@ def _summarize_bak_state(cache_root: Path) -> tuple[int, str | None]:
 
 @app.command()
 def uninstall(
+    everything: Annotated[
+        bool,
+        typer.Option(
+            "--everything",
+            help=(
+                "Also remove the user-controlled ~/.config/paper-wiki/ root, "
+                "the ~/.local/bin/paperwiki shim + PATH-warned marker, the "
+                "marketplace clone, and the settings.json marketplace entry."
+            ),
+        ),
+    ] = False,
+    purge_vault: Annotated[
+        Path | None,
+        typer.Option(
+            "--purge-vault",
+            help=(
+                "Also remove paperwiki-created files (Daily/, Wiki/, "
+                ".digest-archive/, .vault.lock, Welcome.md) under PATH. "
+                "Preserves .obsidian/ and any other content not created by "
+                "paperwiki. PATH must exist."
+            ),
+        ),
+    ] = None,
+    nuke_vault: Annotated[
+        bool,
+        typer.Option(
+            "--nuke-vault",
+            help=(
+                "Replaces --purge-vault's surgical removal with rm -rf PATH "
+                "(everything, including .obsidian/). Requires --purge-vault."
+            ),
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompts."),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
     ] = False,
 ) -> None:
-    """Remove cache dir and JSON entries cleanly (what /plugin uninstall should do)."""
+    """Remove paperwiki state (plugin layer, optionally user config + vault)."""
     configure_runner_logging(verbose=verbose)
 
-    cache_ver = _cache_version()
-    if cache_ver:
-        cache_dir = _find_cache_dir(cache_ver)
-        if cache_dir is not None:
-            import shutil
+    # v0.3.35: orchestration moved to ``paperwiki.runners.uninstall``.
+    # The CLI handler is now a thin flag-collector.
+    expanded_vault: Path | None = None
+    if purge_vault is not None:
+        expanded_vault = Path(purge_vault).expanduser().resolve()
 
-            try:
-                shutil.rmtree(cache_dir)
-                typer.echo(f"removed cache: {cache_dir}")
-            except OSError as exc:
-                typer.echo(f"paper-wiki: could not remove cache dir: {exc}", err=True)
-                raise typer.Exit(1) from exc
-
-    _drop_from_installed_plugins()
-    _drop_from_enabled_plugins(_SETTINGS_JSON)
-    _drop_from_enabled_plugins(_SETTINGS_LOCAL_JSON)
-
-    typer.echo("paper-wiki uninstalled (JSON entries cleared).")
-    typer.echo("Open a fresh claude session and run: /plugin install paper-wiki@paper-wiki")
+    opts = UninstallOpts(
+        everything=everything,
+        purge_vault=expanded_vault,
+        nuke_vault=nuke_vault,
+        yes=yes,
+        verbose=verbose,
+    )
+    _uninstall_run(opts)
 
 
 # ---------------------------------------------------------------------------

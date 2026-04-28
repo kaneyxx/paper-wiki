@@ -9,6 +9,79 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.35] - 2026-04-28
+
+### Added
+
+- **Flag-driven `paperwiki uninstall`** that can do a complete
+  fresh-user reset in one command. The previous `paperwiki uninstall`
+  only handled the plugin layer (~30% of paper-wiki's footprint);
+  users testing fresh installs had to follow up with a 5-command
+  manual sequence (`paperwiki uninstall` + 4× `rm -rf` + 1× python
+  edit of `settings.json`). v0.3.35 collapses that into:
+
+  ```
+  paperwiki uninstall                                          # plugin layer (unchanged default)
+  paperwiki uninstall --everything --yes                       # + config root + shim + marketplace
+  paperwiki uninstall --everything --purge-vault PATH --yes    # + paperwiki vault content
+  paperwiki uninstall --everything --purge-vault PATH --nuke-vault --yes   # + rm -rf vault
+  ```
+
+  Flags compose. `--purge-vault PATH` is surgical (removes only
+  paperwiki-created `Daily/`, `Wiki/`, `.digest-archive/`,
+  `.vault.lock`, `Welcome.md`); `--nuke-vault` upgrades it to
+  `rm -rf PATH` for a complete vault wipe. `--yes` / `-y` skips the
+  confirmation prompt; `--verbose` / `-v` logs each removal.
+
+- **Idempotent re-runs.** A second `paperwiki uninstall --everything
+  --yes` after a clean wipe exits 0 with `nothing to remove` instead
+  of erroring on missing targets.
+
+- **Vault handling separation.** Vault content is its own
+  `--purge-vault PATH` flag rather than a default behaviour — the
+  user must point at the vault explicitly to opt into vault changes.
+  This keeps the safe-default behaviour exactly the same as v0.3.34.
+
+### Changed
+
+- **`paperwiki uninstall` orchestration moved** from `cli.py` (inline
+  helpers) to a new `paperwiki.runners.uninstall` module. The CLI
+  handler is now a thin flag-collector that builds an `UninstallOpts`
+  and delegates. Tests can drive the orchestrator directly via
+  `tmp_path` fixtures without needing to monkeypatch `cli` constants.
+
+- **README "Uninstall" section** rewritten to document the four flags,
+  with a "Fresh-user reset" recipe block calling out the
+  one-command wipe.
+
+- **`skills/uninstall/SKILL.md`** Step 1 now describes the
+  flag-driven uninstall (plugin / `--everything` / `--purge-vault` /
+  `--nuke-vault`) and adds a "Fresh-user reset" Step 1b. Dropped the
+  prose that told users to `rm -rf ~/.config/paper-wiki/` manually —
+  that's now `--everything`.
+
+### Lessons learned
+
+The previous `paperwiki uninstall` semantics (plugin layer only) were
+honest but incomplete: the word "uninstall" implies "remove every
+paper-wiki trace from this machine", which is what users actually
+want when they fresh-test or switch machines. v0.3.35 keeps the
+safe-by-default contract (no flag = no surprise destruction) while
+making the full reset a one-liner. The flag-driven design beats a
+separate `paperwiki nuke` subcommand because flags compose: you can
+opt into the user-config wipe without touching a vault, or vice
+versa, without learning a second command.
+
+### Tests
+
+- 14 new tests in `tests/unit/cli/test_uninstall_flags.py` and
+  `tests/unit/cli/test_uninstall_idempotent.py` covering A1-A12 and
+  re-run idempotency. Updated 1 pre-existing test
+  (`TestCliUninstall.test_uninstall_removes_cache_and_json`) to
+  monkeypatch `Path.home()` and pass `--yes` for the new prompt.
+- 831 total tests green; mypy --strict clean; ruff check + format
+  clean.
+
 ## [0.3.34] - 2026-04-28
 
 ### Fixed
