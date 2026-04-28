@@ -24,8 +24,8 @@ import typer
 from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
-from paperwiki.runners.digest import app as _digest_app
-from paperwiki.runners.extract_paper_images import app as _extract_images_app
+from paperwiki.runners.digest import main as _digest_main
+from paperwiki.runners.extract_paper_images import main as _extract_images_main
 from paperwiki.runners.gc_bak import (
     BAK_FILENAME_RE,
 )
@@ -33,19 +33,19 @@ from paperwiki.runners.gc_bak import (
     _resolve_default_keep_recent as _resolve_bak_keep,
 )
 from paperwiki.runners.gc_bak import (
-    app as _gc_bak_app,
-)
-from paperwiki.runners.gc_bak import (
     gc_bak as _gc_bak_run,
 )
-from paperwiki.runners.gc_digest_archive import app as _gc_archive_app
-from paperwiki.runners.migrate_recipe import app as _migrate_recipe_app
-from paperwiki.runners.migrate_sources import app as _migrate_sources_app
-from paperwiki.runners.where import app as _where_app
-from paperwiki.runners.wiki_compile import app as _wiki_compile_app
-from paperwiki.runners.wiki_ingest_plan import app as _wiki_ingest_app
-from paperwiki.runners.wiki_lint import app as _wiki_lint_app
-from paperwiki.runners.wiki_query import app as _wiki_query_app
+from paperwiki.runners.gc_bak import (
+    main as _gc_bak_main,
+)
+from paperwiki.runners.gc_digest_archive import main as _gc_archive_main
+from paperwiki.runners.migrate_recipe import main as _migrate_recipe_main
+from paperwiki.runners.migrate_sources import main as _migrate_sources_main
+from paperwiki.runners.where import main as _where_main
+from paperwiki.runners.wiki_compile import main as _wiki_compile_main
+from paperwiki.runners.wiki_ingest_plan import main as _wiki_ingest_main
+from paperwiki.runners.wiki_lint import main as _wiki_lint_main
+from paperwiki.runners.wiki_query import main as _wiki_query_main
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -72,20 +72,24 @@ app = typer.Typer(
 
 # Plugin lifecycle commands (update / status / uninstall) are defined inline
 # below as ``@app.command()`` decorators.  Operational subcommands re-use the
-# corresponding ``paperwiki.runners.<name>`` Typer apps so each runner has a
-# single source of truth — the CLI surface and ``python -m paperwiki.runners.<name>``
-# stay in lock-step (Task 9.29 / D-9.29.2).
-app.add_typer(_migrate_recipe_app, name="migrate-recipe")
-app.add_typer(_digest_app, name="digest")
-app.add_typer(_wiki_ingest_app, name="wiki-ingest")
-app.add_typer(_wiki_lint_app, name="wiki-lint")
-app.add_typer(_wiki_compile_app, name="wiki-compile")
-app.add_typer(_wiki_query_app, name="wiki-query")
-app.add_typer(_extract_images_app, name="extract-images")
-app.add_typer(_migrate_sources_app, name="migrate-sources")
-app.add_typer(_gc_archive_app, name="gc-archive")
-app.add_typer(_gc_bak_app, name="gc-bak")
-app.add_typer(_where_app, name="where")
+# corresponding ``paperwiki.runners.<name>.main`` callable directly via
+# ``app.command(name=...)(...)`` rather than ``add_typer`` — the latter wraps
+# the sub-app in a click.Group that requires a sub-command, which broke
+# ``paperwiki <name>`` invocations (Task 9.29 / v0.3.27 regression caught
+# in v0.3.30 user smoke). Each runner module still ships its own standalone
+# Typer app for ``python -m paperwiki.runners.<name>`` invocation; this file
+# only re-uses the ``main`` callable as a parent-app command.
+app.command(name="migrate-recipe")(_migrate_recipe_main)
+app.command(name="digest")(_digest_main)
+app.command(name="wiki-ingest")(_wiki_ingest_main)
+app.command(name="wiki-lint")(_wiki_lint_main)
+app.command(name="wiki-compile")(_wiki_compile_main)
+app.command(name="wiki-query")(_wiki_query_main)
+app.command(name="extract-images")(_extract_images_main)
+app.command(name="migrate-sources")(_migrate_sources_main)
+app.command(name="gc-archive")(_gc_archive_main)
+app.command(name="gc-bak")(_gc_bak_main)
+app.command(name="where")(_where_main)
 
 # ---------------------------------------------------------------------------
 # Helpers

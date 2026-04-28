@@ -9,6 +9,65 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.30] - 2026-04-28
+
+### Fixed
+
+- **`paperwiki <subcommand>` was BROKEN for every runner-backed
+  subcommand** (regression from v0.3.27 / Task 9.29 — caught only in
+  v0.3.30 user smoke when `paperwiki where` returned `Missing command.
+  Try 'paperwiki where --help' for help.`). Root cause: cli.py used
+  `app.add_typer(_X_app, name="X")` to mirror runners as parent
+  subcommands. `add_typer` wraps the sub-app in a `click.Group` that
+  REQUIRES a sub-command — single-command auto-promotion does NOT
+  apply. Every invocation that didn't include `--help` (the help
+  printer exits early before the group dispatcher runs) failed:
+  `paperwiki digest`, `paperwiki wiki-ingest`, `paperwiki gc-archive`,
+  `paperwiki gc-bak`, `paperwiki where`, etc. — all 11 of them.
+
+  v0.3.27's CLI surface tests only checked `<name> --help` exit code,
+  which masked the bug because Typer's `--help` short-circuits the
+  group routing.
+
+  **Fix**: replaced every `app.add_typer(_X_app, name="X")` with
+  `app.command(name="X")(_X_main)` — re-registers each runner's
+  `main` callable directly as a parent-app command, bypassing the
+  click.Group wrapper. Each runner module still ships its own
+  standalone Typer app for `python -m paperwiki.runners.<name>`
+  invocation; only the parent-app wiring changed.
+
+  Verified all 11 subcommands now route correctly via
+  `paperwiki <name>` (with or without args).
+
+### Tests
+
+- **CI green again on narrow terminals** (Rich `--help` line-wrap
+  fix): three `TestCli::test_help_lists_*_flags` tests in
+  `tests/unit/runners/test_gc_bak.py`,
+  `tests/unit/runners/test_gc_digest_archive.py`, and
+  `tests/unit/runners/test_where.py` were passing locally (wide
+  terminal) but failing in CI (narrow terminal) because Rich wrapped
+  long flag names like `--keep-recent` across lines, breaking the
+  literal substring assertion. Fixed by passing
+  `env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "200"}` to
+  CliRunner so Rich uses plain wide-format output for the help text.
+- `tests/unit/test_cli.py::TestCliRunnerImports` renamed to
+  `test_all_runner_mains_importable` and updated to import `_main`
+  callables instead of `_app` Typer apps (matches the new wiring).
+- 727 total tests green; mypy --strict clean; ruff check + format
+  clean.
+
+### Migration
+
+- Upgrade is straightforward: `paperwiki update` then `/exit + claude`
+  + `/plugin install paper-wiki@paper-wiki`.
+- v0.3.29 users hit the `Missing command` error — running v0.3.30 is
+  the only way out short of `python -m paperwiki.runners.<X>`
+  (long-form workaround that still works).
+- v0.3.28 users skipping straight to v0.3.30 also need the v0.3.29
+  one-time migration: legacy per-version `.venv` is COPIED to
+  `${PAPERWIKI_HOME}/venv` then symlinked.
+
 ## [0.3.29] - 2026-04-28
 
 ### Changed

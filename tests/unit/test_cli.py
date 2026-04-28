@@ -484,30 +484,35 @@ class TestCliRunnerImports:
     without updating cli.py.
     """
 
-    def test_all_runner_apps_importable(self) -> None:
+    def test_all_runner_mains_importable(self) -> None:
+        """v0.3.30: cli.py re-uses runner.main callables directly via
+        app.command(name=...)(...). This test pins the import names so a
+        runner rename can't silently drop a parent-app subcommand."""
         from paperwiki.cli import (
-            _digest_app,
-            _extract_images_app,
-            _gc_archive_app,
-            _gc_bak_app,
-            _migrate_recipe_app,
-            _migrate_sources_app,
-            _wiki_compile_app,
-            _wiki_ingest_app,
-            _wiki_lint_app,
-            _wiki_query_app,
+            _digest_main,
+            _extract_images_main,
+            _gc_archive_main,
+            _gc_bak_main,
+            _migrate_recipe_main,
+            _migrate_sources_main,
+            _where_main,
+            _wiki_compile_main,
+            _wiki_ingest_main,
+            _wiki_lint_main,
+            _wiki_query_main,
         )
 
-        for name, runner_app in (
-            ("digest", _digest_app),
-            ("extract-images", _extract_images_app),
-            ("gc-archive", _gc_archive_app),
-            ("gc-bak", _gc_bak_app),
-            ("migrate-recipe", _migrate_recipe_app),
-            ("migrate-sources", _migrate_sources_app),
-            ("wiki-compile", _wiki_compile_app),
-            ("wiki-ingest", _wiki_ingest_app),
-            ("wiki-lint", _wiki_lint_app),
-            ("wiki-query", _wiki_query_app),
+        for name, runner_main in (
+            ("digest", _digest_main),
+            ("extract-images", _extract_images_main),
+            ("gc-archive", _gc_archive_main),
+            ("gc-bak", _gc_bak_main),
+            ("migrate-recipe", _migrate_recipe_main),
+            ("migrate-sources", _migrate_sources_main),
+            ("where", _where_main),
+            ("wiki-compile", _wiki_compile_main),
+            ("wiki-ingest", _wiki_ingest_main),
+            ("wiki-lint", _wiki_lint_main),
+            ("wiki-query", _wiki_query_main),
         ):
-            assert runner_app is not None, f"runner app {name} failed to import"
+            assert callable(runner_main), f"runner main {name} not callable"
