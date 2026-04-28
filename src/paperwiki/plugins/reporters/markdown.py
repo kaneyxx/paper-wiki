@@ -106,7 +106,16 @@ def _format_source_line(canonical_id: str, landing_url: str | None) -> str:
 
 
 class MarkdownReporter:
-    """Persist a digest as ``{output_dir}/{filename_template}``."""
+    """Persist a digest as ``{output_dir}/{filename_template}``.
+
+    ``archive_retention_days`` (Task 9.30 / v0.3.28) is a recipe-level
+    field that documents the user's intended retention window for files
+    written under ``output_dir``.  The reporter intentionally does NOT
+    GC at emit time (avoids hot-path slowdown and surprise mutation);
+    the field is informational metadata that ``paperwiki gc-archive``
+    can read in future revisions.  v0.3.28's runner uses ``--max-age-days``
+    on the CLI; the recipe-driven retention path is a 9.32 candidate.
+    """
 
     name = "markdown"
 
@@ -115,9 +124,11 @@ class MarkdownReporter:
         output_dir: Path,
         *,
         filename_template: str = "{date}-paper-digest.md",
+        archive_retention_days: int | None = None,
     ) -> None:
         self.output_dir = output_dir
         self.filename_template = filename_template
+        self.archive_retention_days = archive_retention_days
 
     async def emit(
         self,

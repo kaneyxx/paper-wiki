@@ -283,6 +283,7 @@ _EXPECTED_PAPERWIKI_COMMANDS: tuple[str, ...] = (
     "wiki-query",
     "extract-images",
     "migrate-sources",
+    "gc-archive",
 )
 
 
@@ -338,6 +339,7 @@ class TestCliRunnerImports:
         from paperwiki.cli import (
             _digest_app,
             _extract_images_app,
+            _gc_archive_app,
             _migrate_recipe_app,
             _migrate_sources_app,
             _wiki_compile_app,
@@ -349,6 +351,7 @@ class TestCliRunnerImports:
         for name, runner_app in (
             ("digest", _digest_app),
             ("extract-images", _extract_images_app),
+            ("gc-archive", _gc_archive_app),
             ("migrate-recipe", _migrate_recipe_app),
             ("migrate-sources", _migrate_sources_app),
             ("wiki-compile", _wiki_compile_app),

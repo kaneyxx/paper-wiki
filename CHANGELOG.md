@@ -9,6 +9,72 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.28] - 2026-04-28
+
+### Added
+
+- **`paperwiki gc-archive` runner** (Task 9.30 / D-9.30.*). Cleans up
+  old `<vault>/.digest-archive/<YYYY-MM-DD>-paper-digest.md` files
+  written by the markdown reporter. Power users hate hidden-directory
+  growth — this is the explicit user-driven GC tool. Sizing context:
+  ~30-50 KB per file, ~11-18 MB per year, ~55-90 MB per 5 years.
+
+  Surface:
+
+  ```
+  paperwiki gc-archive [--vault <path>] [--max-age-days N]
+                       [--dry-run] [--gzip] [-v]
+  ```
+
+  Behavior:
+
+  - **D-9.30.1**: when `--vault` is omitted, auto-discovers from
+    `~/.config/paper-wiki/recipes/daily.yaml` (prefers obsidian
+    reporter's `vault_path`; falls back to deriving from the markdown
+    reporter's `output_dir` ending in `/.digest-archive`). Discovery
+    failure exits 2 with a clear message.
+  - **D-9.30.2**: scope locked to `<vault>/.digest-archive/` only.
+    Filename pattern guard (`^\d{4}-\d{2}-\d{2}-paper-digest\.md(\.gz)?$`)
+    skips anything that doesn't match — user-added notes, `.icloud`
+    sync stubs, `.DS_Store`, etc. surface in `skipped_unrecognized`
+    and are never touched.
+  - **D-9.30.3**: `--max-age-days` defaults to `365` (1 year). Common
+    values documented in `--help`: 90 / 365 / 730.
+  - `--dry-run` reports what would happen without mutating disk.
+  - `--gzip` compresses old files in place (`<file>.md` →
+    `<file>.md.gz`); reversible via `gunzip`. Already-gzipped files
+    are kept (no double-gzip).
+  - Idempotent. Re-running emits empty `removed` / `gzipped` lists.
+  - Missing `.digest-archive/` is a clean no-op (AC-9.30.7).
+
+  JSON output to stdout includes `vault`, `archive_dir`,
+  `max_age_days`, `mode`, `dry_run`, `removed`, `gzipped`, `kept`,
+  `skipped_unrecognized`, `errors`.
+
+- **`MarkdownReporter.archive_retention_days: int | None = None`**
+  recipe field (Task 9.30 (a)). Documents the user's intended retention
+  window. Reporter intentionally does NOT GC at emit time — the field
+  is informational metadata that future revisions of `gc-archive` can
+  read to default `--max-age-days` from the recipe.
+
+- **`paperwiki gc-archive` exposed as a CLI subcommand** (Task 9.30
+  (c)) via `app.add_typer` plumbing in `paperwiki.cli`. Continues the
+  v0.3.27 surface-symmetry pattern.
+
+### Tests
+
+- 20 new unit tests in `tests/unit/runners/test_gc_digest_archive.py`
+  covering filename pattern guard, age threshold gating, dry-run,
+  gzip mode, idempotency, missing-archive no-op, vault auto-discovery
+  (4 paths), CLI exit codes, and the documented `--max-age-days = 365`
+  default.
+- 3 new tests in `tests/unit/plugins/reporters/test_markdown.py`
+  covering the new `archive_retention_days` field accepts default
+  `None`, accepts explicit int, and emit-time behavior unchanged.
+- Integration smoke (`tests/integration/test_cli_smoke.py`) extended
+  to include `gc-archive` in the expected CLI surface and to assert
+  `python -m paperwiki.runners.gc_digest_archive --help` exits 0.
+
 ## [0.3.27] - 2026-04-28
 
 ### Added

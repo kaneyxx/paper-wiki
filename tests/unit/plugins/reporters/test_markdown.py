@@ -186,3 +186,30 @@ class TestMarkdownReporter:
 
         reporter = MarkdownReporter(output_dir=tmp_path)
         assert isinstance(reporter, Reporter)
+
+
+class TestArchiveRetentionDays:
+    """Task 9.30 / v0.3.28: ``archive_retention_days`` accepted as recipe
+    metadata. The field is documentation-only at v0.3.28; the runner
+    ``paperwiki gc-archive`` reads it from the recipe in a future
+    revision. Reporter emit-time behavior is unchanged."""
+
+    def test_default_is_none(self, tmp_path: Path) -> None:
+        reporter = MarkdownReporter(output_dir=tmp_path)
+        assert reporter.archive_retention_days is None
+
+    def test_accepts_explicit_value(self, tmp_path: Path) -> None:
+        reporter = MarkdownReporter(output_dir=tmp_path, archive_retention_days=365)
+        assert reporter.archive_retention_days == 365
+
+    async def test_emit_does_not_gc_at_write_time(self, tmp_path: Path) -> None:
+        """Emit-time behavior is unchanged regardless of retention setting:
+        the reporter never deletes files when writing. GC is a separate
+        explicit user action via paperwiki gc-archive."""
+        old = tmp_path / "2020-01-01-paper-digest.md"
+        old.write_text("# old\n", encoding="utf-8")
+
+        reporter = MarkdownReporter(output_dir=tmp_path, archive_retention_days=1)
+        await reporter.emit([_make_recommendation()], _make_ctx())
+
+        assert old.is_file()
