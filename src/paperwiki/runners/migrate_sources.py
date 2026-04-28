@@ -37,6 +37,7 @@ import typer
 import yaml
 from loguru import logger
 
+from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
@@ -132,7 +133,23 @@ async def migrate_vault(
     """Walk every ``Wiki/sources/*.md`` and migrate where needed.
 
     ``dry_run=True`` returns the same counts but never writes.
+
+    Acquires the vault advisory lock for the duration of the operation
+    (skipped when ``dry_run=True`` since no files are modified).
     """
+    if dry_run:
+        return await _migrate_vault_locked(vault_path, wiki_subdir=wiki_subdir, dry_run=True)
+    async with acquire_vault_lock(vault_path):
+        return await _migrate_vault_locked(vault_path, wiki_subdir=wiki_subdir, dry_run=False)
+
+
+async def _migrate_vault_locked(
+    vault_path: Path,
+    *,
+    wiki_subdir: str = WIKI_SUBDIR,
+    dry_run: bool = False,
+) -> MigrateReport:
+    """Inner implementation — called with vault lock already held (unless dry_run)."""
     report = MigrateReport()
     sources_dir = vault_path / wiki_subdir / "sources"
     if not sources_dir.is_dir():

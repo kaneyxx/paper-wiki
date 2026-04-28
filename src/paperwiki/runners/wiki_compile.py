@@ -31,6 +31,7 @@ import typer
 from loguru import logger
 
 from paperwiki import __version__
+from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
@@ -65,7 +66,22 @@ async def compile_wiki(
     wiki_subdir: str = WIKI_SUBDIR,
     now: datetime | None = None,
 ) -> CompileResult:
-    """Rebuild the wiki index file and return a summary."""
+    """Rebuild the wiki index file and return a summary.
+
+    Acquires the vault advisory lock for the duration of the operation so
+    concurrent ingest runs cannot observe a partial index.
+    """
+    async with acquire_vault_lock(vault_path):
+        return await _compile_wiki_locked(vault_path, wiki_subdir=wiki_subdir, now=now)
+
+
+async def _compile_wiki_locked(
+    vault_path: Path,
+    *,
+    wiki_subdir: str = WIKI_SUBDIR,
+    now: datetime | None = None,
+) -> CompileResult:
+    """Inner implementation — called with vault lock already held."""
     backend = MarkdownWikiBackend(vault_path=vault_path, wiki_subdir=wiki_subdir)
     sources = await backend.list_sources()
     concepts = await backend.list_concepts()

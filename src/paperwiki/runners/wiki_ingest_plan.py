@@ -43,6 +43,7 @@ import typer
 import yaml
 from loguru import logger
 
+from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError
@@ -91,7 +92,27 @@ async def plan_ingest(
     stub files before the affected-concept query is re-run. This ensures
     a fresh vault does not dead-end with an empty ``affected_concepts``
     list on the first ingest.
+
+    Acquires the vault advisory lock for the duration of the operation so
+    concurrent ingest or compile runs cannot observe partial state.
     """
+    async with acquire_vault_lock(vault_path):
+        return await _plan_ingest_locked(
+            vault_path,
+            source_id,
+            wiki_subdir=wiki_subdir,
+            auto_bootstrap=auto_bootstrap,
+        )
+
+
+async def _plan_ingest_locked(
+    vault_path: Path,
+    source_id: str,
+    *,
+    wiki_subdir: str = WIKI_SUBDIR,
+    auto_bootstrap: bool = False,
+) -> IngestPlan:
+    """Inner implementation — called with vault lock already held."""
     backend = MarkdownWikiBackend(vault_path=vault_path, wiki_subdir=wiki_subdir)
     sources = await backend.list_sources()
     concepts = await backend.list_concepts()

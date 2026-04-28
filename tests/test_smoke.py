@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.17"
+    assert data["version"] == "0.3.18"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1034,6 +1034,49 @@ def test_wiki_lint_explains_auto_stub_intent() -> None:
     assert "/paper-wiki:wiki-ingest" in body, (
         "wiki-lint SKILL Step 2 must reference /paper-wiki:wiki-ingest "
         "as the action to fill auto-created stubs"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.17 — vault .lock (v0.3.18)
+# ---------------------------------------------------------------------------
+
+
+def test_vault_lock_module_exists() -> None:
+    """src/paperwiki/_internal/locking.py must expose acquire_vault_lock and VaultLockError."""
+    from paperwiki._internal.locking import VaultLockError, acquire_vault_lock
+
+    assert callable(acquire_vault_lock)
+    assert issubclass(VaultLockError, Exception)
+
+
+# ---------------------------------------------------------------------------
+# Task 9.18 — Today's Overview crash-safe step ordering (v0.3.18)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_overview_synthesis_comes_after_auto_chain_and_per_paper() -> None:
+    """digest SKILL.md must order steps: auto-chain → per-paper synthesis → overview synthesis.
+
+    The overview slot should be filled last so it can reference concepts and
+    figures that the earlier steps produced.
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+
+    auto_chain_pos = body.find("Auto-chain extract-images")
+    per_paper_pos = body.find("Per-paper Detailed report synthesis")
+    overview_pos = body.find("Synthesize Today's Overview")
+
+    assert auto_chain_pos != -1, "digest SKILL must describe the auto-chain step"
+    assert per_paper_pos != -1, "digest SKILL must describe per-paper synthesis"
+    assert overview_pos != -1, "digest SKILL must describe Today's Overview synthesis"
+
+    assert auto_chain_pos < per_paper_pos, (
+        "In digest SKILL, auto-chain must appear BEFORE per-paper synthesis"
+    )
+    assert per_paper_pos < overview_pos, (
+        "In digest SKILL, per-paper synthesis must appear BEFORE Today's Overview synthesis — "
+        "the overview is written last so it can reference the fully-populated digest"
     )
 
 

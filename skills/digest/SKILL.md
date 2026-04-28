@@ -63,23 +63,7 @@ to `paperwiki:setup`.
 6. **Summarize the outcome.** Read the reporter output paths from the
    recipe and report: how many recommendations were emitted, where
    they were written, and the titles + composite scores of the top 3.
-7. **Synthesize Today's Overview.** Read the digest file at the path
-   emitted by the runner (the obsidian reporter's `output_dir`). Find
-   the line `<!-- paper-wiki:overview-slot -->` inside the
-   `> [!summary] Today's Overview` callout. Replace that single line
-   with 60–200 words of synthesized prose covering:
-   - Top trends across the N recommendations (e.g. "3 papers explore
-     VLA models, 2 explore diffusion-based generation")
-   - Quality / score distribution (e.g. "scores skew high; median 0.74")
-   - Suggested reading order (e.g. "start with #2 for the foundation
-     paper, then #5 for the application")
-
-   Every factual claim MUST cite the paper(s) it comes from using `#N`
-   markers matching the digest's paper indices (e.g. "...as in #1 and
-   #4"). Do not invent claims. Use only what's in the digest you just
-   read. Keep prose Obsidian-readable (callout-friendly: short
-   paragraphs, bullet-able if helpful).
-8. **Auto-chain extract-images + wiki-ingest when configured.** Read the
+7. **Auto-chain extract-images + wiki-ingest when configured.** Read the
    recipe's `auto_ingest_top` field. If `> 0`, **immediately and without
    asking the user**, take the top `min(auto_ingest_top, top_k)` papers
    from the digest and for each, **in this order**:
@@ -106,7 +90,7 @@ to `paperwiki:setup`.
    keep the manual confirm prompt — only the digest auto-chain uses
    `--auto-bootstrap`.
 
-9. **Per-paper Detailed report synthesis.** For each
+8. **Per-paper Detailed report synthesis.** For each
    `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` marker still in
    the digest file, synthesize the **Detailed report** block and replace
    the marker. Each report contains:
@@ -120,6 +104,27 @@ to `paperwiki:setup`.
    prompts when feasible (one LLM call for all top-K papers) to amortize
    cost; fall back to per-paper if the batched output truncates. If a
    marker is already gone (re-run case), skip it.
+
+9. **Synthesize Today's Overview.** Read the digest file at the path
+   emitted by the runner (the obsidian reporter's `output_dir`). Find
+   the line `<!-- paper-wiki:overview-slot -->` inside the
+   `> [!summary] Today's Overview` callout. Replace that single line
+   with 60–200 words of synthesized prose covering:
+   - Top trends across the N recommendations (e.g. "3 papers explore
+     VLA models, 2 explore diffusion-based generation")
+   - Quality / score distribution (e.g. "scores skew high; median 0.74")
+   - Suggested reading order (e.g. "start with #2 for the foundation
+     paper, then #5 for the application")
+
+   Every factual claim MUST cite the paper(s) it comes from using `#N`
+   markers matching the digest's paper indices (e.g. "...as in #1 and
+   #4"). Do not invent claims. Use only what's in the digest you just
+   read. Keep prose Obsidian-readable (callout-friendly: short
+   paragraphs, bullet-able if helpful).
+
+   **Do this last** — after auto-chain and per-paper synthesis — so the
+   overview can reference the ingested concepts and extracted figures
+   that Step 7 produced.
 
 10. **Suggest a follow-up.** If the user has not configured a vault,
    suggest `/paper-wiki:setup`. If a paper looks interesting and was

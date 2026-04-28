@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import aiofiles
 
 from paperwiki import __version__
+from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki.config.layout import DAILY_SUBDIR
 from paperwiki.core.errors import UserError
 
@@ -261,12 +262,13 @@ class ObsidianReporter:
             from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
 
             backend = MarkdownWikiBackend(vault_path=self.vault_path)
-            for rec in recs:
-                await backend.upsert_paper(
-                    rec,
-                    topic_strength_threshold=self.wiki_topic_strength_threshold,
-                )
-                ctx.increment("reporter.obsidian.wiki_backend.written")
+            async with acquire_vault_lock(self.vault_path):
+                for rec in recs:
+                    await backend.upsert_paper(
+                        rec,
+                        topic_strength_threshold=self.wiki_topic_strength_threshold,
+                    )
+                    ctx.increment("reporter.obsidian.wiki_backend.written")
 
 
 __all__ = [

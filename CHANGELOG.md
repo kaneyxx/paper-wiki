@@ -9,6 +9,28 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-04-27
+
+### Added
+
+- **Vault advisory lock** (Task 9.17). New `src/paperwiki/_internal/locking.py`
+  provides the `acquire_vault_lock(vault_path)` async context manager. All
+  mutating runners (`wiki_ingest_plan`, `wiki_compile`, `migrate_sources`) and
+  `ObsidianReporter` (when `wiki_backend=True`) acquire the lock before writing
+  to `Wiki/`. Concurrent runs now fail immediately with `VaultLockError` (exit
+  code 1) instead of producing interleaved partial state.
+- **Today's Overview synthesized last** (Task 9.18). The digest SKILL Process
+  reorders Steps 7–9: auto-chain (extract-images + wiki-ingest) → per-paper
+  Detailed report synthesis → Today's Overview synthesis. The overview is now
+  the final LLM pass so it can reference concepts and figures produced by the
+  earlier steps. A new Common Rationalizations note ("Do this last") anchors
+  the contract.
+- Unit tests for `acquire_vault_lock`: lock file creation, sequential
+  re-acquisition, parent-dir creation, release-on-exception.
+- Smoke tests `test_vault_lock_module_exists` and
+  `test_digest_skill_overview_synthesis_comes_after_auto_chain_and_per_paper`
+  pin both contracts.
+
 ## [0.3.17] - 2026-04-27
 
 ### Added
