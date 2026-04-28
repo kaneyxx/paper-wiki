@@ -279,3 +279,124 @@ class TestFetch:
         # Sanity: the fixture is JSON-serializable so MockTransport's
         # json= parameter does not raise.
         json.dumps(_VALID_RESPONSE)
+
+
+# ---------------------------------------------------------------------------
+# Task 9.19 — s2.parse.skip log level
+# ---------------------------------------------------------------------------
+
+
+class TestSkipLogLevel:
+    def test_semantic_scholar_skip_branches_log_at_debug_level(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """AC-9.19.4: sparse-record skip branches emit DEBUG, not WARNING."""
+        from paperwiki._internal.logging import configure_runner_logging
+
+        configure_runner_logging(verbose=True)
+
+        sparse_responses = [
+            # missing title/abstract
+            {"data": [{"paperId": "x1", "title": "", "abstract": ""}]},
+            # bad publication date
+            {
+                "data": [
+                    {
+                        "paperId": "x2",
+                        "title": "T",
+                        "abstract": "A",
+                        "publicationDate": "not-a-date",
+                        "authors": [{"name": "A"}],
+                    }
+                ]
+            },
+            # no authors
+            {
+                "data": [
+                    {
+                        "paperId": "x3",
+                        "title": "T",
+                        "abstract": "A",
+                        "publicationDate": "2026-01-01",
+                        "authors": [],
+                    }
+                ]
+            },
+            # no usable id (no externalIds, no paperId)
+            {
+                "data": [
+                    {
+                        "title": "T",
+                        "abstract": "A",
+                        "publicationDate": "2026-01-01",
+                        "authors": [{"name": "A"}],
+                    }
+                ]
+            },
+        ]
+        for payload in sparse_responses:
+            SemanticScholarSource._parse_response(payload)
+
+        captured = capsys.readouterr()
+        # s2.parse.skip must appear in DEBUG output (verbose=True)
+        assert "s2.parse.skip" in captured.err, "sparse-record skip must log s2.parse.skip"
+        # Must NOT appear as WARNING-level — only DEBUG
+        lines = captured.err.splitlines()
+        warning_skip_lines = [ln for ln in lines if "s2.parse.skip" in ln and "WARNING" in ln]
+        assert not warning_skip_lines, (
+            "s2.parse.skip must NOT appear at WARNING level for sparse records; "
+            f"found: {warning_skip_lines}"
+        )
+
+    def test_semantic_scholar_emits_skip_summary_at_info_level(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """AC-9.19.5: summary line emitted once per fetch when at least one skip."""
+        from paperwiki._internal.logging import configure_runner_logging
+
+        configure_runner_logging(verbose=False)
+
+        # Two broken entries + one good entry → skips counted
+        mixed = {
+            "data": [
+                {"paperId": "bad1", "title": "", "abstract": ""},
+                {
+                    "paperId": "bad2",
+                    "title": "T",
+                    "abstract": "A",
+                    "publicationDate": "2026-01-01",
+                    "authors": [],
+                },
+                {
+                    "paperId": "good",
+                    "title": "Valid Entry",
+                    "abstract": "Valid abstract",
+                    "publicationDate": "2026-03-01",
+                    "authors": [{"name": "Author"}],
+                    "externalIds": {},
+                },
+            ]
+        }
+        papers = SemanticScholarSource._parse_response(mixed)
+        captured = capsys.readouterr()
+
+        # Exactly one good paper parsed
+        assert len(papers) == 1
+        # INFO summary line must appear
+        assert "s2.parse.skipped_summary" in captured.err, (
+            "must emit s2.parse.skipped_summary when at least one skip occurred"
+        )
+
+    def test_semantic_scholar_no_summary_when_all_parse_cleanly(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """AC-9.19.5 (inverse): no summary line when zero skips."""
+        from paperwiki._internal.logging import configure_runner_logging
+
+        configure_runner_logging(verbose=False)
+
+        SemanticScholarSource._parse_response(_VALID_RESPONSE)
+        captured = capsys.readouterr()
+        assert "s2.parse.skipped_summary" not in captured.err, (
+            "must NOT emit s2.parse.skipped_summary when all entries parse successfully"
+        )

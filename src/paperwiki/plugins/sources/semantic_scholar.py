@@ -160,24 +160,47 @@ class SemanticScholarSource:
         """Convert a Semantic Scholar JSON payload into a list of :class:`Paper`."""
         entries = payload.get("data") or []
         papers: list[Paper] = []
+        skip_counts: dict[str, int] = {}
         for entry in entries:
-            paper = _parse_entry(entry)
+            paper = _parse_entry(entry, skip_counts=skip_counts)
             if paper is not None:
                 papers.append(paper)
+        if skip_counts:
+            total = sum(skip_counts.values())
+            logger.info(
+                "s2.parse.skipped_summary",
+                count=total,
+                by_reason=skip_counts,
+            )
         return papers
 
 
-def _parse_entry(entry: dict[str, Any]) -> Paper | None:
-    """Map a single S2 paper dict into a :class:`Paper`, or ``None`` to skip."""
+def _parse_entry(
+    entry: dict[str, Any],
+    *,
+    skip_counts: dict[str, int] | None = None,
+) -> Paper | None:
+    """Map a single S2 paper dict into a :class:`Paper`, or ``None`` to skip.
+
+    When ``skip_counts`` is supplied, sparse-record skips are tallied
+    there (keyed by reason) at DEBUG level. The ``model validation``
+    branch stays at WARNING — that indicates a real schema mismatch.
+    """
+
+    def _record_skip(reason: str, **kw: object) -> None:
+        logger.debug("s2.parse.skip", reason=reason, **kw)
+        if skip_counts is not None:
+            skip_counts[reason] = skip_counts.get(reason, 0) + 1
+
     title = (entry.get("title") or "").strip()
     abstract = (entry.get("abstract") or "").strip()
     if not title or not abstract:
-        logger.warning("s2.parse.skip", reason="missing title/abstract")
+        _record_skip("missing title/abstract")
         return None
 
     published_at = _parse_publication_date(entry.get("publicationDate"))
     if published_at is None:
-        logger.warning("s2.parse.skip", reason="bad publication date", title=title)
+        _record_skip("bad publication date", title=title)
         return None
 
     authors_raw = entry.get("authors") or []
@@ -190,12 +213,12 @@ def _parse_entry(entry: dict[str, Any]) -> Paper | None:
         affiliation = _first_affiliation(affiliations)
         authors.append(Author(name=name, affiliation=affiliation))
     if not authors:
-        logger.warning("s2.parse.skip", reason="no authors", title=title)
+        _record_skip("no authors", title=title)
         return None
 
     canonical_id = _canonical_id(entry)
     if canonical_id is None:
-        logger.warning("s2.parse.skip", reason="no usable id", title=title)
+        _record_skip("no usable id", title=title)
         return None
 
     citation_count = entry.get("citationCount")
