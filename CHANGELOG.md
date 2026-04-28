@@ -9,6 +9,17 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.24] - 2026-04-28
+
+### Changed
+
+- **`paperwiki update` first-line wording trimmed.** Was
+  `paper-wiki upgraded marketplace 0.3.20 → 0.3.23` (with the awkward
+  `marketplace (not installed)` placeholder when nothing was cached).
+  Now `paper-wiki: 0.3.20 → 0.3.23` (or `paper-wiki: not installed →
+  0.3.23` when no current install). Concise X → Y format that matches
+  the user's mental model of what an upgrade message should look like.
+
 ## [0.3.23] - 2026-04-28
 
 ### Fixed

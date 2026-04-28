@@ -228,9 +228,9 @@ def update(
     _drop_from_enabled_plugins(_SETTINGS_JSON)
     _drop_from_enabled_plugins(_SETTINGS_LOCAL_JSON)
 
-    old_display = cache_ver if cache_ver else "(not installed)"
+    old_display = cache_ver if cache_ver else "not installed"
     typer.echo(
-        f"paper-wiki upgraded marketplace {old_display} → {marketplace_ver}"
+        f"paper-wiki: {old_display} → {marketplace_ver}"
         + bak_suffix
         + "\n"
         + "\nNext:"
