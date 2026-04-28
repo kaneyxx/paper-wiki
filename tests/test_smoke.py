@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.15"
+    assert data["version"] == "0.3.16"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -841,4 +841,60 @@ def test_wiki_ingest_skill_auto_chain_path_uses_only_runner() -> None:
     assert "folded_citations" in body, (
         "wiki-ingest SKILL must reference the 'folded_citations' JSON field "
         "so the LLM knows which field to read from runner output"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.4 — Per-paper Detailed report synthesis (v0.3.16)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_describes_per_paper_synthesis() -> None:
+    """digest SKILL.md must document per-paper Detailed report synthesis:
+    - reference the per-paper-slot marker
+    - mention 'Detailed report'
+    - NOT refer to /paper-wiki:analyze as a fallback for per-paper synthesis
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "paper-wiki:per-paper-slot" in body, (
+        "digest SKILL.md must reference the 'paper-wiki:per-paper-slot' marker "
+        "used to anchor per-paper synthesized sections"
+    )
+    assert "Detailed report" in body, (
+        "digest SKILL.md must mention 'Detailed report' as the synthesized section type"
+    )
+    # The SKILL must not rely on /paper-wiki:analyze as a per-paper fallback
+    # (that's a different flow for single-paper deep dives)
+    assert (
+        "analyze" not in body.lower().split("suggest")[-1]
+        or "/paper-wiki:analyze" not in body[: body.lower().find("per-paper-slot")]
+    ), "digest SKILL.md must not use /paper-wiki:analyze as a fallback for per-paper synthesis"
+
+
+# ---------------------------------------------------------------------------
+# Task 9.5 — Auto image extraction for auto_ingest_top papers (v0.3.16)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_chains_extract_images() -> None:
+    """digest SKILL.md must document both extract-images AND wiki-ingest in the
+    auto-chain step, with extract-images appearing BEFORE wiki-ingest."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "extract-images" in body or "extract_paper_images" in body, (
+        "digest SKILL.md must mention extract-images in the auto-chain step"
+    )
+    assert "/paper-wiki:wiki-ingest" in body or "wiki-ingest" in body, (
+        "digest SKILL.md must mention wiki-ingest in the auto-chain step"
+    )
+
+    # Extract-images must appear BEFORE wiki-ingest in the document
+    extract_pos = body.find("extract-images")
+    if extract_pos == -1:
+        extract_pos = body.find("extract_paper_images")
+    ingest_pos = body.find("wiki-ingest")
+    assert extract_pos < ingest_pos, (
+        "In digest SKILL.md, extract-images must appear BEFORE wiki-ingest "
+        "in the auto-chain step — figures must be on disk before ingest runs"
     )

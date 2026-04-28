@@ -79,28 +79,49 @@ to `paperwiki:setup`.
    #4"). Do not invent claims. Use only what's in the digest you just
    read. Keep prose Obsidian-readable (callout-friendly: short
    paragraphs, bullet-able if helpful).
-8. **Auto-chain wiki-ingest when configured.** Read the recipe's
-   `auto_ingest_top` field. If `> 0`, **immediately and without asking
-   the user**, take the top `min(auto_ingest_top, top_k)` papers from
-   the digest and chain `/paper-wiki:wiki-ingest <canonical-id>
-   --auto-bootstrap` for each, in score order. The user setting
-   `auto_ingest_top: N` IS their pre-approval — do NOT prompt
-   "shall I chain?" or "want me to ingest?". Just do it. The
-   `--auto-bootstrap` flag tells wiki-ingest to auto-stub any new
-   concepts the source suggests, so a fresh vault doesn't dead-end on
-   paper #1 — missing concept articles are stubbed automatically before
-   the normal update loop runs. The wiki-ingest SKILL handles its own
-   idempotence (no-op when a source is already folded into all relevant
-   concepts), so safe to run on every digest. Surface the per-paper
-   outcome briefly to the user — they should see "ingesting paper #1 →
-   created 2 stubs, updated 1 concept" rather than a silent block of
-   activity. When `auto_ingest_top` is `0` (the default), skip this
-   step.
+8. **Auto-chain extract-images + wiki-ingest when configured.** Read the
+   recipe's `auto_ingest_top` field. If `> 0`, **immediately and without
+   asking the user**, take the top `min(auto_ingest_top, top_k)` papers
+   from the digest and for each, **in this order**:
+
+   a. **Extract images first** (for `arxiv:` ids only). Invoke
+      `python -m paperwiki.runners.extract_paper_images <vault>
+      <canonical-id>` so figures are on disk before wiki-ingest runs.
+      Continue on failure (a 404 or non-arXiv id is not a digest
+      failure); surface a one-liner skip reason for `paperclip:` /
+      `s2:` ids. Cache hits are normal — no warning when
+      `cached=true`.
+   b. **Then wiki-ingest.** Invoke `/paper-wiki:wiki-ingest
+      <canonical-id> --auto-bootstrap --fold-citations` for each. The
+      `--auto-bootstrap` flag stubs missing concepts; `--fold-citations`
+      folds the source citation into pre-existing concepts atomically.
+      No LLM work in this path. Surface `created_stubs` and
+      `folded_citations` counts per paper.
+
+   The user setting `auto_ingest_top: N` IS their pre-approval — do NOT
+   prompt "shall I chain?" or "want me to ingest?". Just do it. When
+   `auto_ingest_top` is `0` (the default), skip this step.
 
    **Note:** interactive `/paper-wiki:wiki-ingest <id>` invocations
    keep the manual confirm prompt — only the digest auto-chain uses
    `--auto-bootstrap`.
-9. **Suggest a follow-up.** If the user has not configured a vault,
+
+9. **Per-paper Detailed report synthesis.** For each
+   `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` marker still in
+   the digest file, synthesize the **Detailed report** block and replace
+   the marker. Each report contains:
+   - 2–3 sentence **"Why this matters"** framing from the abstract.
+   - 2–4 bullet **"Key takeaways"** (concrete claims from the abstract;
+     never invented).
+   - 1 line **"Score reasoning"** plain-English explanation of the
+     composite score (e.g. "Scores high because relevance is 0.92 —
+     multiple exact topic matches, modest novelty 0.55").
+   Cite the paper with `#N` matching its digest index. Batch the
+   prompts when feasible (one LLM call for all top-K papers) to amortize
+   cost; fall back to per-paper if the batched output truncates. If a
+   marker is already gone (re-run case), skip it.
+
+10. **Suggest a follow-up.** If the user has not configured a vault,
    suggest `/paper-wiki:setup`. If a paper looks interesting and was
    not auto-ingested, suggest `/paper-wiki:analyze <paper-id>` for a
    deeper dive or `/paper-wiki:wiki-ingest <paper-id>` to fold it
@@ -117,6 +138,9 @@ to `paperwiki:setup`.
 | "I'll claim a trend even if only one paper supports it — sounds smarter." | One paper is not a trend. Cite specifically: "#3 explores X" rather than "the field is moving toward X". Every trend claim needs at least two papers. |
 | "I'll skip the `#N` citations — they look ugly." | Citations are how the user can verify and follow up. Without them the overview is ungrounded prose that erodes trust in the digest. |
 | "I'll ask the user before chaining wiki-ingest — being safe." | NO. `auto_ingest_top: N` in the recipe IS the user's pre-approval. Asking "want me to chain?" defeats the whole point of the field — they configured it precisely so they don't have to answer that prompt every morning. Just do it. (If they don't want auto-chain, they set `auto_ingest_top: 0`.) |
+| "I'll invent per-paper claims that aren't in the abstract — makes the report richer." | NO. Every claim in the Detailed report MUST come from the abstract or the score breakdown. Hallucinated methods and results erode the user's trust in the digest. One wrong claim per day = the user stops reading. |
+| "I'll skip image extraction because Obsidian renders without it." | The user wants figures. Figures appear in the NEXT digest run's inline teasers. Skipping extraction silently delays that by one day and the user can't tell why their digest looks bare. |
+| "I'll run wiki-ingest before extract-images to save a step." | Extract-images must run FIRST so figures are on disk when `_try_inline_teaser` is invoked. Swapping the order means day-2 teasers are missing. The order is intentional. |
 
 ## Red Flags
 

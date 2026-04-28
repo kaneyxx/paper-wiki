@@ -9,6 +9,24 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-04-27
+
+### Added
+
+- **Per-paper Detailed report synthesis** (Task 9.4). The digest SKILL
+  Process Step 9 now fills each `<!-- paper-wiki:per-paper-slot:{id} -->`
+  marker with a synthesized Detailed report: "Why this matters" framing,
+  2–4 "Key takeaways" bullets from the abstract (never invented), and a
+  "Score reasoning" line. Claims must cite `#N` markers; batched prompts
+  are the default to amortize cost.
+- **Auto-chain image extraction** (Task 9.5). The digest SKILL auto-chain
+  now runs `extract_paper_images` **before** `wiki-ingest` for each top-N
+  `arxiv:` paper, so figures are on disk when `_try_inline_teaser` is
+  invoked on the next digest run. Non-arXiv ids are skipped with a one-line
+  reason; failures do not abort the digest.
+- Smoke tests `test_digest_skill_describes_per_paper_synthesis` and
+  `test_digest_skill_chains_extract_images` pin both contracts.
+
 ## [0.3.15] - 2026-04-27
 
 ### Added
