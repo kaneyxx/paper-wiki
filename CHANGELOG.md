@@ -9,6 +9,45 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-04-28
+
+### Added
+
+- **3-priority image extraction** (Task 9.25). `paperwiki._internal.arxiv_source`
+  now extracts figures via three cascading strategies:
+  (1) figure dirs in the arXiv source tarball (existing, now with min-size filter
+  `>200px` on at least one axis preserving v0.3.16 commit `c7d5df4`);
+  (2) standalone PDFs at the tarball root converted to PNG via PyMuPDF (new);
+  (3) caption-aware crops of the compiled paper PDF when TikZ is detected and
+  fewer than 2 figures were found via P1+P2 (new). New runtime dependency:
+  `pymupdf>=1.24` (AGPL, compatible with GPL-3.0). The `extract_paper_images`
+  runner now writes `Wiki/sources/<id>/images/index.md` with per-figure source
+  class (`arxiv-source` / `pdf-figure` / `tikz-cropped`) and emits a `sources`
+  sub-dict in its JSON output. Recovers figures from ~80% of arXiv papers (vs
+  ~30% on v0.3.19). Reference: github.com/juliye2025/evil-read-arxiv.
+- **`paperwiki` console-script** (Task 9.26). New `src/paperwiki/cli.py` exposes
+  `paperwiki update`, `paperwiki status`, and `paperwiki uninstall` subcommands.
+  `paperwiki update` ends the manual JSON-cleanup ritual every release has
+  required: it refreshes the marketplace clone, compares versions, and on drift
+  renames the stale cache to `<ver>.bak.<UTC-timestamp>` and prunes
+  `installed_plugins.json` plus both `settings.json` / `settings.local.json`
+  `enabledPlugins` entries so the subsequent `/plugin install` does a real
+  install without the "already installed globally" short-circuit.
+  README "Upgrading" section rewritten to lead with `paperwiki update` as the
+  primary path; manual flow retained as a fallback footnote.
+
+### Tests
+
+- `tests/unit/_internal/test_arxiv_source.py`: adds Priority-2 root-PDF,
+  Priority-3 TikZ-crop, min-size filter, and `_has_tikz` fixtures (12 new).
+- `tests/unit/runners/test_extract_paper_images.py`: adds `TestIndexManifest`
+  covering `index.md` presence and `sources` JSON field (3 new).
+- `tests/unit/test_cli.py` (new): 6 CLI-flow tests via `typer.testing.CliRunner`
+  for stale-cache upgrade, up-to-date no-op, missing marketplace clone (exit 2),
+  corrupt JSON (exit 1), `status` output, and `uninstall` teardown.
+- Smoke tests pin CLI surface (`test_paperwiki_cli_help_lists_subcommands`),
+  module imports, `ExtractResult.sources`, and pyproject declarations.
+
 ## [0.3.19] - 2026-04-27
 
 ### Added

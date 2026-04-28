@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.19"
+    assert data["version"] == "0.3.20"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1217,4 +1217,82 @@ def test_digest_skill_forbids_synthesizing_below_auto_ingest_top() -> None:
     assert found, (
         "digest SKILL.md Red Flags must have a row associating auto_ingest_top "
         "over-synthesis with STOP — warn the SKILL executor to halt and fix"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.25 — 3-priority image extraction (v0.3.20)
+# ---------------------------------------------------------------------------
+
+
+def test_arxiv_source_exports_priority_functions() -> None:
+    """arxiv_source must export the three new extraction functions."""
+    from paperwiki._internal.arxiv_source import (
+        _has_tikz,
+        extract_root_pdfs_from_tarball,
+        extract_tikz_crop_from_pdf,
+    )
+
+    assert callable(extract_root_pdfs_from_tarball)
+    assert callable(extract_tikz_crop_from_pdf)
+    assert callable(_has_tikz)
+
+
+def test_extract_result_has_sources_field() -> None:
+    """ExtractResult must carry a 'sources' dict with all three priority keys."""
+    from paperwiki.runners.extract_paper_images import ExtractResult
+
+    r = ExtractResult(
+        canonical_id="arxiv:0001.0001",
+        image_count=3,
+        images=[],
+        cached=False,
+        sources={"arxiv-source": 2, "pdf-figure": 1, "tikz-cropped": 0},
+    )
+    assert r.sources == {"arxiv-source": 2, "pdf-figure": 1, "tikz-cropped": 0}
+
+
+def test_pymupdf_dependency_declared() -> None:
+    """pyproject.toml must declare pymupdf>=1.24 (AGPL, GPL-3.0 compatible)."""
+    pyproject = REPO_ROOT / "pyproject.toml"
+    body = pyproject.read_text(encoding="utf-8")
+    assert "pymupdf" in body.lower(), (
+        "pyproject.toml must declare pymupdf>=1.24 as a runtime dependency "
+        "(added in Task 9.25 for Priority-2 and Priority-3 image extraction)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.26 — paperwiki CLI (v0.3.20)
+# ---------------------------------------------------------------------------
+
+
+def test_paperwiki_cli_help_lists_subcommands() -> None:
+    """``paperwiki --help`` must list update, status, and uninstall subcommands."""
+    from typer.testing import CliRunner
+
+    from paperwiki.cli import app
+
+    result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(app, ["--help"])
+    output = result.output
+    assert "update" in output, "paperwiki --help must list 'update' subcommand"
+    assert "status" in output, "paperwiki --help must list 'status' subcommand"
+    assert "uninstall" in output, "paperwiki --help must list 'uninstall' subcommand"
+
+
+def test_paperwiki_cli_module_importable() -> None:
+    """paperwiki.cli must import cleanly and expose app + main."""
+    from paperwiki.cli import app, main
+
+    assert callable(main)
+    assert app is not None
+
+
+def test_pyproject_declares_paperwiki_console_script() -> None:
+    """pyproject.toml must declare paperwiki = paperwiki.cli:main console-script."""
+    pyproject = REPO_ROOT / "pyproject.toml"
+    body = pyproject.read_text(encoding="utf-8")
+    assert "paperwiki" in body, "pyproject.toml must declare paperwiki console-script"
+    assert "paperwiki.cli:main" in body, (
+        "pyproject.toml [project.scripts] must map paperwiki → paperwiki.cli:main"
     )
