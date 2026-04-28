@@ -9,6 +9,32 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-04-27
+
+### Added
+
+- **Inline figures in Detailed reports** (Task 9.22). Detailed report synthesis
+  now embeds the first 1-2 alphabetically-sorted figures from
+  `Wiki/sources/<id>/images/` via `![[Wiki/sources/<id>/images/<file>|600]]`
+  inside the synthesized block, between Key takeaways and Score reasoning.
+  Distinct from the existing card teaser (`|700`) before the Abstract — both
+  placements are intentional. Figures are silently skipped for papers with no
+  extracted images (e.g. `paperclip:` / `s2:` ids with no arXiv source bundle).
+- 5 new smoke tests pin both contracts (inline figures + `auto_ingest_top`
+  gating).
+
+### Changed
+
+- **Detailed report synthesis gated by `auto_ingest_top`** (Task 9.24). Only
+  the top-N papers (where N = `auto_ingest_top`) get the full Detailed report
+  block (Why this matters + Key takeaways + inline figures + Score reasoning).
+  Papers ranked below the threshold get a single-line teaser:
+  `_Run /paper-wiki:analyze <id> for a deep dive into this paper, or
+  /paper-wiki:wiki-ingest <id> to fold it into your concept articles._`
+  Setting `auto_ingest_top: 0` makes ALL papers show the teaser (no synthesis).
+  Users who want all-paper synthesis can set `auto_ingest_top` to their full
+  `top_k` value.
+
 ## [0.3.18] - 2026-04-27
 
 ### Added
