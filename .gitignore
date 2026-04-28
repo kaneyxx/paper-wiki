@@ -54,3 +54,11 @@ secrets.*
 
 # Per-user paperwiki config (if anyone copies it into the project tree)
 .paperwiki/
+
+# Internal devlog & planning docs — NOT shipped to end users.
+# These are author-only notes (multi-thousand-line plans, in-progress
+# todo lists). End users who /plugin install paper-wiki@paper-wiki get
+# the whole repo cloned into their cache; trimming these keeps that
+# cache smaller and avoids confusing user-facing surface area.
+tasks/plan.md
+tasks/todo.md
