@@ -33,24 +33,28 @@ def _make_plugin_json(version: str, dest: Path) -> None:
 
 
 def _make_installed_plugins(version: str | None, dest: Path) -> None:
-    """Write installed_plugins.json with an optional paper-wiki entry."""
+    """Write installed_plugins.json using the real Claude Code 2.1.119 dict shape."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    plugins = []
+    plugins: dict[str, object] = {}
     if version is not None:
-        plugins.append(
+        plugins["paper-wiki@paper-wiki"] = [
             {
-                "name": "paper-wiki@paper-wiki",
-                "id": "paper-wiki@paper-wiki",
+                "scope": "user",
                 "version": version,
+                "installPath": "/fake/path",
             }
-        )
-    dest.write_text(json.dumps({"plugins": plugins}), encoding="utf-8")
+        ]
+    dest.write_text(json.dumps({"version": 2, "plugins": plugins}), encoding="utf-8")
 
 
 def _make_settings(dest: Path, enabled: bool = True) -> None:
+    """Write settings.json using the real Claude Code 2.1.119 dict shape."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    enabled_list = ["paper-wiki@paper-wiki"] if enabled else []
-    dest.write_text(json.dumps({"enabledPlugins": enabled_list}), encoding="utf-8")
+    enabled_plugins: dict[str, bool] = {}
+    if enabled:
+        enabled_plugins["oh-my-claudecode@omc"] = True
+        enabled_plugins["paper-wiki@paper-wiki"] = True
+    dest.write_text(json.dumps({"enabledPlugins": enabled_plugins}), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -130,9 +134,9 @@ class TestCliUpdate:
 
         # JSON entries cleared.
         installed = json.loads(paths["installed_plugins"].read_text())
-        assert all(p.get("id") != "paper-wiki@paper-wiki" for p in installed.get("plugins", []))
+        assert "paper-wiki@paper-wiki" not in installed.get("plugins", {})
         settings = json.loads(paths["settings"].read_text())
-        assert "paper-wiki@paper-wiki" not in settings.get("enabledPlugins", [])
+        assert "paper-wiki@paper-wiki" not in settings.get("enabledPlugins", {})
 
         # Cache dir backed up (renamed, not deleted).
         children = list(paths["cache_base"].iterdir())
@@ -258,4 +262,4 @@ class TestCliUninstall:
         assert not cache_dir.exists()
 
         installed = json.loads(paths["installed_plugins"].read_text())
-        assert all(p.get("id") != "paper-wiki@paper-wiki" for p in installed.get("plugins", []))
+        assert "paper-wiki@paper-wiki" not in installed.get("plugins", {})

@@ -87,16 +87,18 @@ def _marketplace_version(marketplace_dir: Path) -> str | None:
 def _cache_version() -> str | None:
     """Read version from installed_plugins.json for _PLUGIN_KEY."""
     data = _read_json(_INSTALLED_PLUGINS_JSON)
-    plugins = data.get("plugins", [])
-    if not isinstance(plugins, list):
+    plugins = data.get("plugins")
+    if not isinstance(plugins, dict):
         return None
-    for entry in plugins:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("name") == _PLUGIN_KEY or entry.get("id") == _PLUGIN_KEY:
-            ver = entry.get("version")
-            return str(ver) if ver else None
-    return None
+    entries = plugins.get(_PLUGIN_KEY)
+    if not isinstance(entries, list) or not entries:
+        return None
+    # Use the first entry's version (multi-scope is rare; first one wins).
+    first = entries[0]
+    if not isinstance(first, dict):
+        return None
+    ver = first.get("version")
+    return str(ver) if ver else None
 
 
 def _git_pull(marketplace_dir: Path) -> None:
@@ -126,12 +128,11 @@ def _drop_from_enabled_plugins(settings_path: Path) -> None:
     except (json.JSONDecodeError, OSError):
         return
     enabled = data.get("enabledPlugins")
-    if not isinstance(enabled, list):
+    if not isinstance(enabled, dict):
         return
-    new_list = [p for p in enabled if p != _PLUGIN_KEY]
-    if len(new_list) == len(enabled):
-        return  # nothing to do
-    data["enabledPlugins"] = new_list
+    if _PLUGIN_KEY not in enabled:
+        return
+    del enabled[_PLUGIN_KEY]
     _write_json(settings_path, data)
 
 
@@ -140,19 +141,12 @@ def _drop_from_installed_plugins() -> None:
     if not _INSTALLED_PLUGINS_JSON.is_file():
         return
     data = _read_json(_INSTALLED_PLUGINS_JSON)
-    plugins = data.get("plugins", [])
-    if not isinstance(plugins, list):
+    plugins = data.get("plugins")
+    if not isinstance(plugins, dict):
         return
-    new_plugins = [
-        p
-        for p in plugins
-        if not (
-            isinstance(p, dict) and (p.get("name") == _PLUGIN_KEY or p.get("id") == _PLUGIN_KEY)
-        )
-    ]
-    if len(new_plugins) == len(plugins):
+    if _PLUGIN_KEY not in plugins:
         return
-    data["plugins"] = new_plugins
+    del plugins[_PLUGIN_KEY]
     _write_json(_INSTALLED_PLUGINS_JSON, data)
 
 
@@ -270,7 +264,7 @@ def status(
 
     def _is_enabled(data: dict[str, object]) -> bool:
         enabled = data.get("enabledPlugins")
-        return isinstance(enabled, list) and _PLUGIN_KEY in enabled
+        return isinstance(enabled, dict) and _PLUGIN_KEY in enabled
 
     enabled_in_settings = _is_enabled(settings_data)
     enabled_in_local = _is_enabled(settings_local_data)

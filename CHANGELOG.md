@@ -9,6 +9,38 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.25] - 2026-04-28
+
+### Fixed
+
+- **`paperwiki update` had THREE silent no-op bugs** — `_cache_version()`,
+  `_drop_from_installed_plugins()`, and `_drop_from_enabled_plugins()`
+  in `src/paperwiki/cli.py` all assumed the underlying JSON used a
+  `list[dict]` shape, but Claude Code 2.1.119 actually uses a
+  `dict[plugin_id, ...]` shape:
+  - `installed_plugins.json["plugins"]` = `dict[plugin_id, list[install_entry]]`
+  - `settings.json["enabledPlugins"]` and
+    `settings.local.json["enabledPlugins"]` = `dict[plugin_id, bool]`
+  
+  So `paperwiki update` always saw "no install detected" (cache version
+  returned `None`) and never cleaned `installed_plugins.json` or
+  `settings.json` enabledPlugins. The cache rename worked because that
+  ran on disk; the JSON cleanup never did. Result: every "successful"
+  `paperwiki update` left stale entries that caused `/plugin install`
+  to short-circuit "already installed globally" (the very thing
+  `paperwiki update` was built to prevent).
+
+  Rewrote all three functions against the real Claude Code 2.1.119
+  schema. Test fixtures updated to use real shapes.
+
+### Tests
+
+- Existing `tests/unit/test_cli.py` fixtures rewritten to use real
+  dict shapes (was `list[{"name": ..., "id": ...}]` — wrong).
+- Regression coverage: `paperwiki update` against a state with
+  paper-wiki present in all three shape-correct files actually drops
+  all three entries.
+
 ## [0.3.24] - 2026-04-28
 
 ### Changed
