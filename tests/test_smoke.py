@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.30"
+    assert data["version"] == "0.3.31"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1470,6 +1470,29 @@ def test_ensure_env_shim_block_is_idempotent_guard() -> None:
     )
     assert "EXPECTED_TAG" in body, (
         "hooks/ensure-env.sh must define EXPECTED_TAG for the idempotency check"
+    )
+
+
+def test_ensure_env_shim_sets_pythonpath_to_latest_src() -> None:
+    """Task v0.3.31-A: shim must inject PYTHONPATH=<latest>/src so the
+    `paperwiki` console-script's editable install can resolve the
+    `paperwiki` module even when the venv's .pth file points at a
+    stale path (e.g. <ver>.bak.<ts>/src after `paperwiki update`
+    renamed it).
+
+    Before v0.3.31 the shim relied solely on the editable install's
+    .pth file, which `paperwiki update` could orphan via cache rename.
+    Result: `paperwiki where` after upgrade hit `ModuleNotFoundError:
+    No module named 'paperwiki'`.
+    """
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    # The shim heredoc must export / set PYTHONPATH using the latest
+    # cache's src dir so paperwiki imports always resolve regardless
+    # of editable-install staleness.
+    assert 'PYTHONPATH="$CACHE_ROOT/$LATEST/src' in body, (
+        "shim must inject PYTHONPATH=<latest cache>/src as a fallback for "
+        "stale editable-install .pth files (v0.3.31-A defence)"
     )
 
 

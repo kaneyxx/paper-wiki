@@ -24,6 +24,7 @@ import typer
 from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
+from paperwiki._internal.paths import resolve_paperwiki_venv_dir
 from paperwiki.runners.digest import main as _digest_main
 from paperwiki.runners.extract_paper_images import main as _extract_images_main
 from paperwiki.runners.gc_bak import (
@@ -189,6 +190,40 @@ def _drop_from_installed_plugins() -> None:
     _write_json(_INSTALLED_PLUGINS_JSON, data)
 
 
+def _uninstall_stale_editable_paperwiki() -> None:
+    """Uninstall ``paperwiki`` from the shared venv before cache rename.
+
+    Task v0.3.31-B. The shared venv at ``${PAPERWIKI_VENV_DIR}`` carries
+    an editable install of ``paperwiki`` whose ``.pth`` file references
+    ``<cache>/<current-ver>/src``. When ``paperwiki update`` renames
+    that cache dir to ``.bak.<ts>``, the ``.pth`` path becomes stale —
+    next ``paperwiki <X>`` invocation hits
+    ``ModuleNotFoundError: No module named 'paperwiki'`` until the
+    SessionStart re-runs ``ensure-env.sh`` against the new cache.
+
+    Pre-rename uninstall removes the stale ``.pth`` cleanly so the
+    re-install on next SessionStart is the only source of truth. The
+    shim's ``PYTHONPATH`` fallback (v0.3.31-A) covers the runtime gap
+    in case this uninstall is skipped (no venv, missing pip, etc).
+
+    Best-effort: any failure is silently absorbed — we do NOT block
+    the upgrade flow on this housekeeping step.
+    """
+    venv_dir = resolve_paperwiki_venv_dir()
+    venv_python = venv_dir / "bin" / "python"
+    if not venv_python.is_file():
+        return  # No venv yet — nothing to uninstall.
+    try:
+        subprocess.run(  # noqa: S603 — args are literal strings + resolved venv path
+            [str(venv_python), "-m", "pip", "uninstall", "paperwiki", "-y"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        logger.debug("paperwiki_update.uninstall_skipped", error=str(exc))
+
+
 def _find_cache_dir(version: str) -> Path | None:
     """Return ``<_CACHE_BASE>/<version>/`` if it exists."""
     candidate = _CACHE_BASE / version
@@ -244,6 +279,19 @@ def update(
         return
 
     # Versions differ — perform upgrade.
+    # v0.3.31-B: BEFORE renaming the cache dir, uninstall the editable
+    # `paperwiki` install from the shared venv. The editable install's
+    # .pth file holds an absolute path to <cache>/<old-ver>/src; if we
+    # rename without uninstalling first, the .pth points at a path
+    # that no longer exists and the next `paperwiki <X>` call hits
+    # `ModuleNotFoundError: No module named 'paperwiki'`. The
+    # subsequent SessionStart's ensure-env.sh re-runs editable install
+    # against the new cache, so this uninstall is purely a cleanup
+    # gate. Best-effort: if the uninstall fails (no venv yet, network,
+    # permissions), continue with rename — the shim's PYTHONPATH
+    # fallback (v0.3.31-A) covers the runtime gap.
+    _uninstall_stale_editable_paperwiki()
+
     old_cache_dir = _find_cache_dir(cache_ver) if cache_ver else None
     bak_suffix = ""
     if old_cache_dir is not None and cache_ver:

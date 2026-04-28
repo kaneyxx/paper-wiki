@@ -9,6 +9,52 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.31] - 2026-04-28
+
+### Fixed
+
+- **`paperwiki <X>` after upgrade hit `ModuleNotFoundError: No module
+  named 'paperwiki'`** — design flaw introduced in v0.3.29 (Task 9.31)
+  surfaced in v0.3.30 user smoke. The shared venv at
+  `${PAPERWIKI_HOME}/venv` carried an editable install of `paperwiki`
+  whose `.pth` file referenced
+  `~/.claude/plugins/cache/paper-wiki/paper-wiki/<old-ver>/src`. When
+  `paperwiki update` renamed `<old-ver>` → `<old-ver>.bak.<ts>`, the
+  `.pth` path became stale — the next `paperwiki <X>` call from a
+  fresh terminal couldn't import `paperwiki.cli`.
+
+  **Two-pronged defence in depth (v0.3.31)**:
+
+  1. **Shim PYTHONPATH fallback (v0.3.31-A)**: `~/.local/bin/paperwiki`
+     now exports `PYTHONPATH="<latest-cache>/src"` before exec'ing
+     the venv binary. Even when the editable-install `.pth` is stale,
+     the latest cache's `src/` is on `sys.path` and `paperwiki`
+     resolves cleanly.
+  2. **Pre-rename uninstall (v0.3.31-B)**: `paperwiki update` now
+     calls `pip uninstall paperwiki -y` against the shared venv
+     BEFORE renaming the cache dir. This removes the soon-to-be-stale
+     `.pth` cleanly so the next SessionStart's editable re-install is
+     the only source of truth.
+
+  Manual recovery for users on v0.3.29 / v0.3.30 hitting this bug:
+
+  ```bash
+  rm -f ~/.config/paper-wiki/venv/.installed
+  CLAUDE_PLUGIN_ROOT=~/.claude/plugins/cache/paper-wiki/paper-wiki/<latest> \
+    bash ~/.claude/plugins/cache/paper-wiki/paper-wiki/<latest>/hooks/ensure-env.sh
+  ```
+
+  Or just upgrade to v0.3.31 — the new shim self-heals.
+
+### Tests
+
+- 1 new smoke test pinning shim `PYTHONPATH=$CACHE_ROOT/$LATEST/src`
+  contract (`test_ensure_env_shim_sets_pythonpath_to_latest_src`).
+- 2 new `TestCliUpdateUninstallsStaleEditableInstall` tests pinning
+  the pre-rename uninstall flow + the no-venv-yet noop path.
+- 730 total tests green; mypy --strict clean; ruff check + format
+  clean.
+
 ## [0.3.30] - 2026-04-28
 
 ### Fixed

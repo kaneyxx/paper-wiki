@@ -298,6 +298,106 @@ def _make_bak_dir(cache_base: Path, name: str) -> Path:
     return bak
 
 
+class TestCliUpdateUninstallsStaleEditableInstall:
+    """Task v0.3.31-B: `paperwiki update` must uninstall the editable
+    `paperwiki` install from the shared venv BEFORE renaming the cache
+    dir, so the .pth file (referencing the soon-to-be-renamed path)
+    doesn't orphan the next `paperwiki <X>` call with
+    `ModuleNotFoundError: No module named 'paperwiki'`.
+    """
+
+    def test_uninstall_called_before_rename(
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import paperwiki.cli as cli_mod
+
+        paths = _patch_cli_paths(claude_home)
+        marketplace_dir = paths["default_marketplace"]
+        _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
+        _make_installed_plugins("0.3.29", paths["installed_plugins"])
+        _make_settings(paths["settings"], enabled=True)
+        cache_dir = paths["cache_base"] / "0.3.29"
+        cache_dir.mkdir(parents=True)
+
+        # Synthesise a fake shared venv so the uninstall helper finds
+        # bin/python and attempts the subprocess call.
+        fake_venv = tmp_path / "venv"
+        (fake_venv / "bin").mkdir(parents=True)
+        (fake_venv / "bin" / "python").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        (fake_venv / "bin" / "python").chmod(0o755)
+        monkeypatch.setattr(cli_mod, "resolve_paperwiki_venv_dir", lambda: fake_venv)
+
+        # Capture order: uninstall subprocess call BEFORE cache rename.
+        call_log: list[str] = []
+        original_subprocess_run = cli_mod.subprocess.run
+
+        def _logged_run(cmd: list[str], **kwargs: object) -> object:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+            if "uninstall" in cmd_str and "paperwiki" in cmd_str:
+                call_log.append("uninstall")
+            return original_subprocess_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", _logged_run)
+
+        # Wrap rename to also log.
+        original_rename = type(cache_dir).rename
+
+        def _logged_rename(self_path: Path, target: Path) -> Path:  # type: ignore[no-redef]
+            call_log.append("rename")
+            return original_rename(self_path, target)
+
+        monkeypatch.setattr(type(cache_dir), "rename", _logged_rename)
+
+        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
+        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+        monkeypatch.setattr(cli_mod, "_git_pull", _noop_git_pull)
+
+        from typer.testing import CliRunner
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["update", "--marketplace-dir", str(marketplace_dir)]
+        )
+        assert result.exit_code == 0, result.output
+        # Both happened, in the right order.
+        assert "uninstall" in call_log, "expected pip uninstall to be called"
+        assert "rename" in call_log, "expected cache rename to be called"
+        assert call_log.index("uninstall") < call_log.index("rename"), (
+            f"uninstall must precede rename; actual order: {call_log}"
+        )
+
+    def test_uninstall_is_noop_when_venv_missing(
+        self, claude_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No shared venv = no editable install to clean. Update flow continues."""
+        import paperwiki.cli as cli_mod
+
+        paths = _patch_cli_paths(claude_home)
+        marketplace_dir = paths["default_marketplace"]
+        _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
+        _make_installed_plugins("0.3.29", paths["installed_plugins"])
+        _make_settings(paths["settings"], enabled=True)
+        cache_dir = paths["cache_base"] / "0.3.29"
+        cache_dir.mkdir(parents=True)
+
+        # Point at a path that doesn't exist.
+        monkeypatch.setattr(cli_mod, "resolve_paperwiki_venv_dir", lambda: tmp_path / "nonexistent")
+        monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
+        monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_JSON", paths["settings"])
+        monkeypatch.setattr(cli_mod, "_SETTINGS_LOCAL_JSON", paths["settings_local"])
+        monkeypatch.setattr(cli_mod, "_git_pull", _noop_git_pull)
+
+        from typer.testing import CliRunner
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(
+            cli_mod.app, ["update", "--marketplace-dir", str(marketplace_dir)]
+        )
+        # Update still succeeds; uninstall was skipped silently.
+        assert result.exit_code == 0, result.output
+
+
 class TestCliUpdateAutoPruneBak:
     """Task 9.33 / D-9.33.2: `paperwiki update` auto-prunes old .bak after success."""
 

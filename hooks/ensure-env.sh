@@ -62,7 +62,11 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
   CLAUDE_PLUGIN_ROOT="$CACHE_ROOT/$LATEST" \
     bash "$CACHE_ROOT/$LATEST/hooks/ensure-env.sh" >&2
 fi
-exec "$VENV_DIR/bin/paperwiki" "$@"
+# v0.3.31-A: PYTHONPATH=<latest>/src guarantees `paperwiki` module
+# resolves even when the venv's editable-install .pth points at a
+# stale path (e.g. after `paperwiki update` rename of the cache dir).
+PYTHONPATH="$CACHE_ROOT/$LATEST/src${PYTHONPATH:+:$PYTHONPATH}" \
+  exec "$VENV_DIR/bin/paperwiki" "$@"
 SHIM_EOF
   chmod +x "$SHIM_PATH"
 fi
