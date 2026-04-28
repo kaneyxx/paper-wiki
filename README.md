@@ -222,6 +222,7 @@ Every subdir is configurable per recipe — for example
 | `/paper-wiki:wiki-lint`         | Health-check: orphan concepts, stale entries, broken wikilinks, dangling sources.       |
 | `/paper-wiki:wiki-compile`      | Deterministic rebuild of `Wiki/index.md` from frontmatter.                              |
 | `/paper-wiki:migrate-sources`   | Upgrade legacy `Wiki/sources/<id>.md` files to the current section-organized format.    |
+| `/paper-wiki:migrate-recipe`    | Surgically update a personal recipe to the latest template keywords (e.g. remove stale `foundation model` from `biomedical-pathology`) without re-running the full setup wizard.    |
 | `/paper-wiki:bio-search`        | (Optional) Search bioRxiv / medRxiv / PMC via paperclip MCP, save hits as wiki sources. |
 
 ### Optional: biomedical literature

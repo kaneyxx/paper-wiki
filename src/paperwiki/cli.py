@@ -24,6 +24,7 @@ import typer
 from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
+from paperwiki.runners.migrate_recipe import app as _migrate_recipe_app
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -47,6 +48,9 @@ app = typer.Typer(
     help="Manage the paper-wiki Claude Code plugin.",
     no_args_is_help=True,
 )
+
+# Add the migrate-recipe subcommand from its own runner app.
+app.add_typer(_migrate_recipe_app, name="migrate-recipe")
 
 # ---------------------------------------------------------------------------
 # Helpers

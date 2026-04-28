@@ -72,7 +72,34 @@ Check whether `~/.config/paper-wiki/recipes/daily.yaml` already exists.
 Note: Claude Code automatically appends a Cancel option — do NOT add one manually.
 
 If user chooses "Keep current config": run Step 0 + Step 1, confirm
-health, show a summary, and exit.
+health, then run the **migration heuristic check** before exiting:
+
+1. Read `~/.config/paper-wiki/recipes/daily.yaml`.
+2. Look for any keyword listed in `STALE_MARKERS` (from
+   `paperwiki.config.recipe_migrations`) in the corresponding topic.
+   The primary check: does `foundation model` appear in the
+   `biomedical-pathology` topic's keyword list?
+3. If yes, surface a 5th option via AskUserQuestion:
+
+**AskUserQuestion call (migration check):**
+- question: "Your recipe predates v0.3.17 keyword updates (contains 'foundation model' in biomedical-pathology, which matches unrelated ML papers). Would you like to migrate?"
+- header: "Recipe stale"
+- multiSelect: false
+- options:
+  1. label: "Migrate now"
+     description: "Run /paper-wiki:migrate-recipe to apply the surgical keyword update."
+  2. label: "Show me the diff first"
+     description: "Preview what would change without applying."
+  3. label: "Keep stale — I know what I'm doing"
+     description: "Leave the recipe as-is and exit."
+
+If "Migrate now": hand off to `/paper-wiki:migrate-recipe`.
+If "Show me the diff first": run the runner in dry-run mode, show
+the diff, re-ask.
+If "Keep stale": exit without changes.
+
+If the heuristic returns clean (no stale markers found): confirm
+health, show a summary, and exit normally.
 
 If user chooses "Reconfigure from scratch": proceed to Q1 wizard below.
 
