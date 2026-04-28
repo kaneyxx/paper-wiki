@@ -233,9 +233,6 @@ def update(
         + "\n  1. Exit any running session: /exit (or Ctrl-D)"
         + "\n  2. Open a fresh session: claude"
         + "\n  3. Inside: /plugin install paper-wiki@paper-wiki"
-        + "\n"
-        + '\nThe install will now do a real install (no "already installed"'
-        + "\nshort-circuit because the JSON entries were cleared)."
     )
 
 

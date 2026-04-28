@@ -9,6 +9,16 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.22] - 2026-04-28
+
+### Changed
+
+- **`paperwiki update` output trimmed** for cleaner UX. Removed the
+  trailing two-line technical explanation about `/plugin install`'s
+  short-circuit / cleared JSON entries — the next-steps list above
+  carries the actionable info; the explanation read like internal
+  debug rationale leaking into user-facing output.
+
 ## [0.3.21] - 2026-04-28
 
 ### Fixed
