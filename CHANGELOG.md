@@ -9,6 +9,22 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-04-27
+
+### Added
+
+- **`tests/integration/test_full_digest_auto_chain.py` end-to-end smoke test.**
+  Single test that drives the full digest → auto-chain pipeline against a
+  tmp vault using stubbed sources (Option B: in-process `StubSource`,
+  no recipe YAML or network calls). Asserts every contract added in
+  v0.3.6–v0.3.13: daily digest file on disk, `<!-- paper-wiki:overview-slot -->`
+  marker, per-paper slot markers, Wiki source stubs, `wiki_ingest_plan`
+  subprocess exits 0, JSON has `created_stubs` + `folded_citations`, concepts
+  already seen fold instead of re-stub, idempotent `sources:` lists (no
+  duplicates), no DEBUG/WARNING in subprocess stderr, and full test runtime
+  < 15 s. Acts as a CI hard gate so future releases can't silently regress
+  the pipeline.
+
 ## [0.3.13] - 2026-04-27
 
 ### Fixed

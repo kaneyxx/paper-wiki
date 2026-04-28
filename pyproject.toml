@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "paper-wiki"
-version = "0.3.13"
+version = "0.3.14"
 description = "Personal research wiki builder for Claude Code — pipeline-driven paper ingestion with plugin architecture."
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -108,6 +108,9 @@ plugins = ["pydantic.mypy"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = [
+  "timeout: mark a test with a wall-clock budget (seconds)",
+]
 
 [tool.coverage.run]
 source = ["paperwiki"]
