@@ -45,11 +45,14 @@ exists; if not, surface a clear error and suggest `/paper-wiki:setup`.
 
 ### Step 2 — Dry-run first
 
-Run the runner in dry-run mode to show the user what would change:
+Run this exact bash to invoke the migrate-recipe runner in dry-run
+mode and show the user what would change. The ``export PATH=...`` line
+is mandatory — fresh-install users may not have ``~/.local/bin`` on
+PATH yet (D-9.34.6).
 
-```
-${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.migrate_recipe \
-  ~/.config/paper-wiki/recipes/daily.yaml --dry-run
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+paperwiki migrate-recipe ~/.config/paper-wiki/recipes/daily.yaml --dry-run
 ```
 
 Parse the JSON output. If `applied_changes` is empty, tell the user
@@ -91,11 +94,11 @@ removals/additions. Then re-ask.
 
 ### Step 4 — Apply the migration
 
-Run the runner in apply mode:
+Run this exact bash to invoke the migrate-recipe runner in apply mode:
 
-```
-${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.migrate_recipe \
-  ~/.config/paper-wiki/recipes/daily.yaml
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+paperwiki migrate-recipe ~/.config/paper-wiki/recipes/daily.yaml
 ```
 
 Parse the JSON output. Confirm:

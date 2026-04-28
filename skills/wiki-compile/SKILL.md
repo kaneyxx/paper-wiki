@@ -31,9 +31,16 @@ compile (idempotent, but wastes a run).
 
 ## Process
 
-1. **Run the runner.** Invoke
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_compile
-   <vault>`. The runner rewrites `Wiki/index.md` and prints
+1. **Run the runner.** Run this exact bash to invoke the compile runner.
+   The `export PATH=...` line is mandatory — fresh-install users may
+   not have `~/.local/bin` on PATH yet (D-9.34.6).
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki wiki-compile <vault>
+   ```
+
+   The runner rewrites `Wiki/index.md` and prints
    `compiled: N concepts, M sources -> <path>`.
 2. **Confirm the index file.** Read the first 30 lines and verify
    frontmatter has `concepts: N` and `sources: M` matching the
@@ -66,7 +73,7 @@ compile (idempotent, but wastes a run).
 
 ## Verification
 
-- `paperwiki.runners.wiki_compile` exits 0.
+- `paperwiki wiki-compile` exits 0.
 - `Wiki/index.md` opens cleanly; frontmatter parses.
 - Concept and source counts in the file match the runner stdout
   exactly.

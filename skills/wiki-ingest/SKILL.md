@@ -36,16 +36,33 @@ do not pile up.
 1. **Resolve the source id.** Accept `arxiv:1234.5678`, `s2:<paperId>`,
    or a fuzzy title; normalize to a canonical id via the
    `paperwiki._internal.normalize` helpers if the user gave a URL.
-2. **Run the planner.** Invoke
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_ingest_plan
-   <vault> <canonical-id>`. **If the user (or upstream digest auto-chain)
-   passed the `--auto-bootstrap` flag, append it to this CLI invocation:**
-   `... <vault> <canonical-id> --auto-bootstrap`. The flag tells the
-   runner to auto-stub any concepts in `suggested_new_concepts` that
-   don't yet exist, BEFORE the affected-concepts loop runs — so a fresh
-   vault doesn't dead-end on paper #1. Read the JSON; with the flag set,
-   it includes a `created_stubs` field listing the freshly-created
-   concept names.
+2. **Run the planner.** Run this exact bash to invoke the wiki-ingest
+   runner via the shim. The CLI subcommand name is `wiki-ingest` (with
+   hyphen) — same as the slash command — even though the underlying
+   Python module is `paperwiki.runners.wiki_ingest_plan`. The
+   `export PATH=...` line is mandatory — fresh-install users may not
+   have `~/.local/bin` on PATH yet (D-9.34.6).
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki wiki-ingest <vault> <canonical-id>
+   ```
+
+   **If the user (or upstream digest auto-chain) passed the
+   `--auto-bootstrap` flag, append it to this CLI invocation:**
+
+   ```bash
+   paperwiki wiki-ingest <vault> <canonical-id> --auto-bootstrap
+   ```
+
+   The flag tells the runner to auto-stub any concepts in
+   `suggested_new_concepts` that don't yet exist, BEFORE the
+   affected-concepts loop runs — so a fresh vault doesn't dead-end on
+   paper #1. Read the JSON; with the flag set, it includes a
+   `created_stubs` field listing the freshly-created concept names.
+   Citation folding is implicit when `--auto-bootstrap` is set; there
+   is no separate citation-folding flag (the runner has never accepted
+   one).
 3. **Honor `source_exists`.** If `source_exists` is `false`, stop and
    ask the user to run `/paper-wiki:analyze <id>` first; ingest cannot
    work without a source file under `Wiki/sources/`.
@@ -148,8 +165,7 @@ for interactive use. The flag is for the digest auto-chain only.
 
 ## Verification
 
-- `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_ingest_plan`
-  exits 0.
+- `paperwiki wiki-ingest` exits 0.
 - Each affected concept's `last_synthesized` field is today's date.
 - Each affected concept's `sources` list contains the ingested
   canonical id at most once.

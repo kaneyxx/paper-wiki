@@ -37,10 +37,18 @@ touched — they already have a different schema).
 
 ## Process
 
-1. **Dry-run first.** Invoke
-   ``${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.migrate_sources
-   <vault> --dry-run`` and surface the count to the user. If
-   ``migrated == 0``, tell them no migration is needed and stop.
+1. **Dry-run first.** Run this exact bash to invoke the migrate-sources
+   runner in dry-run mode. The ``export PATH=...`` line is mandatory —
+   fresh-install users may not have ``~/.local/bin`` on PATH yet
+   (D-9.34.6).
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki migrate-sources <vault> --dry-run
+   ```
+
+   Surface the count to the user. If ``migrated == 0``, tell them no
+   migration is needed and stop.
 2. **Confirm before rewriting.** If ``migrated > 0``, show the user
    the exact list (``migrated_paths``) so they know what's about to
    change, and ask whether to proceed.

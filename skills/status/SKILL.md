@@ -38,17 +38,19 @@ Claude get the same answer they would from a terminal.
 ### Step 1 — Run the CLI
 
 Invoke the console-script directly (it's installed at
-`~/.local/bin/paperwiki` by `hooks/ensure-env.sh` since v0.3.21):
+`~/.local/bin/paperwiki` by `hooks/ensure-env.sh` since v0.3.21).
+The `export PATH=...` line is mandatory — fresh-install users may not
+have `~/.local/bin` on PATH yet (D-9.34.6).
 
-```
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 paperwiki status
 ```
 
-If `paperwiki` is not on PATH, fall back to the venv-relative path:
-
-```
-${CLAUDE_PLUGIN_ROOT}/.venv/bin/paperwiki status
-```
+If `paperwiki status` still reports `command not found` after the
+`export PATH=...` line, the SessionStart hook didn't run — tell the
+user to exit and restart Claude Code so `hooks/ensure-env.sh`
+re-installs the shim.
 
 ### Step 2 — Surface the output
 

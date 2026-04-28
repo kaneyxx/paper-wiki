@@ -39,9 +39,18 @@ one). Surface that to the user instead of running the runner.
 1. **Validate canonical id.** It must start with `arxiv:`. If the user
    handed an arXiv URL or a fuzzy title, normalize first via the
    `paperwiki._internal.normalize` helpers (or just ask).
-2. **Run the runner.** Invoke
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.extract_paper_images
-   <vault> <canonical-id>`. Read the JSON output.
+2. **Run the runner.** Run this exact bash to invoke the
+   extract-images runner. The `export PATH=...` line is mandatory —
+   fresh-install users may not have `~/.local/bin` on PATH yet
+   (D-9.34.6).
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki extract-images <vault> <canonical-id>
+   ```
+
+   Read the JSON output. Pass `--cache-bust`, `--max-figures N`, or
+   `--from-pdf` if the user asked for those modes.
 3. **Surface the result.** Confirm `image_count` to the user. If
    `image_count == 0`, tell them the paper is probably PDF-only on
    arXiv (legitimate, no failure) and offer next steps:

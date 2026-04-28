@@ -26,6 +26,7 @@ from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki._internal.paths import resolve_paperwiki_venv_dir
+from paperwiki.runners.diagnostics import main as _diagnostics_main
 from paperwiki.runners.digest import main as _digest_main
 from paperwiki.runners.extract_paper_images import main as _extract_images_main
 from paperwiki.runners.gc_bak import (
@@ -92,6 +93,12 @@ app.command(name="migrate-sources")(_migrate_sources_main)
 app.command(name="gc-archive")(_gc_archive_main)
 app.command(name="gc-bak")(_gc_bak_main)
 app.command(name="where")(_where_main)
+# Task 9.59 (v0.3.34): expose `paperwiki diagnostics` so the setup and
+# bio-search SKILLs can use the shim consistently. The runner module
+# uses `@app.callback()` for its own standalone `python -m
+# paperwiki.runners.diagnostics` entrypoint; the same callable doubles
+# as a parent-app subcommand here without modification.
+app.command(name="diagnostics")(_diagnostics_main)
 
 # ---------------------------------------------------------------------------
 # Helpers

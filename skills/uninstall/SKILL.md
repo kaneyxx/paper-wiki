@@ -68,9 +68,17 @@ and clears `enabledPlugins` in both `settings.json` and
     /plugin install paper-wiki@paper-wiki
 ```
 
-Substitute `${CLAUDE_PLUGIN_ROOT}/.venv/bin/paperwiki uninstall` if the
-user reports `paperwiki: command not found` (their PATH doesn't
-include `~/.local/bin`).
+If the user reports `paperwiki: command not found`, point them at the
+PATH-defensive form first:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+paperwiki uninstall
+```
+
+If that still fails, the SessionStart hook didn't install the shim;
+they need to exit Claude Code and start a fresh `claude` session so
+`hooks/ensure-env.sh` re-runs.
 
 If the user asks for a deeper clean (recover disk space, switch
 machines, etc.), surface the full path list via `paperwiki where`

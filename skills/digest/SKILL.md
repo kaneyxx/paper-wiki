@@ -37,6 +37,15 @@ to `paperwiki:setup`.
    land in the plugin starter directory and pick the wrong recipe.
 
    ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   # D-9.34.2: Claude bash subprocesses sometimes start with
+   # $CLAUDE_PLUGIN_ROOT unset. Resolve the highest-version cache dir
+   # defensively so the bundled-template fallback below works.
+   if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+       CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
+           | grep -v '\.bak\.' \
+           | sort -V | tail -1 | sed 's:/$::')
+   fi
    CONFIG_ROOT="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
    name="${1:-daily}"
    case "$name" in
@@ -45,7 +54,7 @@ to `paperwiki:setup`.
    esac
    if [ -f "$CONFIG_ROOT/recipes/$name.yaml" ]; then
        RECIPE="$CONFIG_ROOT/recipes/$name.yaml"
-   elif [ -f "$CLAUDE_PLUGIN_ROOT/recipes/$name.yaml" ]; then
+   elif [ -n "$CLAUDE_PLUGIN_ROOT" ] && [ -f "$CLAUDE_PLUGIN_ROOT/recipes/$name.yaml" ]; then
        RECIPE="$CLAUDE_PLUGIN_ROOT/recipes/$name.yaml"
        echo "WARN: using bundled template; no personal recipe at $CONFIG_ROOT/recipes/$name.yaml"
    else
@@ -72,15 +81,28 @@ to `paperwiki:setup`.
    resolves cleanly. The recipe loader raises ``UserError`` with a
    pointer at this file when the env var is missing — you'll see it
    in the runner's stderr.
-3. **Confirm the environment.** Verify
-   `${CLAUDE_PLUGIN_ROOT}/.venv/.installed` exists. If missing, run
-   `bash ${CLAUDE_PLUGIN_ROOT}/hooks/ensure-env.sh` and re-check.
-4. **Run the digest.** Invoke
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.digest "$RECIPE"`
-   with an optional `--target-date YYYY-MM-DD` if the user gave one.
-   Always use the `$RECIPE` variable resolved in Step 1 — never hand-pick
-   a path or interpolate a `<recipe-path>` placeholder, or you re-open
+3. **Confirm the environment.** Run `paperwiki status` (the same shim
+   the runner will use). The very fact that the command runs at all is
+   the readiness gate — exit 0 means the venv resolves, the editable
+   install is healthy, and the next step is safe to invoke. If the
+   command reports `command not found`, the SessionStart hook didn't
+   run; tell the user to exit and restart Claude Code.
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki status
+   ```
+
+4. **Run the digest.** Invoke the digest runner via the shim. Pass an
+   optional `--target-date YYYY-MM-DD` if the user gave one. Always
+   use the `$RECIPE` variable resolved in Step 1 — never hand-pick a
+   path or interpolate a `<recipe-path>` placeholder, or you re-open
    the v0.3.32 ambiguity that routed users to the bundled starter.
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki digest "$RECIPE"
+   ```
 5. **Inspect the exit code.** 0 = success, 1 = user error
    (bad recipe / bad config), 2 = system error (network, plugin
    contract). On non-zero, surface the structured log line and offer
@@ -93,9 +115,14 @@ to `paperwiki:setup`.
    asking the user**, take the top `min(auto_ingest_top, top_k)` papers
    from the digest and for each, **in this order**:
 
-   a. **Extract images first** (for `arxiv:` ids only). Invoke
-      `python -m paperwiki.runners.extract_paper_images <vault>
-      <canonical-id>` so figures are on disk before wiki-ingest runs.
+   a. **Extract images first** (for `arxiv:` ids only). Run this exact
+      bash so figures are on disk before wiki-ingest runs:
+
+      ```bash
+      export PATH="$HOME/.local/bin:$PATH"
+      paperwiki extract-images <vault> <canonical-id>
+      ```
+
       Continue on failure (a 404 or non-arXiv id is not a digest
       failure). Cache hits are normal — no warning when `cached=true`.
 
@@ -125,12 +152,23 @@ to `paperwiki:setup`.
       The summary lives in the SKILL terminal output only (not in the
       digest file). Do NOT skip the block even when all extractions
       succeed — the user wants a confidence signal that extraction ran.
-   b. **Then wiki-ingest.** Invoke `/paper-wiki:wiki-ingest
-      <canonical-id> --auto-bootstrap --fold-citations` for each. The
-      `--auto-bootstrap` flag stubs missing concepts; `--fold-citations`
-      folds the source citation into pre-existing concepts atomically.
-      No LLM work in this path. Surface `created_stubs` and
-      `folded_citations` counts per paper.
+   b. **Then wiki-ingest.** Run this exact bash for each paper —
+      DO NOT chain via the slash-command form (`/paper-wiki:wiki-ingest
+      <id>`) inside a parent SKILL bash block; Claude has historically
+      mis-translated that to a non-existent runner module. Use the
+      literal shim subcommand:
+
+      ```bash
+      export PATH="$HOME/.local/bin:$PATH"
+      paperwiki wiki-ingest "$VAULT_PATH" "<canonical-id>" --auto-bootstrap
+      ```
+
+      The `--auto-bootstrap` flag stubs missing concepts and folds the
+      source citation into pre-existing concepts atomically (citation
+      folding is implicit inside `--auto-bootstrap`; the runner has
+      never had a separate citation-folding flag). No LLM work in this
+      path. Surface `created_stubs` and `folded_citations` counts per
+      paper.
 
    The user setting `auto_ingest_top: N` IS their pre-approval — do NOT
    prompt "shall I chain?" or "want me to ingest?". Just do it. When
@@ -283,7 +321,7 @@ to `paperwiki:setup`.
 ## Verification
 
 - The recipe file referenced in the run actually exists.
-- `${CLAUDE_PLUGIN_ROOT}/.venv/.installed` is present.
+- `paperwiki status` exits 0 (the v0.3.34 readiness gate).
 - The runner's stdout includes a `digest.complete` log line with a
   positive (or zero with explanation) `recommendations` count.
 - Every reporter's expected output file is on disk; confirm via

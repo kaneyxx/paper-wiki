@@ -9,6 +9,40 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.34] - 2026-04-28
+
+### Fixed
+
+- **SKILL sweep (14 files)**: Replaced all 19 stale
+  `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.X` invocations
+  with `paperwiki <subcommand>` shim calls guarded by
+  `export PATH="$HOME/.local/bin:$PATH"` (Flavour-A, -B, and -C patterns
+  eliminated). Also dropped `.venv/.installed` stamp checks in digest and
+  setup SKILLs; replaced with `paperwiki status` readiness gate.
+
+- **digest Step 7b**: Dropped phantom `--fold-citations` flag (never
+  implemented in `wiki_ingest_plan.py`). Citation folding is implicit
+  inside `--auto-bootstrap`; the runner has never had a separate
+  citation-folding flag. Replaced the slash-command chain with a single
+  `paperwiki wiki-ingest "$VAULT_PATH" "<canonical-id>" --auto-bootstrap`
+  bash block.
+
+- **`paperwiki diagnostics` subcommand (Task 9.59)**: Wired
+  `runners.diagnostics.main` into the Typer app as
+  `app.command(name="diagnostics")` so `paperwiki diagnostics` now works
+  via the shim consistently across setup and bio-search SKILLs.
+
+- **Shim tag bump**: `hooks/ensure-env.sh` EXPECTED_TAG and heredoc body
+  updated from `v0.3.33` → `v0.3.34` so existing shims are overwritten on
+  first SessionStart after upgrade.
+
+### Added
+
+- **Regression test** `tests/unit/test_skills_md_no_legacy_venv.py`:
+  71 parametric tests across all 14 `skills/*/SKILL.md` files asserting
+  no legacy `python -m paperwiki.runners.` invocations, no `--fold-citations`
+  flag, and that `wiki-ingest` SKILLs use `--auto-bootstrap`.
+
 ## [0.3.33] - 2026-04-28
 
 ### Fixed

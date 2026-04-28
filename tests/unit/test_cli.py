@@ -286,6 +286,8 @@ _EXPECTED_PAPERWIKI_COMMANDS: tuple[str, ...] = (
     "gc-archive",
     "gc-bak",
     "where",
+    # Task 9.59 (v0.3.34): diagnostics joined the symmetric CLI surface.
+    "diagnostics",
 )
 
 
@@ -589,6 +591,7 @@ class TestCliRunnerImports:
         app.command(name=...)(...). This test pins the import names so a
         runner rename can't silently drop a parent-app subcommand."""
         from paperwiki.cli import (
+            _diagnostics_main,
             _digest_main,
             _extract_images_main,
             _gc_archive_main,
@@ -603,6 +606,7 @@ class TestCliRunnerImports:
         )
 
         for name, runner_main in (
+            ("diagnostics", _diagnostics_main),
             ("digest", _digest_main),
             ("extract-images", _extract_images_main),
             ("gc-archive", _gc_archive_main),
@@ -616,3 +620,30 @@ class TestCliRunnerImports:
             ("wiki-query", _wiki_query_main),
         ):
             assert callable(runner_main), f"runner main {name} not callable"
+
+
+class TestCliDiagnosticsSubcommand:
+    """Task 9.59 (v0.3.34): `paperwiki diagnostics` runs end-to-end.
+
+    The runner module exposes ``build_report`` already; this just pins
+    that the parent CLI surface invokes it without crashing.
+    """
+
+    def test_diagnostics_emits_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`paperwiki diagnostics` exits 0 and emits valid JSON."""
+        from typer.testing import CliRunner
+
+        import paperwiki.runners.diagnostics as diag_mod
+        from paperwiki.cli import app
+
+        # Stub `claude mcp list` so the test never spawns a real subprocess.
+        # Without this, the test depends on whether `claude` is on PATH.
+        monkeypatch.setattr(diag_mod, "_detect_mcp_servers", lambda issues: [])
+
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"}).invoke(app, ["diagnostics"])
+        assert result.exit_code == 0, result.output
+        # Output must be valid JSON with the expected top-level keys.
+        report = json.loads(result.output)
+        assert "paperwiki_version" in report
+        assert "python_version" in report
+        assert "bundled_recipes" in report

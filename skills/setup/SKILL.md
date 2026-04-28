@@ -28,8 +28,8 @@ concept articles.
 - The user types `/paper-wiki:setup`.
 - A paper-wiki SKILL fails because no personal recipe exists at
   `~/.config/paper-wiki/recipes/daily.yaml`.
-- The user reports broken Python imports inside
-  `${CLAUDE_PLUGIN_ROOT}/.venv`.
+- The user reports broken Python imports inside the shared paper-wiki
+  venv (default `~/.config/paper-wiki/venv/`).
 - The user asks "how do I configure paper-wiki?", "where do I point
   it at my vault?", "do I need an API key?", "walk me through setup".
 
@@ -42,14 +42,36 @@ recipe; use AskUserQuestion to ask the user whether to reconfigure first.
 
 ### Step 0 — Verify the venv
 
-Run `bash ${CLAUDE_PLUGIN_ROOT}/hooks/ensure-env.sh` and confirm
-`${CLAUDE_PLUGIN_ROOT}/.venv/.installed` exists afterwards.
+Run this exact bash to bootstrap (or refresh) the shared venv. The
+defensive resolver is required because `$CLAUDE_PLUGIN_ROOT` is often
+unset inside Claude bash subprocesses (D-9.34.2), and the hook script
+is a legitimate plugin-cache resource that the shim cannot self-shim.
+
+```bash
+if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
+        | grep -v '\.bak\.' \
+        | sort -V | tail -1 | sed 's:/$::')
+fi
+bash "$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh"
+```
+
+Confirm the next step (`paperwiki diagnostics`) runs without error —
+that exit-0 IS the readiness gate (no separate `.installed` stamp
+check; v0.3.34+ collapses the gate into the shim).
 
 ### Step 1 — Run diagnostics
 
-Invoke
-`${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.diagnostics`
-and parse the JSON. Note the `mcp_servers` field for the paperclip step later.
+Run this exact bash to call the diagnostics runner via the shim and
+parse the JSON. The `export PATH=...` line is mandatory — fresh-install
+users may not have `~/.local/bin` on PATH yet (D-9.34.6).
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+paperwiki diagnostics
+```
+
+Note the `mcp_servers` field for the paperclip step later.
 
 ### Step 2 — Detect existing config (Branch 1)
 
@@ -430,7 +452,9 @@ Then suggest: `/paper-wiki:digest` to run their first morning digest.
 
 ## Verification
 
-- `${CLAUDE_PLUGIN_ROOT}/.venv/.installed` exists.
+- `paperwiki diagnostics` exits 0 and emits a parseable JSON report
+  (the v0.3.34 readiness gate; replaces the legacy `.installed` stamp
+  check).
 - `~/.config/paper-wiki/recipes/daily.yaml` exists and parses as a
   valid `RecipeSchema` (the digest runner will reject it loudly if
   not).

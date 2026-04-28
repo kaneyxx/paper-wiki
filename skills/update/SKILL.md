@@ -45,15 +45,18 @@ This is the official upgrade path replacing the manual `rm -rf cache`
 
 ### Step 1 — Run the CLI
 
-```
+The `export PATH=...` line is mandatory — fresh-install users may not
+have `~/.local/bin` on PATH yet (D-9.34.6).
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 paperwiki update
 ```
 
-Fallback if `paperwiki` is not on PATH:
-
-```
-${CLAUDE_PLUGIN_ROOT}/.venv/bin/paperwiki update
-```
+If `paperwiki update` still reports `command not found` after the
+`export PATH=...` line, the SessionStart hook didn't run — tell the
+user to exit and restart Claude Code so `hooks/ensure-env.sh`
+re-installs the shim.
 
 ### Step 2 — Surface the output verbatim
 

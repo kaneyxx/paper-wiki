@@ -39,10 +39,18 @@ specifically asking for biomedical-domain literature.
 
 ## Process
 
-1. **Check that paperclip MCP is available.** Run
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.diagnostics`
-   and inspect `mcp_servers`. If `paperclip` is missing, **stop** and
-   show the user the registration steps from
+1. **Check that paperclip MCP is available.** Run this exact bash to
+   call the diagnostics runner via the shim. The `export PATH=...`
+   line is mandatory — fresh-install users may not have
+   `~/.local/bin` on PATH yet (D-9.34.6).
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki diagnostics
+   ```
+
+   Parse the JSON output and inspect `mcp_servers`. If `paperclip` is
+   missing, **stop** and show the user the registration steps from
    [`docs/paperclip-setup.md`](../../docs/paperclip-setup.md). Do not
    run `claude mcp add` yourself; the user opts in.
 

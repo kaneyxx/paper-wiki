@@ -34,9 +34,16 @@ sources first.
 
 1. **Pick search terms.** From the user's question, extract 2-5
    substantive nouns / multi-word phrases. Drop function words.
-2. **Run the runner.** Invoke
-   `${CLAUDE_PLUGIN_ROOT}/.venv/bin/python -m paperwiki.runners.wiki_query
-   <vault> "<terms>" --top-k 10`. Parse the JSON list of hits.
+2. **Run the runner.** Run this exact bash to invoke the query runner.
+   The `export PATH=...` line is mandatory — fresh-install users may
+   not have `~/.local/bin` on PATH yet (D-9.34.6).
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   paperwiki wiki-query <vault> "<terms>" --top-k 10
+   ```
+
+   Parse the JSON list of hits.
 3. **Surface top hits.** If `len(hits) == 0`, tell the user the wiki
    doesn't cover this topic and offer to ingest sources. Stop.
 4. **Read the hit files.** For the top hits (typically 3-5), read the
@@ -71,7 +78,7 @@ sources first.
 
 ## Verification
 
-- `paperwiki.runners.wiki_query` exits 0.
+- `paperwiki wiki-query` exits 0.
 - Every wikilink in the answer matches the path of a returned hit.
 - Every claim in the answer is traceable to a snippet you read.
 - The answer never contains "I know" / "in general" / "as a model" —
