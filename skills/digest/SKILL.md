@@ -90,13 +90,36 @@ to `paperwiki:setup`.
    keep the manual confirm prompt — only the digest auto-chain uses
    `--auto-bootstrap`.
 
-8. **Per-paper Detailed report synthesis.** For each
-   `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` marker still in
-   the digest file, synthesize the **Detailed report** block and replace
-   the marker. Each report contains:
+8. **Per-paper Detailed report synthesis.** Synthesize Detailed reports
+   **only for the top `auto_ingest_top` papers** (i.e. papers ranked 1
+   through `min(auto_ingest_top, top_k)`). For papers ranked below
+   `auto_ingest_top`, replace the
+   `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` marker with this
+   single-line teaser instead of a full report:
+
+   > _Run `/paper-wiki:analyze <canonical-id>` for a deep dive into this
+   > paper, or `/paper-wiki:wiki-ingest <canonical-id>` to fold it into
+   > your concept articles._
+
+   If `auto_ingest_top` is 0, skip Detailed report synthesis entirely for
+   ALL papers — every slot gets the teaser line only. If
+   `auto_ingest_top >= top_k` (user wants every paper deep-treated),
+   synthesize all.
+
+   For each **top-N** paper, replace the marker with the full
+   **Detailed report** block containing:
    - 2–3 sentence **"Why this matters"** framing from the abstract.
    - 2–4 bullet **"Key takeaways"** (concrete claims from the abstract;
      never invented).
+   - **Figures** (if `Wiki/sources/<canonical-id>/images/` exists and is
+     non-empty — sort alphabetically, deterministic listing — pick the
+     FIRST 1 file if the directory has 1–2 figures total; pick the FIRST
+     2 files if the directory has 3+ figures): embed each as
+     `![[Wiki/sources/<canonical-id>/images/<file>|600]]`. Width `|600`
+     is intentionally narrower than the card teaser's `|700` so both
+     placements are visually distinct. Skip this section silently if the
+     directory is empty or does not exist (e.g. `paperclip:` / `s2:`
+     ids with no arXiv source bundle).
    - 1 line **"Score reasoning"** plain-English explanation of the
      composite score (e.g. "Scores high because relevance is 0.92 —
      multiple exact topic matches, modest novelty 0.55").
@@ -146,6 +169,9 @@ to `paperwiki:setup`.
 | "I'll invent per-paper claims that aren't in the abstract — makes the report richer." | NO. Every claim in the Detailed report MUST come from the abstract or the score breakdown. Hallucinated methods and results erode the user's trust in the digest. One wrong claim per day = the user stops reading. |
 | "I'll skip image extraction because Obsidian renders without it." | The user wants figures. Figures appear in the NEXT digest run's inline teasers. Skipping extraction silently delays that by one day and the user can't tell why their digest looks bare. |
 | "I'll run wiki-ingest before extract-images to save a step." | Extract-images must run FIRST so figures are on disk when `_try_inline_teaser` is invoked. Swapping the order means day-2 teasers are missing. The order is intentional. |
+| "The card teaser already shows a figure — the Detailed report doesn't need one." | The card teaser is the FIRST figure outside the synthesized report. The inlined figures inside the Detailed report are different — they ground the prose with specific visual evidence as the user reads. Both placements are intentional. |
+| "I'll embed all 7 architecture diagrams to be thorough." | 1–2 figures max per Detailed report. Use the heuristic: sort alphabetically, pick the first 1 (for directories with 1–2 figures) or first 2 (for 3+ figures). Excessive figures clutter the digest and slow Obsidian render. |
+| "I synthesized Detailed reports for all 10 papers — more value for the user." | Wrong. `auto_ingest_top` controls treatment depth. Only top-N get the full Detailed report (Why this matters / Key takeaways / inline figures / Score reasoning). The rest get a teaser pointing at `/paper-wiki:analyze`. Respect the user's depth budget. |
 
 ## Red Flags
 
@@ -162,6 +188,10 @@ to `paperwiki:setup`.
   any paper's matched_topics or abstract** → STOP. The synthesis is
   hallucinating. Re-read the digest carefully and re-synthesize using
   only present claims.
+- **Detailed reports synthesized for all N papers when `auto_ingest_top`
+  is 3** → STOP. `auto_ingest_top` is the depth-of-treatment envelope.
+  Only top-3 get the full Detailed report; the rest get the analyze-link
+  teaser. Fix by replacing the extra reports with the teaser line.
 
 ## Verification
 
@@ -172,3 +202,7 @@ to `paperwiki:setup`.
 - Every reporter's expected output file is on disk; confirm via
   `ls -la <output-dir>`.
 - Top-3 summary cites real titles and scores, not invented content.
+- Each paper with extracted images has at least one
+  `![[Wiki/sources/<id>/images/...|600]]` line in the Detailed report block.
+- After Step 8, exactly `min(auto_ingest_top, top_k)` per-paper slots have
+  synthesized Detailed reports; the remaining slots have the teaser line.

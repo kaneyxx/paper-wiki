@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.18"
+    assert data["version"] == "0.3.19"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1103,4 +1103,118 @@ def test_setup_skill_biomedical_keywords_exclude_generic_terms() -> None:
     wsi_count = bio_block.count("whole slide image") + bio_block.count("whole-slide image")
     assert wsi_count <= 1, (
         f"Biomedical & Pathology should have at most one WSI keyword variant, found {wsi_count}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.22 — Inline figures in synthesized Detailed reports (v0.3.19)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_inlines_figures_in_detailed_report() -> None:
+    """digest SKILL.md Process Step 8 must document the inline-figure embed
+    contract: figures from Wiki/sources/<id>/images/ are embedded via
+    ![[Wiki/sources/<id>/images/<file>|600]] inside the Detailed report block.
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    assert "![[Wiki/sources/" in flat, (
+        "digest SKILL.md must reference the ![[Wiki/sources/ embed shape "
+        "for inline figures inside the Detailed report"
+    )
+    assert "|600]]" in flat, (
+        "digest SKILL.md must use |600 width for Detailed-report figure embeds "
+        "(distinct from the card teaser's |700)"
+    )
+
+
+def test_digest_skill_picks_alphabetically_first_figures() -> None:
+    """digest SKILL.md must describe the deterministic (alphabetical) sort
+    heuristic for picking which figures to embed in the Detailed report.
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    assert "sort alphabetically" in flat or "deterministic listing" in flat, (
+        "digest SKILL.md must say 'sort alphabetically' or 'deterministic listing' "
+        "near the inline-figure step so the pick heuristic is pinned and drift-proof"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.24 — Detailed reports gated by auto_ingest_top (v0.3.19)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_gates_detailed_report_by_auto_ingest_top() -> None:
+    """digest SKILL.md Process Step 8 must document that only the top
+    auto_ingest_top papers get full Detailed report synthesis; papers below
+    the threshold get the analyze-link teaser.
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    assert "auto_ingest_top" in flat, (
+        "digest SKILL.md Process Step 8 must reference auto_ingest_top "
+        "as the gating field for Detailed report synthesis"
+    )
+    assert "/paper-wiki:analyze" in flat, (
+        "digest SKILL.md must include the /paper-wiki:analyze teaser shape "
+        "for papers below the auto_ingest_top threshold"
+    )
+    assert "for a deep dive" in flat, (
+        "digest SKILL.md must include 'for a deep dive' in the teaser wording "
+        "so the exact teaser shape is pinned"
+    )
+
+
+def test_digest_skill_zero_auto_ingest_top_uses_teasers_for_all() -> None:
+    """digest SKILL.md must describe the auto_ingest_top: 0 edge case —
+    all papers get the teaser only, no synthesis at all.
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    assert "auto_ingest_top" in flat, "digest SKILL.md must reference auto_ingest_top"
+    # The SKILL must describe the zero case explicitly
+    assert "auto_ingest_top" in body, "digest SKILL.md must reference auto_ingest_top"
+    # The SKILL must describe the zero case explicitly
+    zero_described = (
+        "auto_ingest_top: 0" in flat
+        or "auto_ingest_top is 0" in flat
+        or "auto_ingest_top == 0" in flat
+        or "auto_ingest_top` is 0" in flat
+        or "0` (no auto" in flat
+    )
+    assert zero_described, (
+        "digest SKILL.md must describe the auto_ingest_top: 0 edge case "
+        "(all papers get the teaser, no synthesis)"
+    )
+
+
+def test_digest_skill_forbids_synthesizing_below_auto_ingest_top() -> None:
+    """digest SKILL.md Red Flags must contain a row warning against synthesizing
+    Detailed reports for ALL papers when auto_ingest_top < top_k.
+    The row must include both 'auto_ingest_top' and 'STOP'.
+    """
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "auto_ingest_top" in body, "digest SKILL.md must reference auto_ingest_top"
+    assert "STOP" in body, "digest SKILL.md Red Flags must contain STOP as an explicit halt signal"
+
+    # Find paragraphs/rows that contain both 'auto_ingest_top' and 'STOP'
+    lines = body.splitlines()
+    found = any("auto_ingest_top" in line and "STOP" in line for line in lines)
+    # Or check via a window: a STOP line within 3 lines of an auto_ingest_top mention
+    if not found:
+        for i, line in enumerate(lines):
+            if "auto_ingest_top" in line:
+                window = lines[max(0, i - 3) : i + 4]
+                if any("STOP" in w for w in window):
+                    found = True
+                    break
+    assert found, (
+        "digest SKILL.md Red Flags must have a row associating auto_ingest_top "
+        "over-synthesis with STOP — warn the SKILL executor to halt and fix"
     )
