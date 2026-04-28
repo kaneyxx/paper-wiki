@@ -292,16 +292,188 @@ insufficient.)
   SIGINT smoke (mid-overview crash → re-run = idempotent fill); tag
   `v0.3.18`.
 
+### Phase 9 — Release v0.3.19 (figures inside Detailed reports + top-N gating)
+
+- [ ] **9.22 — Inline figures in synthesized Detailed reports.**
+  Plan §10.17 Task 9.22. Complexity **S-M**. Extend
+  `skills/digest/SKILL.md` Process Step 8 contract: when synthesizing
+  the Detailed report for a paper whose `Wiki/sources/<id>/images/`
+  directory has at least one extracted figure, add a `**Figures.**`
+  block between Key takeaways and Score reasoning containing 1–2
+  Obsidian `![[<source_filename>/images/<name>|600]]` embeds.
+  Selection heuristic: 1 file if directory has ≤ 2 figures; 2 files
+  if 3+; prefer alphabetical-first names matching `fig1.*` /
+  `figure_1.*` / `teaser.*`. Distinct from the existing card-teaser
+  embed (`|700` size at the card level vs `|600` inside the
+  synthesized block). Add Common Rationalizations rows: "Card
+  teaser already shows a figure" and "I'll embed all 7 architecture
+  diagrams". Add smoke test
+  `test_digest_skill_embeds_figures_in_detailed_report`. Pure SKILL
+  prose change; no Python edits.
+  **Acceptance check**: SKILL.md mentions "Figures" embed contract,
+  alphabetical-sort + `fig1`/`teaser` heuristic, `|600` size; manual
+  smoke against a fresh vault confirms top-N papers with extracted
+  figures get inline embeds inside their synthesized Detailed report.
+- [ ] **9.24 — Detailed reports gated by `auto_ingest_top`.**
+  Plan §10.19 Task 9.24. Complexity **S**. Update
+  `skills/digest/SKILL.md` Process Step 8 to synthesize Detailed
+  reports ONLY for the top `min(auto_ingest_top, top_k)` papers; for
+  papers ranked below, replace the
+  `<!-- paper-wiki:per-paper-slot:{canonical_id} -->` marker with a
+  one-line teaser: `_Run /paper-wiki:analyze <canonical-id> for a
+  deep dive on this paper._`. When `auto_ingest_top == 0`, ALL slots
+  get the teaser (no synthesis). Add Common Rationalizations row:
+  "I synthesized Detailed reports for all 10 papers — more value
+  for the user." → "Wrong. `auto_ingest_top` controls treatment
+  depth." Add Red Flag. Add smoke test
+  `test_digest_skill_gates_detailed_reports_by_auto_ingest_top`.
+  Pure SKILL prose change; no Python edits, no reporter plumbing
+  (Option 1 from the design doc).
+  **Acceptance check**: with `auto_ingest_top: 3` and `top_k: 10`,
+  digest file has 3 synthesized Detailed reports + 7 teaser lines;
+  with `auto_ingest_top: 0`, digest file has 10 teaser lines and
+  zero synthesis.
+- [ ] **v0.3.19 Gate**: same as v0.3.13 gate; manual smoke (run
+  digest with `auto_ingest_top: 3` against fresh vault — confirm
+  top-3 Detailed reports have inline `![[...]]` figure embeds AND
+  papers #4–#10 show only the analyze-link teaser); CHANGELOG
+  `[0.3.19]` entry; version bump in `pyproject.toml`,
+  `__init__.py`, `plugin.json`; tag `v0.3.19`.
+
+### Phase 9 — Release v0.3.20 (image extraction quality leap, 9.25)
+
+- [ ] **9.25 — Improve `extract-paper-images` per evil-read-arxiv reference.**
+  Plan §10.20 Task 9.25. Complexity **M-L** (90-120 min). Reference repo
+  at `/Users/fangyi/Projects/evil-read-arxiv/extract-paper-images/`
+  (SKILL.md + scripts/extract_images.py) — read both BEFORE implementing.
+  Add PyMuPDF (`pymupdf>=1.24`) to `pyproject.toml`. Extend
+  `paperwiki._internal.arxiv_source` with 3-priority fallback chain:
+  (1) figure dirs (existing); (2) standalone PDF figures at source root
+  → convert to PNG via `fitz.open(pdf).get_pixmap(matrix=Matrix(3,3))`;
+  (3) TikZ detection (`\begin{tikzpicture}` / `pgfplots` in `.tex`) →
+  caption-aware crop of paper PDF at "Figure N:" text-block boundaries.
+  Generate `images/index.md` manifest with source classes
+  (`arxiv-source` / `pdf-figure` / `pdf-extraction` / `tikz-cropped`).
+  Min-size filter (>200px on at least one axis) applies to all
+  priorities. Cap K=8 cropped figures per paper. Surface per-priority
+  count in JSON output. Add `tests/unit/_internal/test_arxiv_source.py`
+  fixtures for each priority + min-size edge.
+  **Acceptance check**: AC-9.25.1 through 9.25.6 all pass; v0.3.18
+  smoke #1 paper that gave 0 images now yields ≥1 figure via Priority
+  2 or 3.
+- [ ] **v0.3.20 Gate**: same as v0.3.13 gate; manual smoke (re-run
+  digest on a fresh vault and confirm `Wiki/sources/<id>/images/`
+  populates for ≥80% of arXiv papers — vs ~30% today); CHANGELOG
+  `[0.3.20]` entry noting PyMuPDF dependency + AGPL→GPL-3.0 license
+  compatibility; version bump in `pyproject.toml`, `__init__.py`,
+  `plugin.json`; tag `v0.3.20`.
+
+### Phase 9 — Release v0.3.21 (interpretive Score reasoning + recipe migration)
+
+- [ ] **9.23 — Insightful Score reasoning (synthesized, not transcribed).**
+  Plan §10.18 Task 9.23. Complexity **S**. Rewrite the digest SKILL
+  Process Step 8 contract for the "Score reasoning" line: 1–2
+  sentences of interpretation (NOT a paraphrase of the four
+  sub-scores from the metadata callout). Forbid pure number-restating;
+  require WHY interpretation, acknowledgement of limits ("rigor 0.50
+  because brand-new"), and citation of specific evidence (topic
+  match, recency, dataset release). Add Common Rationalizations
+  rows: "I'll just list the sub-scores — it's accurate." (wrong) and
+  "If the score is moderate, there's nothing interesting to say."
+  (also wrong). Add Red Flag entry: "Score reasoning starts with
+  the composite number and just restates the four sub-scores in
+  parentheses → STOP." Add smoke test
+  `test_digest_skill_score_reasoning_is_interpretive_not_transcriptive`.
+  Pure SKILL prose change.
+  **Acceptance check**: SKILL.md Process Step 8 mentions "interpret",
+  "1–2 sentences", and the forbidden number-restating pattern;
+  manual smoke confirms 3 different Score reasoning lines (high /
+  medium / low score brackets) read as opinion-bearing
+  interpretations, not paraphrases.
+- [ ] **9.21 — Personal recipe migration after v0.3.17 keyword updates.**
+  Plan §10.16 Task 9.21. Complexity **M**. Add new runner
+  `paperwiki.runners.migrate_recipe` with CLI:
+  `python -m paperwiki.runners.migrate_recipe <recipe-path>
+  [--dry-run] [--target-version 0.3.17]`. Reads the recipe YAML,
+  computes per-topic keyword diff against
+  `paperwiki.config.recipe_migrations` canonical map, applies
+  surgical updates after backing up to
+  `<recipe-path>.bak.<YYYYMMDDHHMMSS>`. Preserves user-edited
+  fields (`vault_path`, `api_key_env`, `auto_ingest_top`, custom
+  5th topics, `top_k`). Idempotent. Emits JSON
+  `{recipe_path, target_version, applied_changes:
+  [{topic, removed_keywords, added_keywords}], backup_path}`. Add
+  new SKILL `skills/migrate-recipe/SKILL.md` (six-section anatomy)
+  + `.claude/commands/migrate-recipe.md`. Setup SKILL Branch 1 gains
+  a stale-recipe heuristic check after "Keep current config" → asks
+  via AskUserQuestion to migrate. Tests: unit tests for runner
+  happy path / dry-run / idempotent re-run / custom 5th topic
+  preservation / backup creation; smoke test for SKILL anatomy;
+  smoke test asserting `0.3.17` target drops `foundation model`
+  from `biomedical-pathology`.
+  **Acceptance check**: running `migrate-recipe` on a stale recipe
+  diffs the keyword changes, backs up the original, applies the
+  diff in place; re-running emits `applied_changes: []` (idempotent);
+  custom 5th topic and other user fields preserved; setup SKILL
+  Branch 1 surfaces the migration prompt when the heuristic matches.
+- [ ] **v0.3.21 Gate**: same as v0.3.13 gate; manual smoke (run
+  `migrate-recipe` against the user's existing
+  `~/.config/paper-wiki/recipes/daily.yaml` — observe diff applied,
+  backup created, subsequent digest stops routing remote-sensing
+  papers into `biomedical-pathology`); CHANGELOG `[0.3.21]` entry;
+  version bump; tag `v0.3.21`.
+
+### Phase 9 — Release v0.3.22 (cleanup: log levels + extract-images failure UX)
+
+- [ ] **9.19 — Quiet `s2.parse.skip` warnings on sparse S2 records.**
+  Plan §10.14 Task 9.19. Complexity **S**. In
+  `src/paperwiki/plugins/sources/semantic_scholar.py::_parse_entry`,
+  downgrade the four "sparse record" branches (lines 175, 180, 193,
+  198) from `logger.warning` to `logger.debug`. Keep the
+  `model validation` branch at line 219 at WARNING — that's a real
+  schema mismatch. In `_parse_response` (or `fetch`), accumulate a
+  per-reason histogram and emit one
+  `logger.info("s2.parse.skipped_summary", count=N, by_reason={...})`
+  line per fetch when `count > 0`. Add unit tests
+  `test_semantic_scholar_skip_branches_log_at_debug_level` and
+  `test_semantic_scholar_emits_skip_summary_at_info_level`.
+  **Acceptance check**: fresh-vault `/paper-wiki:digest daily` shows
+  zero `WARNING | s2.parse.skip` lines on stdout/stderr; with
+  `--verbose`, per-entry DEBUG lines reappear plus the summary INFO
+  line; structured-log key `s2.parse.skipped_summary` is filterable
+  by power users.
+- [ ] **9.20 — Surface `extract-images` failure details to the user.**
+  Plan §10.15 Task 9.20. Complexity **S**. Extend
+  `skills/digest/SKILL.md` Process Step 7a: ALWAYS emit a per-paper
+  summary block in the SKILL's terminal output after the
+  extract-images auto-chain, regardless of success / failure.
+  Format names each paper with one of four classifications:
+  success-with-figures / success-no-figures / network-fail /
+  non-arxiv-skip. Add Common Rationalizations row: "I'll skip the
+  summary if all extractions succeeded — it's noise." → "Wrong.
+  Always emit the block." Add smoke test
+  `test_digest_skill_emits_extract_images_summary` asserting the
+  SKILL Process documents the four classifications and the
+  per-paper format. Pure SKILL prose change; no Python edits.
+  **Acceptance check**: SKILL.md Process Step 7a mentions all four
+  classifications + the per-paper format; manual smoke with one
+  known-404 arxiv id surfaces the failure reason in the SKILL
+  terminal output, naming the paper.
+- [ ] **v0.3.22 Gate**: same as v0.3.13 gate; manual smoke (fresh
+  vault, run digest — confirm S2 WARNINGs are gone and
+  extract-images per-paper summary block is emitted); CHANGELOG
+  `[0.3.22]` entry; version bump; tag `v0.3.22`.
+
 ### Phase 9 — Final checklist
 
-- [ ] All 9.x slice gates green (9.1-9.12 ✅; 9.13-9.18 pending).
+- [ ] All 9.x slice gates green (9.1-9.12 ✅; 9.13-9.24 pending).
 - [ ] `pytest --cov=paperwiki --cov-report=term-missing` ≥ 90% overall.
 - [ ] `mypy --strict src` clean.
 - [ ] `ruff check src tests` clean.
 - [ ] `ruff format --check src tests` clean.
 - [ ] `claude plugin validate .` passes.
-- [ ] CHANGELOG entries for `[0.3.13]` through `[0.3.18]` complete.
-- [ ] Tag each release in turn: `v0.3.13` → `v0.3.18`.
+- [ ] CHANGELOG entries for `[0.3.13]` through `[0.3.22]` complete.
+- [ ] Tag each release in turn: `v0.3.13` → `v0.3.22`.
 - [ ] **Hard floor**: `tests/integration/test_full_digest_auto_chain.py`
   (Task 9.14) green at every commit on every branch.
 
@@ -321,10 +493,12 @@ insufficient.)
   - `0.3.0` after Phase 7 ✅
   - `0.3.5` after README rewrite ✅
   - `0.3.6` → `0.3.12` shipped ✅
-  - `0.3.13` → `0.3.18` after Phase 9 (this round)
+  - `0.3.13` → `0.3.18` after Phase 9 (first round)
+  - `0.3.19` → `0.3.22` after Phase 9 (this round, v0.3.18 smoke findings + evil-read-arxiv image-quality reference)
   - `0.5.0` after Phase 8 (when promoted from candidate)
 - [ ] README, SPEC §3, recipes/README updated.
 - [ ] Tag `v0.2.0` after Phase 6 ✅, `v0.3.0` after Phase 7 ✅,
   `v0.3.5` after README rewrite ✅, `v0.3.6` – `v0.3.12` shipped ✅,
-  then `v0.3.13` – `v0.3.18` per Phase 9, then `v0.5.0` after
-  Phase 8 (if promoted).
+  then `v0.3.13` – `v0.3.18` per Phase 9 (first round), then
+  `v0.3.19` – `v0.3.22` per Phase 9 (this round), then `v0.5.0`
+  after Phase 8 (if promoted).
