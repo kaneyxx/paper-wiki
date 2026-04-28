@@ -77,7 +77,7 @@ def _parse_date(value: str) -> datetime:
         raise typer.BadParameter(msg) from exc
 
 
-@app.command()
+@app.command(name="digest")
 def main(
     recipe: Annotated[
         Path,

@@ -426,7 +426,7 @@ def _derive_pdf_url(landing_url: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-@app.command()
+@app.command(name="migrate-sources")
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Report only; do not write")] = False,

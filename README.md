@@ -224,6 +224,34 @@ Every subdir is configurable per recipe — for example
 | `/paper-wiki:migrate-sources`   | Upgrade legacy `Wiki/sources/<id>.md` files to the current section-organized format.    |
 | `/paper-wiki:migrate-recipe`    | Surgically update a personal recipe to the latest template keywords (e.g. remove stale `foundation model` from `biomedical-pathology`) without re-running the full setup wizard.    |
 | `/paper-wiki:bio-search`        | (Optional) Search bioRxiv / medRxiv / PMC via paperclip MCP, save hits as wiki sources. |
+| `/paper-wiki:status`            | Print paper-wiki install state (cache version / marketplace version / enabledPlugins state). Thin wrapper around `paperwiki status`. |
+| `/paper-wiki:update`            | Refresh the marketplace clone, clean the stale cache and JSON entries, and surface the next-steps for `/plugin install`. Thin wrapper around `paperwiki update`. |
+| `/paper-wiki:uninstall`         | Print the safe uninstall path. Claude can't safely tear itself out from inside its own session, so the SKILL points the user at `paperwiki uninstall` from a fresh terminal. |
+
+### CLI vs SKILL surface symmetry (v0.3.27+)
+
+Every paper-wiki operation is now invocable from BOTH inside Claude Code
+(slash command) AND a fresh terminal (`paperwiki <subcommand>` console
+script). Pick whichever fits the moment — Claude integration when you
+want LLM synthesis along the way, terminal when you want determinism
+and cron-friendliness.
+
+| Operation        | Slash command (in Claude)   | CLI (terminal)                          | Notes                                                                                               |
+|------------------|-----------------------------|-----------------------------------------|-----------------------------------------------------------------------------------------------------|
+| Setup            | `/paper-wiki:setup`         | _(no CLI; LLM-driven wizard)_           | Interactive AskUserQuestion flow; cannot mirror to CLI sensibly.                                    |
+| Digest           | `/paper-wiki:digest`        | `paperwiki digest <recipe>`             | Same pipeline; CLI suits cron / scheduled invocations.                                              |
+| Wiki-ingest      | `/paper-wiki:wiki-ingest`   | `paperwiki wiki-ingest <vault> <id>`    | `--auto-bootstrap` is the typical flag.                                                             |
+| Wiki-lint        | `/paper-wiki:wiki-lint`     | `paperwiki wiki-lint <vault>`           | Both emit JSON.                                                                                     |
+| Wiki-compile     | `/paper-wiki:wiki-compile`  | `paperwiki wiki-compile <vault>`        | Deterministic rebuild of `Wiki/index.md`.                                                           |
+| Wiki-query       | `/paper-wiki:wiki-query`    | `paperwiki wiki-query <vault> <q>`      | CLI is deterministic substring search; SKILL adds LLM synthesis on top.                             |
+| Extract images   | `/paper-wiki:extract-images`| `paperwiki extract-images <vault> <id>` | Same 3-priority extraction.                                                                         |
+| Migrate sources  | `/paper-wiki:migrate-sources`| `paperwiki migrate-sources <vault>`    | One-shot legacy-format upgrade.                                                                     |
+| Migrate recipe   | `/paper-wiki:migrate-recipe`| `paperwiki migrate-recipe <recipe>`     | Surgical keyword diff; both surfaces back up the recipe before write.                               |
+| Status           | `/paper-wiki:status`        | `paperwiki status`                      | Three-line install report.                                                                          |
+| Update plugin    | `/paper-wiki:update`        | `paperwiki update`                      | Refresh marketplace + clean cache; user runs `claude` + `/plugin install` afterwards.               |
+| Uninstall plugin | `/paper-wiki:uninstall`     | `paperwiki uninstall`                   | SKILL prints redirect only (can't safely uninstall from inside Claude); run the CLI in fresh shell. |
+| Analyze          | `/paper-wiki:analyze`       | _(no CLI; LLM-driven 6-section synth)_  | Inherently SKILL-shaped; no deterministic equivalent.                                               |
+| Bio-search       | `/paper-wiki:bio-search`    | _(no CLI; uses paperclip MCP)_          | Auth + LLM-driven; SKILL only.                                                                      |
 
 ### Optional: biomedical literature
 

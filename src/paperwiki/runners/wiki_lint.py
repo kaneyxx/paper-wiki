@@ -235,7 +235,7 @@ async def _read_body_and_last_synth(
 # ---------------------------------------------------------------------------
 
 
-@app.command()
+@app.command(name="wiki-lint")
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     stale_days: Annotated[

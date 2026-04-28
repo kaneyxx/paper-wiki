@@ -24,7 +24,14 @@ import typer
 from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
+from paperwiki.runners.digest import app as _digest_app
+from paperwiki.runners.extract_paper_images import app as _extract_images_app
 from paperwiki.runners.migrate_recipe import app as _migrate_recipe_app
+from paperwiki.runners.migrate_sources import app as _migrate_sources_app
+from paperwiki.runners.wiki_compile import app as _wiki_compile_app
+from paperwiki.runners.wiki_ingest_plan import app as _wiki_ingest_app
+from paperwiki.runners.wiki_lint import app as _wiki_lint_app
+from paperwiki.runners.wiki_query import app as _wiki_query_app
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -49,8 +56,19 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-# Add the migrate-recipe subcommand from its own runner app.
+# Plugin lifecycle commands (update / status / uninstall) are defined inline
+# below as ``@app.command()`` decorators.  Operational subcommands re-use the
+# corresponding ``paperwiki.runners.<name>`` Typer apps so each runner has a
+# single source of truth — the CLI surface and ``python -m paperwiki.runners.<name>``
+# stay in lock-step (Task 9.29 / D-9.29.2).
 app.add_typer(_migrate_recipe_app, name="migrate-recipe")
+app.add_typer(_digest_app, name="digest")
+app.add_typer(_wiki_ingest_app, name="wiki-ingest")
+app.add_typer(_wiki_lint_app, name="wiki-lint")
+app.add_typer(_wiki_compile_app, name="wiki-compile")
+app.add_typer(_wiki_query_app, name="wiki-query")
+app.add_typer(_extract_images_app, name="extract-images")
+app.add_typer(_migrate_sources_app, name="migrate-sources")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -321,6 +339,10 @@ def uninstall(
 def main() -> None:  # pragma: no cover — thin wrapper
     """Console-script entry point."""
     app()
+
+
+if __name__ == "__main__":  # pragma: no cover — supports `python -m paperwiki.cli`
+    main()
 
 
 __all__ = ["app", "main"]

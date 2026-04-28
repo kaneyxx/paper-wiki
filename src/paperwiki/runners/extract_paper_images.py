@@ -321,7 +321,7 @@ def _rewrite_figures_section(
 # ---------------------------------------------------------------------------
 
 
-@app.command()
+@app.command(name="extract-images")
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     canonical_id: Annotated[str, typer.Argument(help="Canonical id (arxiv:...)")],

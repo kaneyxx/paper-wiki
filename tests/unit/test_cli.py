@@ -263,3 +263,97 @@ class TestCliUninstall:
 
         installed = json.loads(paths["installed_plugins"].read_text())
         assert "paper-wiki@paper-wiki" not in installed.get("plugins", {})
+
+
+# ---------------------------------------------------------------------------
+# Task 9.29 / D-9.29.2 — CLI surface symmetry: every runner exposed as
+# a paperwiki subcommand
+# ---------------------------------------------------------------------------
+
+
+_EXPECTED_PAPERWIKI_COMMANDS: tuple[str, ...] = (
+    "update",
+    "status",
+    "uninstall",
+    "migrate-recipe",
+    "digest",
+    "wiki-ingest",
+    "wiki-lint",
+    "wiki-compile",
+    "wiki-query",
+    "extract-images",
+    "migrate-sources",
+)
+
+
+class TestCliSubcommandSurface:
+    """Pin the paperwiki CLI's command list against drift.
+
+    v0.3.27 mirrored 7 runners + the migrate-recipe subcommand into the
+    `paperwiki` console-script via `app.add_typer`. The `update`,
+    `status`, and `uninstall` commands stay defined inline in cli.py
+    because they manage the plugin lifecycle (no runner counterpart).
+    """
+
+    def test_all_expected_subcommands_registered(self) -> None:
+        from typer.testing import CliRunner
+
+        from paperwiki.cli import app
+
+        result = CliRunner().invoke(app, ["--help"])
+        assert result.exit_code == 0
+        for name in _EXPECTED_PAPERWIKI_COMMANDS:
+            assert name in result.output, (
+                f"`paperwiki {name}` missing from --help; "
+                "did a runner rename or add_typer plumbing get dropped?"
+            )
+
+    @pytest.mark.parametrize("name", _EXPECTED_PAPERWIKI_COMMANDS)
+    def test_subcommand_help_runs_cleanly(self, name: str) -> None:
+        """Each subcommand's --help exits 0.
+
+        This catches the most common runner-rename regression: a Typer
+        sub-app whose @app.command name doesn't match the parent's
+        add_typer name routes user to `paperwiki <name> main --help`
+        instead of working as a single-command app.
+        """
+        from typer.testing import CliRunner
+
+        from paperwiki.cli import app
+
+        result = CliRunner().invoke(app, [name, "--help"])
+        assert result.exit_code == 0, (
+            f"`paperwiki {name} --help` exited {result.exit_code}: {result.output}"
+        )
+
+
+class TestCliRunnerImports:
+    """Sanity check: cli.py imports each runner Typer app at module load.
+
+    A regression here usually means a runner was renamed or moved
+    without updating cli.py.
+    """
+
+    def test_all_runner_apps_importable(self) -> None:
+        from paperwiki.cli import (
+            _digest_app,
+            _extract_images_app,
+            _migrate_recipe_app,
+            _migrate_sources_app,
+            _wiki_compile_app,
+            _wiki_ingest_app,
+            _wiki_lint_app,
+            _wiki_query_app,
+        )
+
+        for name, runner_app in (
+            ("digest", _digest_app),
+            ("extract-images", _extract_images_app),
+            ("migrate-recipe", _migrate_recipe_app),
+            ("migrate-sources", _migrate_sources_app),
+            ("wiki-compile", _wiki_compile_app),
+            ("wiki-ingest", _wiki_ingest_app),
+            ("wiki-lint", _wiki_lint_app),
+            ("wiki-query", _wiki_query_app),
+        ):
+            assert runner_app is not None, f"runner app {name} failed to import"

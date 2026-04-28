@@ -150,7 +150,7 @@ async def _read_first_paragraph(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-@app.command()
+@app.command(name="wiki-query")
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     query: Annotated[str, typer.Argument(help="Search query (whitespace-separated terms)")],
@@ -169,6 +169,15 @@ def main(
         raise typer.Exit(exc.exit_code) from exc
 
     typer.echo(json.dumps([asdict(h) for h in hits], indent=2))
+    # Task 9.29 / D-9.29.1: substring search is the deterministic CLI default;
+    # LLM-driven Q&A lives in the SKILL.  Emit the pointer to stderr so the
+    # SKILL parsing of stdout stays JSON-clean while CLI users still see the
+    # redirect tip in their terminal.
+    typer.echo(
+        "tip: for LLM-driven Q&A across the wiki, run /paper-wiki:wiki-query "
+        "inside Claude Code (substring hits above are deterministic only).",
+        err=True,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry

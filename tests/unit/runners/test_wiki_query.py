@@ -117,6 +117,9 @@ class TestCli:
 
         asyncio.run(_seed(tmp_path))
 
+        # ``mix_stderr=False`` keeps the v0.3.27 stderr footer (Task 9.29 /
+        # D-9.29.1) out of the JSON parse — the SKILL parses stdout via
+        # subprocess so the streams are physically separate at runtime.
         runner = CliRunner()
         result = runner.invoke(
             wiki_query_runner.app,
@@ -124,7 +127,7 @@ class TestCli:
         )
 
         assert result.exit_code == 0
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert isinstance(payload, list)
         assert payload  # non-empty
         for hit in payload:
@@ -142,4 +145,24 @@ class TestCli:
         )
 
         assert result.exit_code == 0
-        assert json.loads(result.output) == []
+        assert json.loads(result.stdout) == []
+
+    def test_emits_skill_redirect_footer_to_stderr(self, tmp_path: Path) -> None:
+        """Task 9.29 / D-9.29.1: CLI users see a one-line tip pointing at the
+        SKILL for LLM-driven Q&A; tip goes to stderr so JSON stdout stays
+        machine-parseable."""
+        import asyncio
+
+        asyncio.run(_seed(tmp_path))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            wiki_query_runner.app,
+            [str(tmp_path), "foundation"],
+        )
+
+        assert result.exit_code == 0
+        assert "/paper-wiki:wiki-query" in result.stderr
+        assert "tip" in result.stderr.lower()
+        # JSON stays clean on stdout — no footer leakage.
+        json.loads(result.stdout)

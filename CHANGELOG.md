@@ -9,6 +9,88 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.27] - 2026-04-28
+
+### Added
+
+- **CLI/SKILL surface symmetry** (Task 9.29). Every paper-wiki operation
+  is now invocable from BOTH `/paper-wiki:<name>` (Claude Code) AND
+  `paperwiki <name>` (terminal). The user explicitly requested
+  "兩頭都能執行" — power users on cron / remote shells now get the same
+  pipeline a Claude session does.
+
+  **6 new CLI subcommands** added via `app.add_typer` plumbing in
+  `src/paperwiki/cli.py`:
+
+  - `paperwiki digest <recipe>`
+  - `paperwiki wiki-ingest <vault> <id>`
+  - `paperwiki wiki-lint <vault>`
+  - `paperwiki wiki-compile <vault>`
+  - `paperwiki extract-images <vault> <id>`
+  - `paperwiki migrate-sources <vault>`
+
+  **1 deterministic CLI** for wiki search:
+
+  - `paperwiki wiki-query <vault> <q>` — substring search by default
+    (D-9.29.1). The runner now emits a one-line stderr footer pointing
+    at `/paper-wiki:wiki-query` for LLM-driven Q&A; stdout stays
+    JSON-clean so the SKILL's subprocess parsing is unaffected.
+
+  **3 new SKILLs** as thin CLI wrappers (D-9.29.2):
+
+  - `/paper-wiki:status` → `paperwiki status` (3-line install report).
+  - `/paper-wiki:update` → `paperwiki update` (refresh + clean).
+  - `/paper-wiki:uninstall` → prints redirect to `paperwiki uninstall`
+    from a fresh terminal. Does NOT shell out from inside Claude (the
+    active session would lose its SKILLs and runners mid-execution).
+
+- **Each runner's `@app.command()` decorator now uses an explicit
+  `name="<cli-name>"`** so the `paperwiki <X> --help` and
+  `python -m paperwiki.runners.<X> --help` invocations both surface the
+  cli-friendly hyphenated name. Existing `python -m paperwiki.runners.<X>`
+  invocations remain backward-compatible (Typer's single-command
+  auto-promotion preserves the no-subcommand-required behavior).
+
+- **`if __name__ == "__main__"` block** in `paperwiki.cli` so
+  `python -m paperwiki.cli` works from a clean subprocess (matters for
+  the new integration smoke test — and for any user who hasn't put
+  `~/.local/bin` on PATH yet).
+
+### Changed
+
+- **README "SKILLs" section gains 3 new rows** (status / update /
+  uninstall) plus a brand-new **CLI vs SKILL surface symmetry**
+  triage table that documents which operations are mirrored, which
+  stay SKILL-only (analyze / bio-search — LLM-shaped), and which stay
+  CLI-only (none anymore — but uninstall is "CLI does the work, SKILL
+  prints the redirect").
+
+### Out of scope (logged for future)
+
+- **9.31 candidate**: `/paper-wiki:status` SKILL surfacing version
+  drift between marketplace clone, cache, and pip-installed
+  `paperwiki` console-script. Plan was to defer until users report
+  surprise (D-9.29.3); v0.3.27 keeps the SKILL focused on the cache /
+  marketplace / enabledPlugins triple.
+
+### Tests
+
+- 14 new unit tests in `tests/unit/test_cli.py`:
+  - `TestCliSubcommandSurface` (12 tests) — pins the 11-command
+    CLI surface and that each `paperwiki <name> --help` exits 0.
+  - `TestCliRunnerImports` (1 test) — sanity check that cli.py
+    imports each runner's Typer app at module load.
+- 1 new unit test in `tests/unit/runners/test_wiki_query.py`:
+  - `test_emits_skill_redirect_footer_to_stderr` — pins the v0.3.27
+    contract: stdout JSON parseable + stderr carries the SKILL pointer.
+- New integration smoke test `tests/integration/test_cli_smoke.py`:
+  - Subprocess test that `python -m paperwiki.cli --help` lists every
+    expected subcommand.
+  - Parametrized `paperwiki <name> --help` exit-0 check (11 commands).
+  - Parametrized `python -m paperwiki.runners.<X> --help` exit-0 check
+    (8 runners) — pins backward compat for the existing module-runner
+    invocation path.
+
 ## [0.3.26] - 2026-04-28
 
 ### Fixed

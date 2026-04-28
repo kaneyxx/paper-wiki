@@ -177,7 +177,7 @@ def _render_frontmatter(
 # ---------------------------------------------------------------------------
 
 
-@app.command()
+@app.command(name="wiki-compile")
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     verbose: Annotated[

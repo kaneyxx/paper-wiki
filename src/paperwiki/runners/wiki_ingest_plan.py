@@ -309,7 +309,7 @@ def _extract_wikilink_target(value: str) -> str:
     return value.strip("[]").split("|")[0].strip()
 
 
-@app.command()
+@app.command(name="wiki-ingest")
 def main(
     vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
     source_id: Annotated[str, typer.Argument(help="Canonical id, e.g. arxiv:2506.13063")],
