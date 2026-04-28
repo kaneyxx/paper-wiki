@@ -361,12 +361,34 @@ insufficient.)
   **Acceptance check**: AC-9.25.1 through 9.25.6 all pass; v0.3.18
   smoke #1 paper that gave 0 images now yields ≥1 figure via Priority
   2 or 3.
-- [ ] **v0.3.20 Gate**: same as v0.3.13 gate; manual smoke (re-run
-  digest on a fresh vault and confirm `Wiki/sources/<id>/images/`
-  populates for ≥80% of arXiv papers — vs ~30% today); CHANGELOG
-  `[0.3.20]` entry noting PyMuPDF dependency + AGPL→GPL-3.0 license
-  compatibility; version bump in `pyproject.toml`, `__init__.py`,
-  `plugin.json`; tag `v0.3.20`.
+- [ ] **9.26 — `paperwiki update` CLI for in-place plugin upgrade.**
+  Plan §10.21 Task 9.26. Complexity **S-M** (30-45 min). Reference:
+  OMC's `omc update` (architecturally identical purpose). Add
+  `[project.scripts] paperwiki = "paperwiki.cli:main"` to
+  `pyproject.toml`; create `src/paperwiki/cli.py` Typer app with
+  `update` / `status` / `uninstall` subcommands. `update` does:
+  (1) `git pull` marketplace clone, (2) compare versions, (3) on
+  drift rename cache to `.bak.<UTC-ts>` + drop entries from
+  `installed_plugins.json` + `settings.json`/`settings.local.json`
+  enabledPlugins, (4) print fresh-session install instructions.
+  Idempotent. README "Upgrading" section rewritten to lead with
+  `paperwiki update`; manual JSON-cleanup flow demoted to footnote.
+  Add `tests/unit/test_cli.py` (typer CliRunner + tmp_path fixtures)
+  covering: stale cache (mutation + exit 0), up-to-date (no-op),
+  missing marketplace clone (exit 2), malformed JSON (exit 1).
+  **Acceptance check**: AC-9.26.1 through 9.26.7 pass; manual smoke
+  on user's actual machine — `paperwiki update` then fresh `claude`
+  + `/plugin install paper-wiki@paper-wiki` succeeds WITHOUT "already
+  installed" short-circuit.
+- [ ] **v0.3.20 Gate**: same as v0.3.13 gate; manual smoke
+  combinations: (a) re-run digest on a fresh vault and confirm
+  `Wiki/sources/<id>/images/` populates for ≥80% of arXiv papers
+  (vs ~30% today, demonstrates 9.25); (b) `paperwiki update` →
+  fresh `claude` → `/plugin install paper-wiki@paper-wiki` works in
+  one shot, no JSON editing required (demonstrates 9.26); CHANGELOG
+  `[0.3.20]` entry noting PyMuPDF dependency + license compatibility +
+  the `paperwiki` console-script; version bump in `pyproject.toml`,
+  `__init__.py`, `plugin.json`; tag `v0.3.20`.
 
 ### Phase 9 — Release v0.3.21 (interpretive Score reasoning + recipe migration)
 

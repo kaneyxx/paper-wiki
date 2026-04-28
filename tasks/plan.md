@@ -1996,7 +1996,7 @@ Rollback = revert. No effect on already-created stubs in user vaults
 | v0.3.17 | 9.9 + 9.12 | Concept-matching threshold stops generic-keyword leakage; auto-stub bodies + wiki-lint message clarify next steps. | 45-75 min |
 | v0.3.18 | 9.17 + 9.18 | Vault lock prevents corruption when two sessions race; Today's Overview is crash-safe (SIGINT mid-pass leaves the digest file recoverable). | 30-45 min |
 | v0.3.19 | 9.22 + 9.24 | **Inline figures appear inside synthesized Detailed reports**; **Detailed reports honor `auto_ingest_top`** (top-N get deep, rest get teaser). | 60-80 min |
-| v0.3.20 | 9.25 | **Image extraction quality leap.** PyMuPDF + 3-priority strategy (figure dirs → standalone PDF → TikZ caption-crop) per evil-read-arxiv reference. Recovers figures from ~80% of papers vs ~30% today. | 90-120 min |
+| v0.3.20 | 9.25 + 9.26 | **Image extraction quality leap** (PyMuPDF + 3-priority strategy per evil-read-arxiv reference; ~80% figure-recovery vs ~30%) **and** `paperwiki update` CLI that ends the manual JSON-cleanup ritual every release has required. | 120-165 min |
 | v0.3.21 | 9.23 + 9.21 | **Score reasoning is interpretive, not transcriptive** (1–2 sentences explaining WHY, not paraphrasing sub-scores); **personal recipes can be migrated to v0.3.17 keyword updates** without re-running setup. | 90-120 min |
 | v0.3.22 | 9.19 + 9.20 | **Cleanup release**: `s2.parse.skip` no longer leaks WARNINGs on every digest; `extract-images` failures surface a per-paper summary so users know which paper failed and why. | 35-55 min |
 
@@ -3696,6 +3696,152 @@ known limits in the SKILL.
   (the per-figure PDF→PNG conversion). Use as the architectural blueprint;
   port the algorithm into `paperwiki._internal/arxiv_source.py` rather
   than inline a CLI script (we keep our runner protocol per SPEC §6).
+
+---
+
+### 10.21 Task 9.26 — `paperwiki` CLI for in-place plugin upgrade → v0.3.20
+
+**Problem (concrete, from every release smoke session)**:
+Every release the user has tried to upgrade through `/plugin install
+paper-wiki@paper-wiki` and consistently hits "Plugin already installed
+globally". Claude Code 2.1.119's plugin manager has four broken upgrade
+paths:
+
+- `/plugin install paper-wiki@paper-wiki` — short-circuits when an
+  `installed_plugins.json` entry exists. Does NOT compare versions.
+- `/plugin update paper-wiki` — returns empty output (broken in 2.1.119).
+- `/plugin marketplace update paper-wiki` — refreshes the marketplace
+  clone but never re-emits cache files, so active install stays old.
+- `/plugin uninstall paper-wiki@paper-wiki` — does NOT delete cache;
+  only writes a `false` override to `settings.local.json`.
+
+So the only currently-working upgrade flow requires the user to run a
+5-line shell incantation: nuke cache, prune `installed_plugins.json`,
+prune both `settings.json` `enabledPlugins`, then `/plugin install`
+from a fresh session. **This does not scale to other users** — paper-wiki
+cannot be told "here's how to upgrade" without a manual JSON-editing
+ritual.
+
+OMC sidesteps this entirely by shipping its own `omc update` CLI that
+runs OUTSIDE Claude Code (architectural reference at
+`~/.claude/plugins/cache/omc/oh-my-claudecode/4.13.2/src/cli/index.ts`
+and `scripts/`). paper-wiki should follow the same pattern.
+
+**Solution**: ship a top-level `paperwiki` console-script entry-point
+that bundles the upgrade dance into a single command:
+
+```bash
+paperwiki update
+```
+
+What it does:
+
+1. Resolve marketplace clone path: `~/.claude/plugins/marketplaces/paper-wiki/`
+   by default, or via `--marketplace-dir <path>`.
+2. `git -C <clone> fetch --tags && git -C <clone> pull --ff-only` —
+   refresh the marketplace clone.
+3. Read `<clone>/.claude-plugin/plugin.json` → newest version available.
+4. Read `~/.claude/plugins/installed_plugins.json` → currently-cached
+   version.
+5. If equal: print `paper-wiki is already at <version>` and exit 0.
+6. If marketplace > cache:
+   - Rename `~/.claude/plugins/cache/paper-wiki/paper-wiki/<old>/` →
+     `<old>.bak.<UTC-timestamp>` (preserve, don't delete — user can
+     restore if upgrade breaks).
+   - Drop `paper-wiki@paper-wiki` entry from `installed_plugins.json`.
+   - Drop `paper-wiki@paper-wiki` from `settings.json` `enabledPlugins`
+     and `settings.local.json` `enabledPlugins`.
+   - Print: "paper-wiki upgraded marketplace 0.3.18 → 0.3.19 (cache backed
+     up to 0.3.18.bak.<ts>). Next: /exit any running session, then
+     `claude` → `/plugin install paper-wiki@paper-wiki` for the fresh
+     install."
+7. Exit codes: 0 success/no-op, 1 git/filesystem error, 2 marketplace
+   clone missing (print "run `/plugin marketplace add kaneyxx/paper-wiki`
+   first").
+
+Additional subcommands (low cost, ship together):
+
+- `paperwiki status` — prints cache version, marketplace version,
+  settings enabledPlugins state. For debugging "is it installed?".
+- `paperwiki uninstall` — opposite direction: removes cache + JSON
+  entries cleanly. The thing `/plugin uninstall` was supposed to do.
+
+**Files to touch**:
+
+- `pyproject.toml` — add `[project.scripts] paperwiki = "paperwiki.cli:main"`.
+- `src/paperwiki/cli.py` (new) — Typer app with `update`, `status`,
+  `uninstall` subcommands. Reuses `paperwiki._internal.logging`
+  (configure_runner_logging from 9.15) for `--verbose`.
+- `README.md` — replace "manual JSON cleanup" upgrade doc with
+  `paperwiki update` as the primary upgrade path. Move manual flow
+  into a "fallback if uv/pip not on PATH" footnote.
+- `tests/unit/test_cli.py` (new) — Typer-runner tests with tmp_path
+  fixtures simulating cache/JSON state.
+
+**Acceptance criteria**:
+
+- **AC-9.26.1** `paperwiki --help` prints subcommand list including
+  `update`, `status`, `uninstall`.
+- **AC-9.26.2** `paperwiki update` against a stale cache renames cache
+  dir to `.bak.<UTC-timestamp>`, removes JSON entries, prints success +
+  next-steps, exits 0. Idempotent — re-running on the same state is a
+  no-op.
+- **AC-9.26.3** `paperwiki update` against an up-to-date cache prints
+  `paper-wiki is already at <version>` and exits 0 without mutating
+  any files.
+- **AC-9.26.4** `paperwiki update` against missing marketplace clone
+  exits 2 with actionable message naming
+  `/plugin marketplace add kaneyxx/paper-wiki`.
+- **AC-9.26.5** `paperwiki status` prints a 3-line state report
+  (cache version / marketplace version / enabledPlugins yes-or-no).
+- **AC-9.26.6** `paperwiki uninstall` removes cache + JSON entries;
+  smoke verifies subsequent `/plugin install` does fresh install path
+  (the very thing `/plugin uninstall` should have done).
+- **AC-9.26.7** README's "Upgrading" section names `paperwiki update`
+  as the primary path; the manual JSON-editing flow stays as a
+  fallback footnote only.
+
+**Verification**:
+
+- `pytest -q tests/unit/test_cli.py` — mocked filesystem (tmp_path)
+  with synthetic `~/.claude/plugins/{cache,marketplaces}/paper-wiki`
+  + JSON state. Use `typer.testing.CliRunner`. Cover all four paths:
+  stale cache (success), up-to-date (no-op), missing clone (exit 2),
+  malformed JSON (exit 1).
+- Smoke test pins `paperwiki update --help` shape in `test_smoke.py`.
+- Manual smoke (post-ship): on the user's actual machine, run
+  `paperwiki update` → fresh `claude` → `/plugin install paper-wiki@paper-wiki`
+  succeeds without "already installed" short-circuit.
+
+**Complexity**: **S-M** (~30-45 min). Pure Python CLI + filesystem
+mutation; no LLM, no async, no network beyond `git pull` subprocess.
+
+**Dependencies**:
+
+- Hard: none. Independent of 9.25 (image extraction quality).
+- Soft: ships in same release (v0.3.20) as 9.25 because both touch the
+  user-facing release flow; CHANGELOG can document them together. If
+  9.25 takes longer than budget, 9.26 ships alone — fixing the upgrade
+  path is more urgent than image quality.
+
+**Risk**: **low**. The CLI mutates files paper-wiki already mutates
+manually each release; preserving the old cache as `.bak.<timestamp>`
+makes the operation reversible. Risk row: malformed
+`installed_plugins.json` (user-edited) → CLI must `cp <path>
+<path>.bak` before mutating and exit 1 with a diff if write fails.
+
+**Rollback**: `git revert` on the cli + pyproject + README changes.
+The existing manual upgrade flow continues to work for any user who
+has the v0.3.x docs cached.
+
+**Reference**:
+
+- OMC's update flow at
+  `~/.claude/plugins/cache/omc/oh-my-claudecode/4.13.2/src/cli/index.ts`
+  + `scripts/setup-progress.sh`. Architecturally same shape: refresh
+  clone → sync cache → prompt restart. Port the algorithm; do not port
+  the TypeScript. Stay Python-native to fit our `pyproject.toml`
+  install path.
 
 ---
 
