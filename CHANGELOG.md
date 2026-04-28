@@ -9,6 +9,55 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.23] - 2026-04-28
+
+### Fixed
+
+- **Task 9.19 — `s2.parse.skip` log noise silenced.** Four "sparse record"
+  branches in `_parse_entry` (missing title/abstract, bad publication date,
+  no authors, no usable id) downgraded from `WARNING` to `DEBUG`. The
+  `model validation` branch stays at `WARNING` — that indicates a real schema
+  mismatch, not a normal sparse S2 record. A single `INFO` summary line
+  (`s2.parse.skipped_summary`) is now emitted at the end of each fetch when
+  at least one entry was skipped, carrying per-reason counts for power users
+  running `--verbose`. Users running daily digests no longer see 3+ spurious
+  WARNING lines on every run.
+
+### Added
+
+- **Task 9.20 — digest SKILL surfaces per-paper extract-images summary.**
+  Process Step 7a now always emits a per-paper summary block after running
+  extract-images for each top-N paper, using four outcome classifications:
+  success-with-figures / success-no-figures / skipped-non-arxiv /
+  failed-with-error. No image extraction failure is silently absorbed.
+  Users see exactly which paper had what result and why.
+
+- **Task 9.21 — `paperwiki migrate-recipe` CLI subcommand and runner.**
+  New `paperwiki.runners.migrate_recipe` module and `paperwiki migrate-recipe`
+  CLI subcommand surgically update stale personal recipes to the latest
+  template keywords without re-running the full setup wizard. The initial
+  migration table covers v0.3.17 (drops `foundation model` from
+  `biomedical-pathology`). Always idempotent; creates a timestamped backup
+  before any write. The `/paper-wiki:migrate-recipe` SKILL and slash command
+  wrap the runner with a dry-run-first flow and AskUserQuestion confirmation.
+  Setup SKILL Branch 1 ("Keep current config") now runs a stale-keyword
+  heuristic and offers a fifth option to migrate immediately.
+
+### Changed
+
+- **Task 9.23 — digest SKILL "Score reasoning" is now interpretive, not
+  transcriptive.** Process Step 8 contract updated: Score reasoning must be
+  1–2 sentences that explain WHY the paper scores the way it does, acknowledge
+  specific limits (e.g. "rigor held back by brand-new arXiv"), and cite
+  specific topic matches. Restating the four sub-score numbers verbatim is
+  explicitly forbidden. New Common Rationalizations rows and a Red Flag pin
+  the contract against drift.
+
+### Tests
+
+- 6 new tests (3 × 9.19 unit, 2 × 9.21 smoke + 4 × 9.21 config/runner, 1 × 9.20 smoke,
+  1 × 9.23 smoke).
+
 ## [0.3.22] - 2026-04-28
 
 ### Changed
