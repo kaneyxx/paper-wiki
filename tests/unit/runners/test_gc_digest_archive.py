@@ -229,7 +229,12 @@ class TestCli:
 
         from paperwiki.runners.gc_digest_archive import app
 
-        result = CliRunner().invoke(app, ["--help"])
+        # NO_COLOR/TERM/COLUMNS keep Rich from wrapping flag names across
+        # lines on narrow CI terminals (the literal substring check would
+        # miss "--max-age-days" if Rich split it as "--max-age-\ndays").
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "200"}).invoke(
+            app, ["--help"]
+        )
         assert result.exit_code == 0
         for flag in ("--vault", "--max-age-days", "--dry-run", "--gzip"):
             assert flag in result.output, f"missing {flag} in --help"

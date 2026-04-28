@@ -205,7 +205,11 @@ class TestCli:
 
         from paperwiki.runners.where import app
 
-        result = CliRunner().invoke(app, ["--help"])
+        # NO_COLOR/TERM/COLUMNS keep Rich from wrapping flag names across
+        # lines on narrow CI terminals.
+        result = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "200"}).invoke(
+            app, ["--help"]
+        )
         assert result.exit_code == 0
         assert "--json" in result.output
 
