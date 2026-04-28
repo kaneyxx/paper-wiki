@@ -9,6 +9,45 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.32] - 2026-04-28
+
+### Fixed
+
+Three bugs caught in the v0.3.31 user smoke that prevented the
+defence-in-depth from actually engaging:
+
+- **Shim tag-line wasn't bumped from v0.3.29** when v0.3.31 added
+  PYTHONPATH to the heredoc body. ensure-env.sh's idempotent guard
+  uses the tag-line as the rewrite trigger; with the same tag,
+  existing shims kept the OLD body without PYTHONPATH. **Fix**: bumped
+  tag to `# paperwiki shim — v0.3.32 (shared venv + self-bootstrap +
+  PYTHONPATH fallback).` Now ensure-env.sh sees a stale tag on
+  upgrade and rewrites the shim with the new content.
+
+- **`uv venv "$VENV_DIR"` ran unconditionally**, failing with `A
+  virtual environment already exists at <path>. Use --clear to replace
+  it.` whenever ensure-env.sh re-ran on a populated venv (e.g. after
+  manual `rm .installed` to force a re-bootstrap). **Fix**: guard
+  with `[ ! -d "$VENV_DIR" ]` — the venv is created once and reused,
+  matching the v0.3.29 design intent. The pip-fallback branch already
+  had this guard.
+
+- **Prong B (`paperwiki update` pre-rename uninstall) was a silent
+  no-op for uv users** because uv-created venvs ship WITHOUT pip by
+  default (uv philosophy: use `uv pip` not pip directly). The v0.3.31
+  helper called `<venv>/bin/python -m pip uninstall paperwiki -y`
+  which exited non-zero with `No module named pip` for uv users.
+  **Fix**: prefer `uv pip uninstall --python <venv> paperwiki` when
+  `uv` is on PATH; fall back to `python -m pip` for legacy
+  pip-bootstrapped venvs. Now Prong B actually engages on the dominant
+  paper-wiki install path (uv).
+
+### Tests
+
+- Updated 2 smoke tests pinning the new shim tag-line.
+- 730 total tests green; mypy --strict clean; ruff check + format
+  clean.
+
 ## [0.3.31] - 2026-04-28
 
 ### Fixed

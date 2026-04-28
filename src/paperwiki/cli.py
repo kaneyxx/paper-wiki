@@ -15,6 +15,7 @@ with the runners.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -213,9 +214,21 @@ def _uninstall_stale_editable_paperwiki() -> None:
     venv_python = venv_dir / "bin" / "python"
     if not venv_python.is_file():
         return  # No venv yet — nothing to uninstall.
+
+    # v0.3.32: prefer `uv pip uninstall` because uv-created venvs ship
+    # WITHOUT pip by default (uv philosophy: use `uv pip` not pip
+    # directly). Falling straight to `python -m pip uninstall` was a
+    # silent skip on uv users — Prong B effectively dead. Try uv first,
+    # fall back to python -m pip for venvs created by ensurepip /
+    # virtualenv.
+    cmd: list[str] | None
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "uninstall", "--python", str(venv_python), "paperwiki"]
+    else:
+        cmd = [str(venv_python), "-m", "pip", "uninstall", "paperwiki", "-y"]
     try:
-        subprocess.run(  # noqa: S603 — args are literal strings + resolved venv path
-            [str(venv_python), "-m", "pip", "uninstall", "paperwiki", "-y"],
+        subprocess.run(  # noqa: S603 — args are literal + resolved path
+            cmd,
             capture_output=True,
             text=True,
             check=False,

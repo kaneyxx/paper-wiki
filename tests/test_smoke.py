@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.31"
+    assert data["version"] == "0.3.32"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -1453,7 +1453,9 @@ def test_ensure_env_contains_shim_tag() -> None:
     """
     script = REPO_ROOT / "hooks" / "ensure-env.sh"
     body = script.read_text(encoding="utf-8")
-    expected_tag = "# paperwiki shim — v0.3.29 (shared venv + self-bootstrap)."
+    expected_tag = (
+        "# paperwiki shim — v0.3.32 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+    )
     assert expected_tag in body, (
         "hooks/ensure-env.sh must contain the v0.3.29 shim tag line so "
         "old shims get overwritten on first SessionStart after upgrade"
@@ -1618,9 +1620,9 @@ def test_ensure_env_shim_integration(tmp_path: Path) -> None:
     assert os.access(shim, os.X_OK), "shim must be executable"
 
     body = shim.read_text(encoding="utf-8")
-    assert "paperwiki shim — v0.3.29 (shared venv + self-bootstrap)." in body, (
-        "shim must contain the v0.3.29 expected tag line"
-    )
+    assert (
+        "paperwiki shim — v0.3.32 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
+    ), "shim must contain the v0.3.32 expected tag line"
 
 
 def test_ensure_env_shim_is_idempotent(tmp_path: Path) -> None:

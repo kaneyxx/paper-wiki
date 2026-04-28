@@ -39,13 +39,13 @@ PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 # ---------------------------------------------------------------------------
 SHIM_DIR="$HOME/.local/bin"
 SHIM_PATH="$SHIM_DIR/paperwiki"
-EXPECTED_TAG="# paperwiki shim — v0.3.29 (shared venv + self-bootstrap)."
+EXPECTED_TAG="# paperwiki shim — v0.3.32 (shared venv + self-bootstrap + PYTHONPATH fallback)."
 
 mkdir -p "$SHIM_DIR"
 if ! [ -f "$SHIM_PATH" ] || ! grep -qF "$EXPECTED_TAG" "$SHIM_PATH" 2>/dev/null; then
   cat > "$SHIM_PATH" <<'SHIM_EOF'
 #!/usr/bin/env bash
-# paperwiki shim — v0.3.29 (shared venv + self-bootstrap).
+# paperwiki shim — v0.3.32 (shared venv + self-bootstrap + PYTHONPATH fallback).
 set -euo pipefail
 CACHE_ROOT="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
 PAPERWIKI_HOME_RESOLVED="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
@@ -123,7 +123,13 @@ fi
 mkdir -p "$(dirname "$VENV_DIR")"
 
 if command -v uv >/dev/null 2>&1; then
-  uv venv "$VENV_DIR"
+  # v0.3.32: skip `uv venv` if venv already exists. uv refuses to
+  # re-create without `--clear`, so re-running ensure-env.sh on an
+  # existing shared venv (e.g. after `rm .installed`) used to fail
+  # with "A virtual environment already exists".
+  if [ ! -d "$VENV_DIR" ]; then
+    uv venv "$VENV_DIR"
+  fi
   uv pip install --python "$VENV_DIR/bin/python" -e "$PLUGIN_ROOT"
 else
   if [ ! -d "$VENV_DIR" ]; then
