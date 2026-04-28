@@ -9,6 +9,35 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.21] - 2026-04-28
+
+### Fixed
+
+- **`paperwiki` command not found after install** (Task 9.27). v0.3.20 shipped
+  the `paperwiki` console-script entry-point but the venv that contains it
+  (`~/.claude/plugins/cache/paper-wiki/paper-wiki/<version>/.venv/bin/paperwiki`)
+  is not on the user's PATH, causing `zsh: command not found: paperwiki` when
+  trying to use the v0.3.20 upgrade flow.
+
+### Added
+
+- **Auto-installed `~/.local/bin/paperwiki` shim** (Task 9.27).
+  `hooks/ensure-env.sh` now installs a version-agnostic shim at
+  `~/.local/bin/paperwiki` on every Claude Code SessionStart. The shim
+  auto-discovers the latest installed plugin version so future paper-wiki
+  upgrades update the venv binary AND the shim invocation seamlessly.
+  If `~/.local/bin` is not on the user's PATH, a one-time warning is emitted
+  with the exact line to add to their shell rc (non-blocking; marker file
+  `~/.local/bin/.paperwiki-path-warned` prevents repeated noise).
+  Existing manually-installed shims are preserved — the hook rewrites only
+  on stale/missing/foreign content (tag-line grep guard).
+
+### Tests
+
+- `tests/test_smoke.py`: four new tests pin the shim emission block in
+  `hooks/ensure-env.sh` — static tag check, idempotency guard pattern,
+  PATH-warning marker, and a full integration run in a temp HOME directory.
+
 ## [0.3.20] - 2026-04-28
 
 ### Added

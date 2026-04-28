@@ -48,7 +48,18 @@ the plugin. It handles version comparison, stale-cache backup, and JSON
 pruning automatically:
 
 ```bash
-# From the plugin's virtual environment:
+paperwiki update
+```
+
+The `paperwiki` command is automatically installed at `~/.local/bin/paperwiki`
+on first session start. If `~/.local/bin` is not on your PATH, you'll see a
+one-time warning with the exact line to add to your shell rc; the shim itself
+remains usable via full path.
+
+If needed, the full path to the binary is:
+
+```bash
+# From the plugin's virtual environment (fallback):
 ~/.claude/plugins/cache/paper-wiki/paper-wiki/<current-version>/.venv/bin/paperwiki update
 ```
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "paper-wiki"
-version = "0.3.20"
+version = "0.3.21"
 description = "Personal research wiki builder for Claude Code — pipeline-driven paper ingestion with plugin architecture."
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -97,7 +97,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["paperwiki"]
