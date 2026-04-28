@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import fitz as _fitz
 import httpx
 import pytest
 
@@ -34,14 +35,15 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 
-# Minimal 1x1 PNG.
-_TINY_PNG = bytes.fromhex(
-    "89504E470D0A1A0A0000000D49484452"
-    "00000001000000010806000000"
-    "1F15C489"
-    "0000000A49444154789C6300010000050001"
-    "0D0A2DB40000000049454E44AE426082"
-)
+# 300x300 white PNG — large enough to pass the min-size filter (>200px on
+# at least one axis, introduced in v0.3.20).
+def _make_png(width: int = 300, height: int = 300) -> bytes:
+    pix = _fitz.Pixmap(_fitz.csRGB, _fitz.IRect(0, 0, width, height), False)
+    pix.set_rect(pix.irect, (255, 255, 255))
+    return pix.tobytes("png")
+
+
+_TINY_PNG = _make_png(300, 300)
 
 
 def _build_tarball(files: Iterable[tuple[str, bytes]]) -> bytes:
@@ -258,3 +260,93 @@ class TestCli:
         assert payload["canonical_id"] == "arxiv:2506.13063"
         assert payload["image_count"] == 1
         assert any(p.endswith("teaser.png") for p in payload["images"])
+
+
+# ---------------------------------------------------------------------------
+# New v0.3.20 behaviour: index.md manifest + sources JSON field
+# ---------------------------------------------------------------------------
+
+
+class TestIndexManifest:
+    async def test_index_md_written_after_extraction(self, tmp_path: Path) -> None:
+        """extract_paper_images must write images/index.md alongside figures."""
+        from paperwiki.runners import extract_paper_images as runner
+
+        await _seed_source(tmp_path, "arxiv:2506.13063")
+        tarball = _build_tarball(
+            [
+                ("paper/figures/fig1.png", _TINY_PNG),
+                ("paper/figures/fig2.png", _TINY_PNG),
+            ]
+        )
+        client = _mock_client(tarball)
+        try:
+            await runner.extract_paper_images(tmp_path, "arxiv:2506.13063", http_client=client)
+        finally:
+            await client.aclose()
+
+        index_md = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images" / "index.md"
+        assert index_md.is_file(), "index.md must be written alongside extracted figures"
+        content = index_md.read_text(encoding="utf-8")
+        assert "arxiv-source" in content
+        assert "fig1.png" in content or "fig2.png" in content
+
+    async def test_sources_field_in_result(self, tmp_path: Path) -> None:
+        """ExtractResult must include a 'sources' dict with priority counts."""
+        from paperwiki.runners import extract_paper_images as runner
+
+        await _seed_source(tmp_path, "arxiv:2506.13063")
+        tarball = _build_tarball([("paper/figures/teaser.png", _TINY_PNG)])
+        client = _mock_client(tarball)
+        try:
+            result = await runner.extract_paper_images(
+                tmp_path, "arxiv:2506.13063", http_client=client
+            )
+        finally:
+            await client.aclose()
+
+        assert hasattr(result, "sources"), "ExtractResult must have a 'sources' attribute"
+        sources = result.sources
+        assert "arxiv-source" in sources
+        assert "pdf-figure" in sources
+        assert "tikz-cropped" in sources
+        # One figure from Priority 1, zero from Priority 2 and 3.
+        assert sources["arxiv-source"] == 1
+        assert sources["pdf-figure"] == 0
+        assert sources["tikz-cropped"] == 0
+
+    def test_sources_field_in_json_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """JSON report emitted by the CLI must include the sources sub-dict."""
+        import asyncio as _asyncio
+
+        from paperwiki.runners import extract_paper_images as runner
+
+        loop = _asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_seed_source(tmp_path, "arxiv:2506.13063"))
+        finally:
+            loop.close()
+
+        tarball = _build_tarball([("paper/figures/teaser.png", _TINY_PNG)])
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=tarball)
+
+        def _stub_client(*args: object, **kwargs: object) -> httpx.AsyncClient:
+            return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        monkeypatch.setattr(runner, "build_client", _stub_client)
+
+        from typer.testing import CliRunner
+
+        cli = CliRunner()
+        result = cli.invoke(runner.app, [str(tmp_path), "arxiv:2506.13063"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert "sources" in payload, "JSON output must include 'sources' field"
+        sources = payload["sources"]
+        assert "arxiv-source" in sources
+        assert "pdf-figure" in sources
+        assert "tikz-cropped" in sources

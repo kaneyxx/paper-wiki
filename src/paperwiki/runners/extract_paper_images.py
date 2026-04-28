@@ -12,19 +12,29 @@ What it does:
 2. Downloads the arXiv source tarball to ``Wiki/.cache/sources/<id>.tar.gz``
    (idempotent — skips when the tarball is already cached unless
    ``--force`` is passed).
-3. Extracts image files from common figure dirs into
-   ``Wiki/sources/<id>/images/``.
-4. Rewrites the ``## Figures`` section of the source ``.md`` with
+3. Extracts image files using a 3-priority strategy:
+
+   - **Priority 1** (existing): image files from figure dirs inside the
+     source tarball (``figures/``, ``fig/``, ``pics/``, etc.).
+   - **Priority 2** (new): standalone PDF files at the tarball root,
+     converted to PNG via PyMuPDF.
+   - **Priority 3** (new): when P1+P2 yield <2 figures and the source
+     contains TikZ, caption-aware crops of the compiled paper PDF.
+
+4. Writes ``Wiki/sources/<id>/images/index.md`` manifest with per-figure
+   source class.
+5. Rewrites the ``## Figures`` section of the source ``.md`` with
    Obsidian wikilink embeds (``![[<id>/images/<name>|800]]``). Other
    sections (``## Notes``, ``## Key Takeaways``, etc.) are preserved
    intact.
-5. Emits a JSON report on stdout::
+6. Emits a JSON report on stdout::
 
        {
          "canonical_id": "arxiv:2506.13063",
          "image_count": 7,
          "images": ["Wiki/sources/arxiv_2506.13063/images/teaser.png", ...],
-         "cached": false
+         "cached": false,
+         "sources": {"arxiv-source": 5, "pdf-figure": 2, "tikz-cropped": 0}
        }
 
 Per SPEC §6, no LLM calls — Claude does the synthesis on top later.
@@ -43,8 +53,11 @@ import typer
 from loguru import logger
 
 from paperwiki._internal.arxiv_source import (
+    _has_tikz,
     download_arxiv_source,
     extract_images_from_tarball,
+    extract_root_pdfs_from_tarball,
+    extract_tikz_crop_from_pdf,
 )
 from paperwiki._internal.http import build_client
 from paperwiki._internal.logging import configure_runner_logging
@@ -70,6 +83,22 @@ _FIGURES_SECTION_RE = re.compile(
 
 
 @dataclass(slots=True)
+class SourceCounts:
+    """Per-priority figure counts."""
+
+    arxiv_source: int = 0
+    pdf_figure: int = 0
+    tikz_cropped: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "arxiv-source": self.arxiv_source,
+            "pdf-figure": self.pdf_figure,
+            "tikz-cropped": self.tikz_cropped,
+        }
+
+
+@dataclass(slots=True)
 class ExtractResult:
     """Machine-readable result returned by the runner."""
 
@@ -77,6 +106,49 @@ class ExtractResult:
     image_count: int
     images: list[str] = field(default_factory=list)
     cached: bool = False
+    sources: dict[str, int] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# index.md manifest writer
+# ---------------------------------------------------------------------------
+
+
+def _write_index_md(
+    images_dir: Path,
+    *,
+    p1: list[Path],
+    p2: list[Path],
+    p3: list[Path],
+) -> None:
+    """Write images/index.md with per-figure source class."""
+    lines: list[str] = ["# Figure Index\n"]
+    lines.append(
+        f"Total: {len(p1) + len(p2) + len(p3)} figures "
+        f"({len(p1)} arxiv-source, {len(p2)} pdf-figure, {len(p3)} tikz-cropped)\n"
+    )
+
+    def _section(title: str, paths: list[Path], source_class: str) -> None:
+        if not paths:
+            return
+        lines.append(f"\n## {title}\n")
+        for p in paths:
+            try:
+                size_kb = p.stat().st_size / 1024
+            except OSError:
+                size_kb = 0.0
+            lines.append(f"- **{p.name}**")
+            lines.append(f"  - source: {source_class}")
+            lines.append(f"  - path: {p.relative_to(images_dir.parent)}")
+            lines.append(f"  - size: {size_kb:.1f} KB")
+            lines.append(f"  - format: {p.suffix.lstrip('.')}\n")
+
+    _section("Priority 1 — arXiv source figures", p1, "arxiv-source")
+    _section("Priority 2 — Root PDF figures", p2, "pdf-figure")
+    _section("Priority 3 — TikZ caption crops", p3, "tikz-cropped")
+
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "index.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +204,48 @@ async def extract_paper_images(
         for old in images_dir.glob("*"):
             if old.is_file():
                 old.unlink()
-    extracted = extract_images_from_tarball(tarball_path, images_dir)
+
+    # ------------------------------------------------------------------
+    # Priority 1: figure dirs in source tarball
+    # ------------------------------------------------------------------
+    p1 = extract_images_from_tarball(tarball_path, images_dir)
+    logger.info("extract_paper_images.p1", count=len(p1))
+
+    # ------------------------------------------------------------------
+    # Priority 2: standalone root PDFs → PNG
+    # ------------------------------------------------------------------
+    p2 = extract_root_pdfs_from_tarball(tarball_path, images_dir, paper_id=arxiv_id)
+    logger.info("extract_paper_images.p2", count=len(p2))
+
+    # ------------------------------------------------------------------
+    # Priority 3: TikZ caption-aware crop (only when P1+P2 < 2 figures)
+    # ------------------------------------------------------------------
+    p3: list[Path] = []
+    if len(p1) + len(p2) < 2:
+        if _has_tikz(tarball_path):
+            # Look for compiled PDF in the cache or alongside the tarball.
+            paper_pdf = cache_dir / f"{arxiv_id}.pdf"
+            if paper_pdf.is_file():
+                p3 = extract_tikz_crop_from_pdf(paper_pdf, images_dir, paper_id=arxiv_id)
+                logger.info("extract_paper_images.p3", count=len(p3))
+            else:
+                logger.debug(
+                    "extract_paper_images.p3_skip",
+                    reason="no compiled PDF found at cache path",
+                    expected=str(paper_pdf),
+                )
+        else:
+            logger.debug("extract_paper_images.p3_skip", reason="no TikZ detected in source")
+
+    # ------------------------------------------------------------------
+    # Write index.md manifest
+    # ------------------------------------------------------------------
+    _write_index_md(images_dir, p1=p1, p2=p2, p3=p3)
+
+    # ------------------------------------------------------------------
+    # All extracted paths (excluding index.md)
+    # ------------------------------------------------------------------
+    extracted = [img for img in sorted(p1 + p2 + p3) if img.name != "index.md"]
 
     new_body = _rewrite_figures_section(
         source_path.read_text(encoding="utf-8"),
@@ -148,17 +261,24 @@ async def extract_paper_images(
         else str(p)
         for p in extracted
     ]
+    source_counts = SourceCounts(
+        arxiv_source=len(p1),
+        pdf_figure=len(p2),
+        tikz_cropped=len(p3),
+    )
     logger.info(
         "extract_paper_images.done",
         canonical_id=canonical_id,
         count=len(extracted),
         cached=cached,
+        sources=source_counts.as_dict(),
     )
     return ExtractResult(
         canonical_id=canonical_id,
         image_count=len(extracted),
         images=rel_paths,
         cached=cached,
+        sources=source_counts.as_dict(),
     )
 
 
