@@ -177,8 +177,8 @@ Vision & Multimodal:
   categories: [cs.CV, cs.LG, cs.MM]
 
 Biomedical & Pathology:
-  keywords: [pathology, histopathology, WSI, whole-slide image, whole slide image,
-             digital pathology, medical imaging, clinical AI, foundation model]
+  keywords: [pathology, histopathology, WSI, whole slide image,
+             digital pathology, medical imaging, clinical AI]
   categories: [cs.CV, eess.IV, q-bio.QM]
 
 Agents & Reasoning:
@@ -361,6 +361,7 @@ Then suggest: `/paper-wiki:digest` to run their first morning digest.
 | "I can just render the options as markdown bullet points." | Use AskUserQuestion for every choice point. Rendering options as prose leaves Claude to guess which one the user picked; AskUserQuestion gives a structured selection UI. |
 | "I should add an 'Other' or 'Cancel' option myself." | Claude Code injects these automatically. Manually adding them violates the AskUserQuestion schema and causes UI bugs like duplicate options or split tabs. |
 | "Topics need 10 fine-grained options." | AskUserQuestion hard-caps at 4 options; exceeding this causes Claude Code to auto-split them into multiple tabs (the 'Topics (1)/(2)' bug). Use 4 themed buckets with multiSelect: true instead. |
+| "I'll include broad terms like 'foundation model' in every topic." | Generic cross-domain keywords cause false positives from unrelated fields. Keep topic keyword sets domain-specific; 'foundation model' matches every ML paper regardless of domain and inflates relevance scores across all topics. |
 | "I'll skip the header field — the question text is clear enough." | The header field is REQUIRED. Omitting it causes Claude Code to truncate the question text into a garbage label like 'Custom kw'. Always provide header (max 12 chars). |
 
 ## Red Flags

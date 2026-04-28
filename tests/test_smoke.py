@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.16"
+    assert data["version"] == "0.3.17"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -897,4 +897,167 @@ def test_digest_skill_chains_extract_images() -> None:
     assert extract_pos < ingest_pos, (
         "In digest SKILL.md, extract-images must appear BEFORE wiki-ingest "
         "in the auto-chain step — figures must be on disk before ingest runs"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.9 — concept-matching threshold (v0.3.17)
+# ---------------------------------------------------------------------------
+
+
+def test_composite_scorer_emits_per_topic_strengths() -> None:
+    """CompositeScorer.score() must populate ScoreBreakdown.notes['topic_strengths']
+    as a JSON-encoded dict[str, float] keyed by topic name."""
+    import asyncio
+    import json
+    from datetime import UTC, datetime
+
+    from paperwiki.core.models import Author, Paper, RunContext, ScoreBreakdown
+    from paperwiki.plugins.filters.relevance import Topic
+    from paperwiki.plugins.scorers.composite import CompositeScorer
+
+    scorer = CompositeScorer(
+        topics=[
+            Topic(name="pathology", keywords=["pathology", "histopathology"]),
+            Topic(name="unrelated", keywords=["zzz_xyzzy_never"]),
+        ]
+    )
+    paper = Paper(
+        canonical_id="arxiv:0001.0001",
+        title="Deep learning for pathology histopathology",
+        authors=[Author(name="A. B.")],
+        abstract="We study histopathology slides.",
+        published_at=datetime(2026, 4, 20, tzinfo=UTC),
+        categories=["cs.CV"],
+    )
+    ctx = RunContext(target_date=datetime(2026, 4, 25, tzinfo=UTC), config_snapshot={})
+
+    async def _run() -> ScoreBreakdown:
+        return (
+            await asyncio.wait_for(
+                (scorer.score(_aiter([paper]), ctx).__anext__()),
+                timeout=5,
+            )
+        ).score
+
+    async def _aiter(items):  # type: ignore[no-untyped-def]
+        for item in items:
+            yield item
+
+    score = asyncio.run(_run())
+    assert score.notes is not None
+    assert "topic_strengths" in score.notes
+    strengths = json.loads(score.notes["topic_strengths"])
+    assert isinstance(strengths, dict)
+    assert strengths.get("pathology", 0.0) > 0.0
+    assert strengths.get("unrelated", 0.0) == 0.0
+
+
+def test_wiki_upsert_source_filters_by_topic_strength() -> None:
+    """MarkdownWikiBackend.upsert_paper(topic_strength_threshold=0.5) must exclude
+    topics whose per-topic strength is below the threshold."""
+    import asyncio
+    import json
+    import tempfile
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    import yaml
+
+    from paperwiki.core.models import Author, Paper, Recommendation, ScoreBreakdown
+    from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
+
+    rec = Recommendation(
+        paper=Paper(
+            canonical_id="arxiv:0001.9999",
+            title="Test Paper",
+            authors=[Author(name="T. Tester")],
+            abstract="Abstract.",
+            published_at=datetime(2026, 4, 20, tzinfo=UTC),
+            categories=["cs.CV"],
+        ),
+        score=ScoreBreakdown(
+            relevance=0.8,
+            novelty=0.5,
+            momentum=0.3,
+            rigor=0.4,
+            composite=0.55,
+            notes={"topic_strengths": json.dumps({"strong": 0.9, "weak": 0.1})},
+        ),
+        matched_topics=["strong", "weak"],
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        vault = Path(tmp)
+        backend = MarkdownWikiBackend(vault_path=vault)
+        asyncio.run(backend.upsert_paper(rec, topic_strength_threshold=0.5))
+
+        path = vault / "Wiki" / "sources" / "arxiv_0001.9999.md"
+        assert path.is_file()
+        text = path.read_text(encoding="utf-8")
+        end = text.find("\n---\n", 4)
+        fm = yaml.safe_load(text[4:end])
+        related = fm.get("related_concepts", [])
+        assert any("strong" in s for s in related), "strong topic must appear in related_concepts"
+        assert not any("weak" in s for s in related), "weak topic must be filtered out"
+
+
+# ---------------------------------------------------------------------------
+# Task 9.12 — auto-stub UX (v0.3.17)
+# ---------------------------------------------------------------------------
+
+
+def test_wiki_ingest_sentinel_body_explains_next_step() -> None:
+    """AUTO_CREATED_SENTINEL_BODY must mention /paper-wiki:wiki-ingest as the
+    next step to fill the stub — not just lint."""
+    from paperwiki.runners._stub_constants import AUTO_CREATED_SENTINEL_BODY
+
+    assert "/paper-wiki:wiki-ingest" in AUTO_CREATED_SENTINEL_BODY, (
+        "AUTO_CREATED_SENTINEL_BODY must reference /paper-wiki:wiki-ingest "
+        "so users know what to run next after seeing a stub"
+    )
+    assert "intentionally empty" in AUTO_CREATED_SENTINEL_BODY, (
+        "AUTO_CREATED_SENTINEL_BODY must say 'intentionally empty' so users "
+        "understand the stub is a placeholder, not an error"
+    )
+
+
+def test_wiki_lint_explains_auto_stub_intent() -> None:
+    """wiki-lint SKILL Process Step 2 must explain stubs are intentionally
+    empty until /paper-wiki:wiki-ingest is run."""
+    body = (REPO_ROOT / "skills" / "wiki-lint" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "intentionally empty" in body, (
+        "wiki-lint SKILL Step 2 must say stubs are 'intentionally empty' "
+        "to distinguish them from forgotten orphans"
+    )
+    assert "/paper-wiki:wiki-ingest" in body, (
+        "wiki-lint SKILL Step 2 must reference /paper-wiki:wiki-ingest "
+        "as the action to fill auto-created stubs"
+    )
+
+
+def test_setup_skill_biomedical_keywords_exclude_generic_terms() -> None:
+    """The Biomedical & Pathology topic must not include 'foundation model' in
+    its keyword list — it matches every ML paper and inflates relevance scores."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+
+    # Find the Biomedical & Pathology keywords block
+    bio_start = body.find("Biomedical & Pathology:")
+    assert bio_start != -1, "setup SKILL must define Biomedical & Pathology topic"
+
+    # Extract up to the next topic block
+    next_topic = body.find("\n\n", bio_start + len("Biomedical & Pathology:"))
+    bio_block = body[bio_start:next_topic] if next_topic != -1 else body[bio_start:]
+
+    # 'foundation model' must not be in the biomedical keyword list
+    assert "foundation model" not in bio_block, (
+        "Biomedical & Pathology keywords must not include 'foundation model' — "
+        "it is a cross-domain term that inflates relevance for unrelated papers"
+    )
+
+    # WSI should appear only once (collapsed duplicates)
+    wsi_count = bio_block.count("whole slide image") + bio_block.count("whole-slide image")
+    assert wsi_count <= 1, (
+        f"Biomedical & Pathology should have at most one WSI keyword variant, found {wsi_count}"
     )

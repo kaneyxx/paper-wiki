@@ -175,6 +175,58 @@ class TestUpsertSource:
         assert "https://arxiv.org/abs/2506.13063" in body
         assert "42" in body  # citation count
 
+    async def test_topic_strength_threshold_filters_matched_topics(self, tmp_path: Path) -> None:
+        """Topics below the threshold must not appear in related_concepts frontmatter."""
+        import json
+
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        rec = _make_recommendation(
+            matched_topics=["strong-topic", "weak-topic"],
+        )
+        # Inject per-topic strengths into notes
+        rec.score.notes = {
+            "topic_strengths": json.dumps({"strong-topic": 0.8, "weak-topic": 0.1}),
+        }
+
+        await backend.upsert_paper(rec, topic_strength_threshold=0.5)
+
+        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        related = fm["related_concepts"]
+        assert isinstance(related, list)
+        assert any("strong-topic" in s for s in related)
+        assert not any("weak-topic" in s for s in related)
+
+    async def test_zero_threshold_keeps_all_matched_topics(self, tmp_path: Path) -> None:
+        """Default threshold of 0.0 must keep all matched topics regardless of strength."""
+        import json
+
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        rec = _make_recommendation(matched_topics=["strong-topic", "weak-topic"])
+        rec.score.notes = {
+            "topic_strengths": json.dumps({"strong-topic": 0.8, "weak-topic": 0.05}),
+        }
+
+        await backend.upsert_paper(rec, topic_strength_threshold=0.0)
+
+        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        related = fm["related_concepts"]
+        assert any("strong-topic" in s for s in related)
+        assert any("weak-topic" in s for s in related)
+
+    async def test_missing_topic_strengths_falls_back_to_all_topics(self, tmp_path: Path) -> None:
+        """When notes has no topic_strengths key, all matched_topics are kept (backward compat)."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        rec = _make_recommendation(matched_topics=["topic-a", "topic-b"])
+        # No notes at all — old-style Recommendation without topic_strengths
+        rec.score.notes = {}
+
+        await backend.upsert_paper(rec, topic_strength_threshold=0.9)
+
+        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        related = fm["related_concepts"]
+        assert any("topic-a" in s for s in related)
+        assert any("topic-b" in s for s in related)
+
     async def test_upsert_is_idempotent(self, tmp_path: Path) -> None:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         rec = _make_recommendation()

@@ -28,6 +28,7 @@ reference implementation so users can layer their own tools on top.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -92,7 +93,12 @@ class MarkdownWikiBackend:
     # WikiBackend protocol methods
     # ------------------------------------------------------------------
 
-    async def upsert_paper(self, rec: Recommendation) -> Path:
+    async def upsert_paper(
+        self,
+        rec: Recommendation,
+        *,
+        topic_strength_threshold: float = 0.0,
+    ) -> Path:
         """Write or refresh a per-paper source file under ``sources/``.
 
         The frontmatter carries everything downstream tools need to surface
@@ -103,11 +109,39 @@ class MarkdownWikiBackend:
         ``last_synthesized`` triple. The body is section-organized so
         Obsidian's outline pane is useful and SKILLs can target individual
         sections during ingest / extract / analyze.
+
+        ``topic_strength_threshold`` gates which topics from
+        ``rec.matched_topics`` are written into ``related_concepts``
+        frontmatter.  Only topics whose per-topic strength (from
+        ``rec.score.notes["topic_strengths"]``) meets or exceeds this
+        value are written; topics below it are dropped.  When
+        ``topic_strengths`` is absent from ``notes`` (legacy data or the
+        composite scorer was not used), all matched topics are written
+        (no gating) to preserve backward compatibility.
         """
         paper = rec.paper
         score = rec.score
 
-        related = [f"[[{topic}]]" for topic in rec.matched_topics]
+        # Apply per-topic strength gating if threshold is set and data present.
+        topic_strengths: dict[str, float] = {}
+        if score.notes and "topic_strengths" in score.notes:
+            try:
+                raw = json.loads(score.notes["topic_strengths"])
+                if isinstance(raw, dict):
+                    topic_strengths = {k: float(v) for k, v in raw.items()}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+        if topic_strengths and topic_strength_threshold > 0.0:
+            filtered_topics = [
+                t
+                for t in rec.matched_topics
+                if topic_strengths.get(t, 0.0) >= topic_strength_threshold
+            ]
+        else:
+            filtered_topics = list(rec.matched_topics)
+
+        related = [f"[[{topic}]]" for topic in filtered_topics]
         frontmatter: dict[str, object] = {
             "canonical_id": paper.canonical_id,
             "title": paper.title,

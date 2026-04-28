@@ -231,3 +231,54 @@ class TestComposite:
 
         scorer = CompositeScorer(topics=[Topic(name="x", keywords=["x"])])
         assert isinstance(scorer, Scorer)
+
+
+# ---------------------------------------------------------------------------
+# Per-topic strengths (Task 9.9)
+# ---------------------------------------------------------------------------
+
+
+class TestPerTopicStrengths:
+    async def test_composite_scorer_emits_per_topic_strengths(self) -> None:
+        """score() must serialise per-topic strengths into ScoreBreakdown.notes."""
+        import json
+
+        scorer = CompositeScorer(
+            topics=[
+                Topic(name="vlm", keywords=["vision", "language"]),
+                Topic(name="pathology", keywords=["pathology", "WSI"]),
+            ],
+        )
+        paper = _make_paper(
+            title="Vision language model for pathology",
+            abstract="We study vision language models applied to pathology WSI slides.",
+        )
+        rec = await _score_one(scorer, paper, _make_ctx())
+
+        assert rec.score.notes is not None
+        assert "topic_strengths" in rec.score.notes
+
+        strengths = json.loads(rec.score.notes["topic_strengths"])
+        assert isinstance(strengths, dict)
+        assert "vlm" in strengths
+        assert "pathology" in strengths
+        # Both topics matched — strengths must be positive
+        assert strengths["vlm"] > 0.0
+        assert strengths["pathology"] > 0.0
+
+    async def test_unmatched_topic_has_zero_strength(self) -> None:
+        """Topics that produce no keyword or category hits must have strength 0.0."""
+        import json
+
+        scorer = CompositeScorer(
+            topics=[
+                Topic(name="matched", keywords=["vision"]),
+                Topic(name="unmatched", keywords=["combinatorics"]),
+            ],
+        )
+        paper = _make_paper(title="Vision model", abstract="Study of vision systems.")
+        rec = await _score_one(scorer, paper, _make_ctx())
+
+        strengths = json.loads(rec.score.notes["topic_strengths"])  # type: ignore[index]
+        assert strengths["matched"] > 0.0
+        assert strengths["unmatched"] == 0.0

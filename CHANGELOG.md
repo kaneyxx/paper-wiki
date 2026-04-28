@@ -9,6 +9,39 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-04-27
+
+### Added
+
+- **Concept-matching threshold** (Task 9.9). `CompositeScorer.score()` now
+  serialises per-topic strengths into `ScoreBreakdown.notes["topic_strengths"]`
+  as a JSON `dict[str, float]`. `MarkdownWikiBackend.upsert_paper()` accepts a
+  new `topic_strength_threshold` parameter (default `0.0`); topics whose
+  per-topic strength falls below the threshold are excluded from
+  `related_concepts` frontmatter. `ObsidianReporter` exposes
+  `wiki_topic_strength_threshold` (default `0.3`) and plumbs it through to
+  `upsert_paper`.
+- **Auto-stub UX** (Task 9.12). `AUTO_CREATED_SENTINEL_BODY` is now a
+  two-paragraph sentinel: the first paragraph marks the stub as intentionally
+  empty and names `/paper-wiki:wiki-ingest` as the next step; the second
+  paragraph points at `/paper-wiki:wiki-lint` for discovery. The wiki-lint
+  SKILL Process Step 2 and the wiki-ingest SKILL Auto-bootstrap section mirror
+  this wording so users see a consistent explanation across all surfaces.
+- **Setup SKILL keyword hygiene**: the Biomedical & Pathology topic drops
+  `foundation model` (cross-domain noise) and collapses duplicate WSI variants
+  (`whole-slide image` / `whole slide image`) to a single entry. A new Common
+  Rationalizations row warns against generic cross-domain keywords.
+- Unit tests for per-topic strength emission (`test_composite_scorer_emits_per_topic_strengths`,
+  `test_unmatched_topic_has_zero_strength`) and threshold filtering
+  (`test_topic_strength_threshold_filters_matched_topics`,
+  `test_zero_threshold_keeps_all_matched_topics`,
+  `test_missing_topic_strengths_falls_back_to_all_topics`).
+- Smoke tests `test_composite_scorer_emits_per_topic_strengths`,
+  `test_wiki_upsert_source_filters_by_topic_strength`,
+  `test_wiki_ingest_sentinel_body_explains_next_step`,
+  `test_wiki_lint_explains_auto_stub_intent`, and
+  `test_setup_skill_biomedical_keywords_exclude_generic_terms`.
+
 ## [0.3.16] - 2026-04-27
 
 ### Added

@@ -224,11 +224,13 @@ class ObsidianReporter:
         daily_subdir: str = DAILY_SUBDIR,
         filename_template: str = "{date}-paper-digest.md",
         wiki_backend: bool = False,
+        wiki_topic_strength_threshold: float = 0.3,
     ) -> None:
         self.vault_path = vault_path
         self.daily_subdir = daily_subdir
         self.filename_template = filename_template
         self.wiki_backend = wiki_backend
+        self.wiki_topic_strength_threshold = wiki_topic_strength_threshold
 
     async def emit(
         self,
@@ -260,7 +262,10 @@ class ObsidianReporter:
 
             backend = MarkdownWikiBackend(vault_path=self.vault_path)
             for rec in recs:
-                await backend.upsert_paper(rec)
+                await backend.upsert_paper(
+                    rec,
+                    topic_strength_threshold=self.wiki_topic_strength_threshold,
+                )
                 ctx.increment("reporter.obsidian.wiki_backend.written")
 
 
