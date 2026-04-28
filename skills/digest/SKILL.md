@@ -72,9 +72,34 @@ to `paperwiki:setup`.
       `python -m paperwiki.runners.extract_paper_images <vault>
       <canonical-id>` so figures are on disk before wiki-ingest runs.
       Continue on failure (a 404 or non-arXiv id is not a digest
-      failure); surface a one-liner skip reason for `paperclip:` /
-      `s2:` ids. Cache hits are normal — no warning when
-      `cached=true`.
+      failure). Cache hits are normal — no warning when `cached=true`.
+
+      After running extract-images for all top-N papers, **always emit
+      a per-paper summary block** to the terminal before proceeding to
+      Step 7b. Format:
+
+      ```
+      Image extraction:
+        #1 arxiv:XXXX.YYYYY — success (2 figures: 1 arxiv-source, 1 pdf-figure)
+        #2 arxiv:XXXX.YYYYY — success (0 figures, source has no images)
+        #3 arxiv:XXXX.YYYYY — failed (404 — arXiv source bundle missing)
+      ```
+
+      Classify each paper into one of four outcomes using the
+      `sources` dict from the runner's JSON output:
+      - **success-with-figures**: exit 0, `image_count > 0` — report
+        count + per-source breakdown from `sources` dict.
+      - **success-no-figures**: exit 0, `image_count == 0` — report
+        "0 figures, source has no images".
+      - **skipped-non-arxiv**: id does not start with `arxiv:` — report
+        "skipped (non-arXiv id, no source bundle)".
+      - **failed-with-error**: non-zero exit code — report "failed
+        (error)" with the first line of stderr or the structured log
+        key.
+
+      The summary lives in the SKILL terminal output only (not in the
+      digest file). Do NOT skip the block even when all extractions
+      succeed — the user wants a confidence signal that extraction ran.
    b. **Then wiki-ingest.** Invoke `/paper-wiki:wiki-ingest
       <canonical-id> --auto-bootstrap --fold-citations` for each. The
       `--auto-bootstrap` flag stubs missing concepts; `--fold-citations`
@@ -120,9 +145,36 @@ to `paperwiki:setup`.
      placements are visually distinct. Skip this section silently if the
      directory is empty or does not exist (e.g. `paperclip:` / `s2:`
      ids with no arXiv source bundle).
-   - 1 line **"Score reasoning"** plain-English explanation of the
-     composite score (e.g. "Scores high because relevance is 0.92 —
-     multiple exact topic matches, modest novelty 0.55").
+   - 1–2 sentences **"Score reasoning"** that INTERPRET why the paper
+     scores the way it does — not a list of sub-scores. The sub-scores
+     are already visible in the metadata callout above; your job is to
+     synthesize meaning. Requirements:
+     - **1–2 sentences maximum** (no bullet-style sub-score list).
+     - **Actively interpret WHY**: what combination of signals drives
+       the score? What does it mean for the user's reading priorities?
+     - **Acknowledge limits explicitly**: if rigor is low, say why
+       (e.g. "brand-new arXiv, no replications yet"). If momentum is
+       moderate, say why (e.g. "just published, citation count
+       settling").
+     - **Cite specific topic matches when relevance is high** (e.g.
+       "matches 3 of your 4 topics") rather than listing keywords.
+     - **GROUNDED in the sub-scores**: must reference at least one
+       concrete sub-score number as evidence for the interpretation,
+       not ignore the numbers entirely.
+     - **Forbidden pattern**: "0.79 — relevance 0.99, novelty 0.98,
+       momentum 0.50, rigor 0.50" is a transcription, not an
+       interpretation. Do not do this.
+
+     Good examples:
+     > Punches above its weight: novelty is genuinely high (parallel
+     > RL on LLM agents is unexplored ground), and rigor is held back
+     > only by being brand-new — expect citations to accrue within
+     > 6–12 months.
+
+     > Strong topic match but momentum and rigor lag because this is a
+     > re-implementation of older work; useful for replication studies,
+     > less so for cutting-edge tracking.
+
    Cite the paper with `#N` matching its digest index. Batch the
    prompts when feasible (one LLM call for all top-K papers) to amortize
    cost; fall back to per-paper if the batched output truncates. If a
@@ -166,12 +218,15 @@ to `paperwiki:setup`.
 | "I'll claim a trend even if only one paper supports it — sounds smarter." | One paper is not a trend. Cite specifically: "#3 explores X" rather than "the field is moving toward X". Every trend claim needs at least two papers. |
 | "I'll skip the `#N` citations — they look ugly." | Citations are how the user can verify and follow up. Without them the overview is ungrounded prose that erodes trust in the digest. |
 | "I'll ask the user before chaining wiki-ingest — being safe." | NO. `auto_ingest_top: N` in the recipe IS the user's pre-approval. Asking "want me to chain?" defeats the whole point of the field — they configured it precisely so they don't have to answer that prompt every morning. Just do it. (If they don't want auto-chain, they set `auto_ingest_top: 0`.) |
+| "I'll skip the image-extraction summary if all extractions succeeded — it's noise." | Wrong. The user wants a confidence signal that extraction ran. Even all-success is useful confirmation. Always emit the per-paper summary block with all four outcome classifications; never silently absorb any result. |
 | "I'll invent per-paper claims that aren't in the abstract — makes the report richer." | NO. Every claim in the Detailed report MUST come from the abstract or the score breakdown. Hallucinated methods and results erode the user's trust in the digest. One wrong claim per day = the user stops reading. |
 | "I'll skip image extraction because Obsidian renders without it." | The user wants figures. Figures appear in the NEXT digest run's inline teasers. Skipping extraction silently delays that by one day and the user can't tell why their digest looks bare. |
 | "I'll run wiki-ingest before extract-images to save a step." | Extract-images must run FIRST so figures are on disk when `_try_inline_teaser` is invoked. Swapping the order means day-2 teasers are missing. The order is intentional. |
 | "The card teaser already shows a figure — the Detailed report doesn't need one." | The card teaser is the FIRST figure outside the synthesized report. The inlined figures inside the Detailed report are different — they ground the prose with specific visual evidence as the user reads. Both placements are intentional. |
 | "I'll embed all 7 architecture diagrams to be thorough." | 1–2 figures max per Detailed report. Use the heuristic: sort alphabetically, pick the first 1 (for directories with 1–2 figures) or first 2 (for 3+ figures). Excessive figures clutter the digest and slow Obsidian render. |
 | "I synthesized Detailed reports for all 10 papers — more value for the user." | Wrong. `auto_ingest_top` controls treatment depth. Only top-N get the full Detailed report (Why this matters / Key takeaways / inline figures / Score reasoning). The rest get a teaser pointing at `/paper-wiki:analyze`. Respect the user's depth budget. |
+| "I'll just list the sub-scores — it's accurate." | Accurate but useless. The user can read the metadata callout. Synthesize an interpretation: WHY this score? WHAT does it mean? WHAT to expect next? One transcription per digest erodes trust faster than one hallucination. |
+| "If the score is moderate (e.g. 0.65), there's nothing interesting to say." | Wrong. Moderate scores are the most interesting — explain the trade-off (e.g. "Strong topic match but momentum lags because this is a re-implementation of older work; useful for replication studies, less so for cutting-edge tracking"). |
 
 ## Red Flags
 
@@ -192,6 +247,10 @@ to `paperwiki:setup`.
   is 3** → STOP. `auto_ingest_top` is the depth-of-treatment envelope.
   Only top-3 get the full Detailed report; the rest get the analyze-link
   teaser. Fix by replacing the extra reports with the teaser line.
+- **Score reasoning starts with the composite number and just restates
+  the four sub-scores in parentheses** → STOP. The user has the metadata
+  callout. Synthesize an interpretation: explain WHY the score is what it
+  is, what it means, and what to expect. Do not transcribe the metadata.
 
 ## Verification
 
@@ -202,7 +261,16 @@ to `paperwiki:setup`.
 - Every reporter's expected output file is on disk; confirm via
   `ls -la <output-dir>`.
 - Top-3 summary cites real titles and scores, not invented content.
+- After Step 7a extract-images auto-chain, a per-paper summary block
+  was emitted to the user terminal with one line per paper. No failure
+  (404, non-arXiv id, zero-figure result) was silently absorbed. Each
+  line uses one of the four classifications: success-with-figures /
+  success-no-figures / skipped-non-arxiv / failed-with-error.
 - Each paper with extracted images has at least one
   `![[Wiki/sources/<id>/images/...|600]]` line in the Detailed report block.
 - After Step 8, exactly `min(auto_ingest_top, top_k)` per-paper slots have
   synthesized Detailed reports; the remaining slots have the teaser line.
+- Each Score reasoning sentence interprets WHY (not just WHAT); does not
+  consist solely of the four sub-score numbers restated in parentheses;
+  references at least one specific signal beyond raw numbers (e.g. topic
+  match count, recency context, dataset release, citation trajectory).

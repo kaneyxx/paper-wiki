@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.22"
+    assert data["version"] == "0.3.23"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -897,6 +897,148 @@ def test_digest_skill_chains_extract_images() -> None:
     assert extract_pos < ingest_pos, (
         "In digest SKILL.md, extract-images must appear BEFORE wiki-ingest "
         "in the auto-chain step — figures must be on disk before ingest runs"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.21 — Personal recipe migration (v0.3.23)
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_recipe_skill_anatomy() -> None:
+    """skills/migrate-recipe/SKILL.md must exist and follow six-section anatomy."""
+    skill = REPO_ROOT / "skills" / "migrate-recipe" / "SKILL.md"
+    assert skill.is_file(), "skills/migrate-recipe/SKILL.md must exist"
+    body = skill.read_text(encoding="utf-8")
+
+    for section in (
+        "## Overview",
+        "## When to Use",
+        "## Process",
+        "## Common Rationalizations",
+        "## Red Flags",
+        "## Verification",
+    ):
+        assert section in body, f"migrate-recipe SKILL.md must contain section {section!r}"
+
+    # Must mention AskUserQuestion and dry-run
+    flat = " ".join(body.split())
+    assert "AskUserQuestion" in flat, (
+        "migrate-recipe SKILL must use AskUserQuestion for confirmation"
+    )
+    assert "--dry-run" in flat, "migrate-recipe SKILL must show --dry-run flag"
+    assert "backup" in flat.lower(), "migrate-recipe SKILL must mention backup file"
+
+
+def test_migrate_recipe_slash_command_exists() -> None:
+    """.claude/commands/migrate-recipe.md must exist."""
+    cmd = REPO_ROOT / ".claude" / "commands" / "migrate-recipe.md"
+    assert cmd.is_file(), ".claude/commands/migrate-recipe.md must exist"
+
+
+def test_setup_skill_offers_migration_when_recipe_is_stale() -> None:
+    """setup SKILL Branch 1 ('Keep current config') must offer a migration option
+    when stale keywords are detected (e.g. 'foundation model' in biomedical-pathology)."""
+    body = (REPO_ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    assert "migration heuristic" in flat or "migrate" in flat.lower(), (
+        "setup SKILL Branch 1 must mention migration when recipe is stale"
+    )
+    assert "foundation model" in flat, (
+        "setup SKILL Branch 1 migration check must specifically mention 'foundation model' "
+        "as the stale-marker keyword"
+    )
+    assert "biomedical-pathology" in flat, (
+        "setup SKILL Branch 1 migration check must reference 'biomedical-pathology' topic"
+    )
+    assert "/paper-wiki:migrate-recipe" in flat, (
+        "setup SKILL Branch 1 must hand off to /paper-wiki:migrate-recipe when migration chosen"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.23 — Interpretive Score reasoning (v0.3.23)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_score_reasoning_is_interpretive_not_transcriptive() -> None:
+    """digest SKILL.md Process Step 8 'Score reasoning' contract must require
+    1-2 interpretive sentences (not sub-score transcription), be GROUNDED in
+    sub-scores, and explicitly forbid the number-restating pattern."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    # 1-2 sentences requirement
+    # The SKILL uses an en-dash in "1-2 sentences maximum"; check for
+    # the "sentences maximum" phrase which is robust to the dash variant.
+    assert "sentences maximum" in flat, (
+        "digest SKILL.md Score reasoning must specify a '...sentences maximum' sentence-count limit"
+    )
+    # Interpretive requirement
+    assert "interpret" in flat.lower(), (
+        "digest SKILL.md Score reasoning must say 'interpret' — not just transcribe"
+    )
+    # GROUNDED requirement
+    assert "GROUNDED" in body or "grounded" in body.lower(), (
+        "digest SKILL.md Score reasoning must require interpretation to be "
+        "GROUNDED in the actual sub-score numbers"
+    )
+    # Forbidden transcription pattern explicitly called out
+    assert "Forbidden pattern" in body or "transcription" in flat.lower(), (
+        "digest SKILL.md must explicitly call out the forbidden sub-score "
+        "transcription pattern (e.g. '0.79 — relevance 0.99, novelty 0.98...')"
+    )
+    # Red Flag row for score reasoning
+    red_flags_start = body.find("## Red Flags")
+    assert red_flags_start != -1, "digest SKILL.md must have Red Flags section"
+    red_flags_body = body[red_flags_start:]
+    assert "Score reasoning" in red_flags_body or "sub-scores" in red_flags_body, (
+        "digest SKILL.md Red Flags must warn against Score reasoning that only "
+        "restates the four sub-scores"
+    )
+    assert "STOP" in red_flags_body, (
+        "digest SKILL.md Red Flags must use STOP as an explicit halt signal for "
+        "Score reasoning transcription"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.20 — extract-images failure UX (v0.3.23)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_skill_emits_extract_images_summary() -> None:
+    """digest SKILL.md Process Step 7a must document the per-paper summary block
+    with all four outcome classifications and the four-line format."""
+    body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(body.split())
+
+    # Four outcome classifications must all be present
+    assert "success-with-figures" in flat, (
+        "digest SKILL.md must document success-with-figures classification"
+    )
+    assert "success-no-figures" in flat, (
+        "digest SKILL.md must document success-no-figures classification"
+    )
+    assert "skipped-non-arxiv" in flat, (
+        "digest SKILL.md must document skipped-non-arxiv classification"
+    )
+    assert "failed-with-error" in flat, (
+        "digest SKILL.md must document failed-with-error classification"
+    )
+    # The per-paper format: "Image extraction:" header
+    assert "Image extraction:" in body, (
+        "digest SKILL.md must show the 'Image extraction:' summary block header"
+    )
+    # The rationalization forbidding silent skip of summary
+    assert "confidence signal" in flat, (
+        "digest SKILL.md Common Rationalizations must mention 'confidence signal' "
+        "to forbid skipping the summary when all extractions succeed"
+    )
+    # Verification section must reference the summary block
+    assert "per-paper summary block" in flat, (
+        "digest SKILL.md Verification must mention 'per-paper summary block'"
     )
 
 
