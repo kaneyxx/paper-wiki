@@ -305,3 +305,131 @@ class TestObsidianReporter:
             "arxiv_3333.3333.md",
         ]
         assert ctx.counters["reporter.obsidian.wiki_backend.written"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Task 9.28 — matched_topics filtering in the digest callout (v0.3.26)
+# ---------------------------------------------------------------------------
+
+
+def _make_recommendation_with_strengths(
+    *,
+    matched_topics: list[str],
+    topic_strengths: dict[str, float],
+    canonical_id: str = "arxiv:2506.13063",
+    title: str = "Test Paper",
+) -> Recommendation:
+    """Recommendation whose ScoreBreakdown.notes carries per-topic strengths,
+    matching what CompositeScorer emits in production."""
+    import json
+
+    rec = _make_recommendation(
+        canonical_id=canonical_id, title=title, matched_topics=matched_topics
+    )
+    rec.score.notes = {"topic_strengths": json.dumps(topic_strengths)}
+    return rec
+
+
+class TestCalloutTopicFiltering:
+    """Per Task 9.28 / D-9.28.1: the obsidian reporter must apply the same
+    topic_strength_threshold to the digest callout that the wiki backend
+    applies to related_concepts frontmatter — so users don't see
+    [[biomedical-pathology]] in the callout while the wiki-backend filter
+    correctly keeps that source out of the concept's sources list."""
+
+    def test_topic_below_threshold_dropped_from_callout(self) -> None:
+        rec = _make_recommendation_with_strengths(
+            matched_topics=["strong", "weak"],
+            topic_strengths={"strong": 0.8, "weak": 0.1},
+        )
+        body = render_obsidian_digest([rec], _make_ctx(), topic_strength_threshold=0.5)
+        assert "[[strong]]" in body
+        assert "[[weak]]" not in body
+
+    def test_default_threshold_keeps_strong_single_keyword_match(self) -> None:
+        """D-9.28.1: default threshold = 0.3 keeps single-keyword strength=0.5
+        matches (parity with wiki backend default)."""
+        rec = _make_recommendation_with_strengths(
+            matched_topics=["topic-a"],
+            topic_strengths={"topic-a": 0.5},
+        )
+        body = render_obsidian_digest([rec], _make_ctx())
+        assert "[[topic-a]]" in body
+
+    def test_conservative_threshold_drops_single_keyword_leakage(self) -> None:
+        """2026-04-28 smoke reproducer: Omni-o3 audio paper trips ONE generic
+        biomedical-pathology keyword at strength 0.5; threshold=0.6 drops it,
+        validating the conservative knob users opt into."""
+        rec = _make_recommendation_with_strengths(
+            canonical_id="arxiv:2510.99999",
+            title="Omni-o3: Audio-Visual Reasoning",
+            matched_topics=[
+                "vision-multimodal",
+                "biomedical-pathology",
+                "agents-reasoning",
+            ],
+            topic_strengths={
+                "vision-multimodal": 0.875,  # 3 hits
+                "biomedical-pathology": 0.5,  # 1 generic-keyword hit (the leak)
+                "agents-reasoning": 0.75,  # 2 hits
+            },
+        )
+        body = render_obsidian_digest([rec], _make_ctx(), topic_strength_threshold=0.6)
+        assert "[[vision-multimodal]]" in body
+        assert "[[agents-reasoning]]" in body
+        assert "[[biomedical-pathology]]" not in body, (
+            "single-keyword leak must be filtered when threshold=0.6"
+        )
+
+    def test_legacy_no_topic_strengths_keeps_all(self) -> None:
+        """Backward compat: a Recommendation with no notes still renders all
+        matched_topics (hand-built fixtures + non-composite scorers preserved)."""
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            topic_strength_threshold=0.9,
+        )
+        assert "[[vlm]]" in body
+        assert "[[foundation-model]]" in body
+
+    def test_zero_threshold_disables_filter(self) -> None:
+        rec = _make_recommendation_with_strengths(
+            matched_topics=["a", "b"],
+            topic_strengths={"a": 0.05, "b": 0.5},
+        )
+        body = render_obsidian_digest([rec], _make_ctx(), topic_strength_threshold=0.0)
+        assert "[[a]]" in body
+        assert "[[b]]" in body
+
+
+class TestObsidianReporterTopicStrengthThreshold:
+    """ObsidianReporter.__init__ must accept topic_strength_threshold and
+    plumb it through emit() -> render_obsidian_digest()."""
+
+    def test_init_accepts_topic_strength_threshold(self) -> None:
+        reporter = ObsidianReporter(
+            vault_path=Path("/nonexistent/never-written"),
+            topic_strength_threshold=0.6,
+        )
+        assert reporter.topic_strength_threshold == 0.6
+
+    def test_init_default_is_zero_three(self) -> None:
+        """D-9.28.1: default = 0.3 (parity with wiki backend)."""
+        reporter = ObsidianReporter(vault_path=Path("/nonexistent/never-written"))
+        assert reporter.topic_strength_threshold == 0.3
+
+    async def test_emit_propagates_threshold_to_callout(self, tmp_path: Path) -> None:
+        """End-to-end: configure threshold via __init__, observe filter on disk."""
+        reporter = ObsidianReporter(
+            vault_path=tmp_path,
+            topic_strength_threshold=0.6,
+        )
+        rec = _make_recommendation_with_strengths(
+            matched_topics=["strong", "weak"],
+            topic_strengths={"strong": 0.8, "weak": 0.4},
+        )
+        await reporter.emit([rec], _make_ctx())
+
+        body = (tmp_path / "Daily" / "2026-04-25-paper-digest.md").read_text(encoding="utf-8")
+        assert "[[strong]]" in body
+        assert "[[weak]]" not in body

@@ -247,6 +247,113 @@ class TestUpsertSource:
 
 
 # ---------------------------------------------------------------------------
+# filter_topics_by_strength helper (Task 9.28 / D-9.28.1, D-9.28.2)
+# ---------------------------------------------------------------------------
+
+
+class TestFilterTopicsByStrength:
+    """Module-level helper extracted from upsert_paper for v0.3.26.
+
+    Reporter needs to import the same gating logic, so it must be a
+    module-level function rather than living inside upsert_paper.
+    """
+
+    def test_helper_is_importable_at_module_level(self) -> None:
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        assert callable(filter_topics_by_strength)
+
+    def test_below_threshold_dropped(self) -> None:
+        import json
+
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        score = ScoreBreakdown(
+            relevance=0.5,
+            novelty=0.5,
+            momentum=0.5,
+            rigor=0.5,
+            composite=0.5,
+            notes={"topic_strengths": json.dumps({"strong": 0.8, "weak": 0.1})},
+        )
+        out = filter_topics_by_strength(["strong", "weak"], score, threshold=0.5)
+        assert out == ["strong"]
+
+    def test_above_threshold_kept(self) -> None:
+        import json
+
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        score = ScoreBreakdown(
+            relevance=0.5,
+            novelty=0.5,
+            momentum=0.5,
+            rigor=0.5,
+            composite=0.5,
+            notes={"topic_strengths": json.dumps({"a": 0.7, "b": 0.6})},
+        )
+        out = filter_topics_by_strength(["a", "b"], score, threshold=0.5)
+        assert out == ["a", "b"]
+
+    def test_zero_threshold_returns_all(self) -> None:
+        import json
+
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        score = ScoreBreakdown(
+            relevance=0.0,
+            novelty=0.0,
+            momentum=0.0,
+            rigor=0.0,
+            composite=0.0,
+            notes={"topic_strengths": json.dumps({"a": 0.05, "b": 0.5})},
+        )
+        out = filter_topics_by_strength(["a", "b"], score, threshold=0.0)
+        assert out == ["a", "b"]
+
+    def test_missing_topic_strengths_returns_all(self) -> None:
+        """Backward compat: legacy Recommendation without notes preserved."""
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        score = ScoreBreakdown(relevance=0.5, novelty=0.5, momentum=0.5, rigor=0.5, composite=0.5)
+        out = filter_topics_by_strength(["a", "b"], score, threshold=0.9)
+        assert out == ["a", "b"]
+
+    def test_malformed_topic_strengths_returns_all(self) -> None:
+        """Defensive: corrupt notes payload doesn't silently drop wikilinks."""
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        score = ScoreBreakdown(
+            relevance=0.5,
+            novelty=0.5,
+            momentum=0.5,
+            rigor=0.5,
+            composite=0.5,
+            notes={"topic_strengths": "not valid json"},
+        )
+        out = filter_topics_by_strength(["a", "b"], score, threshold=0.9)
+        assert out == ["a", "b"]
+
+    def test_topics_missing_from_strengths_dict_treated_as_zero(self) -> None:
+        """A topic present in matched_topics but absent from the strengths
+        dict is treated as strength 0.0 — so any positive threshold drops it."""
+        import json
+
+        from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
+        score = ScoreBreakdown(
+            relevance=0.5,
+            novelty=0.5,
+            momentum=0.5,
+            rigor=0.5,
+            composite=0.5,
+            notes={"topic_strengths": json.dumps({"known": 0.8})},
+        )
+        out = filter_topics_by_strength(["known", "unknown"], score, threshold=0.5)
+        assert out == ["known"]
+
+
+# ---------------------------------------------------------------------------
 # upsert_concept / concept files
 # ---------------------------------------------------------------------------
 

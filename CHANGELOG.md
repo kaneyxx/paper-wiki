@@ -9,6 +9,63 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.26] - 2026-04-28
+
+### Fixed
+
+- **Digest callout no longer fabricates topic relevance** (Task 9.28).
+  v0.3.17 added `topic_strength_threshold` filtering to
+  `MarkdownWikiBackend.upsert_paper` so weak single-keyword matches
+  would NOT pollute the wiki concept's `sources:` frontmatter — but the
+  obsidian reporter's per-paper `> [!info] Metadata` callout
+  (`Matched topics:` line) read `rec.matched_topics` directly without
+  applying the same gate. Result on the 2026-04-28 fresh-vault smoke:
+  three audio / RGB-T / hallucination papers showed
+  `[[biomedical-pathology]]` in their callout despite the wiki backend
+  correctly excluding them — the callout claimed a relevance the rest
+  of the system disagreed with.
+
+  Extracted the v0.3.17 inline filter into a module-level helper
+  `paperwiki.plugins.backends.markdown_wiki.filter_topics_by_strength`
+  that both the backend (`upsert_paper`) and reporter
+  (`render_obsidian_digest` / `_render_recommendation`) now call. The
+  callout's `Matched topics` line is gated by the new
+  `ObsidianReporter.topic_strength_threshold` field (recipe-level),
+  default `0.3` so the gate matches `wiki_topic_strength_threshold`
+  out of the box (D-9.28.1, D-9.28.2). Backward-compatible: legacy
+  Recommendations whose `score.notes` lacks `topic_strengths`
+  (hand-built fixtures, non-composite scorers) keep all matched
+  topics.
+
+### Added
+
+- **`topic_strength_threshold` recipe field on `obsidian` reporter**.
+  Conservative readers who want zero single-keyword leakage can set
+  `topic_strength_threshold: 0.6` in `~/.config/paper-wiki/recipes/<name>.yaml`
+  (under the obsidian reporter block). The default `0.3` keeps the
+  callout consistent with the wiki backend's frontmatter gate.
+
+### Documentation
+
+- Users on stale recipes (installed ≤ v0.3.16) still see the
+  2026-04-28 leak even after this fix because the underlying recipe
+  contains keywords like `foundation model` that trip generic-keyword
+  matches at strength 0.5 (above the default 0.3 threshold). **Two-pronged
+  fix**: (a) v0.3.26 catches future leaks at the display layer, (b)
+  running `/paper-wiki:migrate-recipe` (shipped in v0.3.23) drops the
+  stale keywords surgically. Both prongs recommended for users
+  upgrading from v0.3.16 or earlier.
+
+### Tests
+
+- 7 new unit tests for `filter_topics_by_strength` (helper extraction,
+  threshold gating, backward compat, malformed-payload defense).
+- 5 new unit tests for `render_obsidian_digest` callout filtering
+  (incl. the 2026-04-28 leak reproducer using strength-0.5 single-keyword
+  match against threshold 0.6).
+- 3 new unit tests for `ObsidianReporter.__init__` accepting and
+  propagating the new field.
+
 ## [0.3.25] - 2026-04-28
 
 ### Fixed

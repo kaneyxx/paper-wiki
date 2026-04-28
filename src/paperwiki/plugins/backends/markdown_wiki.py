@@ -41,7 +41,7 @@ import yaml
 from paperwiki.config.layout import WIKI_SUBDIR
 
 if TYPE_CHECKING:
-    from paperwiki.core.models import Recommendation
+    from paperwiki.core.models import Recommendation, ScoreBreakdown
 
 
 _SOURCES_DIRNAME = "sources"
@@ -49,6 +49,68 @@ _CONCEPTS_DIRNAME = "concepts"
 _FRONTMATTER_END_RE = re.compile(r"\n---\n", re.MULTILINE)
 _FILENAME_UNSAFE_RE = re.compile(r'[\\/:#?*|<>"\[\]^]+')
 _RUN_OF_UNDERSCORE_OR_WHITESPACE = re.compile(r"[\s_]+")
+
+
+def filter_topics_by_strength(
+    matched_topics: list[str],
+    score: ScoreBreakdown,
+    threshold: float,
+) -> list[str]:
+    """Filter ``matched_topics`` by per-topic strength gating.
+
+    Both ``MarkdownWikiBackend.upsert_paper`` (frontmatter
+    ``related_concepts``) and ``ObsidianReporter`` (digest callout
+    ``Matched topics`` line) need to apply the same threshold so the
+    two surfaces stay consistent. v0.3.17 added the gate at the
+    backend; v0.3.26 (Task 9.28) extracts it here so the reporter can
+    call the same code path.
+
+    Per-topic strengths are stored as a JSON string under
+    ``score.notes["topic_strengths"]`` (the composite scorer encodes
+    them this way to keep ``ScoreBreakdown.notes`` typed as
+    ``dict[str, str]``).
+
+    Behavior:
+
+    * ``threshold <= 0.0`` -> return ``list(matched_topics)`` unchanged
+      (gate disabled).
+    * ``score.notes`` missing or has no ``topic_strengths`` key ->
+      return ``list(matched_topics)`` unchanged (legacy data, e.g.
+      hand-built Recommendations or non-composite scorers — must not
+      silently drop wikilinks).
+    * ``topic_strengths`` payload malformed (bad JSON, non-dict) ->
+      same fallback as above; defensively preserve all topics.
+    * Otherwise drop any topic whose recorded strength is below
+      ``threshold``. Topics absent from the strengths dict are
+      treated as strength 0.0 (so any positive threshold drops
+      them).
+    """
+    if threshold <= 0.0:
+        return list(matched_topics)
+
+    notes = score.notes or {}
+    raw = notes.get("topic_strengths")
+    if not raw:
+        return list(matched_topics)
+
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return list(matched_topics)
+    if not isinstance(decoded, dict):
+        return list(matched_topics)
+
+    topic_strengths: dict[str, float] = {}
+    for key, value in decoded.items():
+        try:
+            topic_strengths[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+
+    if not topic_strengths:
+        return list(matched_topics)
+
+    return [t for t in matched_topics if topic_strengths.get(t, 0.0) >= threshold]
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,25 +184,11 @@ class MarkdownWikiBackend:
         paper = rec.paper
         score = rec.score
 
-        # Apply per-topic strength gating if threshold is set and data present.
-        topic_strengths: dict[str, float] = {}
-        if score.notes and "topic_strengths" in score.notes:
-            try:
-                raw = json.loads(score.notes["topic_strengths"])
-                if isinstance(raw, dict):
-                    topic_strengths = {k: float(v) for k, v in raw.items()}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-        if topic_strengths and topic_strength_threshold > 0.0:
-            filtered_topics = [
-                t
-                for t in rec.matched_topics
-                if topic_strengths.get(t, 0.0) >= topic_strength_threshold
-            ]
-        else:
-            filtered_topics = list(rec.matched_topics)
-
+        filtered_topics = filter_topics_by_strength(
+            rec.matched_topics,
+            score,
+            threshold=topic_strength_threshold,
+        )
         related = [f"[[{topic}]]" for topic in filtered_topics]
         frontmatter: dict[str, object] = {
             "canonical_id": paper.canonical_id,
@@ -482,4 +530,5 @@ __all__ = [
     "ConceptSummary",
     "MarkdownWikiBackend",
     "SourceSummary",
+    "filter_topics_by_strength",
 ]

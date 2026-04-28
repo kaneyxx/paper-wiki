@@ -59,6 +59,7 @@ def render_obsidian_digest(
     ctx: RunContext,
     *,
     vault_path: Path | None = None,
+    topic_strength_threshold: float = 0.3,
 ) -> str:
     """Render an Obsidian-flavored Markdown digest string.
 
@@ -67,6 +68,16 @@ def render_obsidian_digest(
     teaser. When ``None`` (e.g., the markdown reporter or a unit test
     that doesn't write a vault), the figure-embed slot is silently
     skipped.
+
+    ``topic_strength_threshold`` (Task 9.28 / D-9.28.1) gates the
+    ``Matched topics`` callout entries. Topics whose per-topic strength
+    (encoded in ``score.notes['topic_strengths']``) falls below this
+    threshold are dropped from the rendered wikilinks. Defaults to
+    ``0.3`` to match :class:`MarkdownWikiBackend`'s default for
+    ``related_concepts`` frontmatter — same gate, two surfaces.
+    Backward-compatible: when ``topic_strengths`` is missing (legacy
+    data, hand-built fixtures, non-composite scorers), all matched
+    topics are retained.
     """
     target_date = ctx.target_date.strftime("%Y-%m-%d")
 
@@ -83,7 +94,14 @@ def render_obsidian_digest(
     parts.append("---\n")
 
     for index, rec in enumerate(recommendations, start=1):
-        parts.append(_render_recommendation(index, rec, vault_path=vault_path))
+        parts.append(
+            _render_recommendation(
+                index,
+                rec,
+                vault_path=vault_path,
+                topic_strength_threshold=topic_strength_threshold,
+            )
+        )
         parts.append("---\n")
 
     return "\n".join(parts)
@@ -113,6 +131,7 @@ def _render_recommendation(
     rec: Recommendation,
     *,
     vault_path: Path | None = None,
+    topic_strength_threshold: float = 0.3,
 ) -> str:
     """Render one recommendation as a section-organized Obsidian block.
 
@@ -122,7 +141,10 @@ def _render_recommendation(
        rich source stub under ``Wiki/sources/`` instead of a free-form
        title-derived target (which Obsidian would treat as a brand new
        note).
-    2. ``> [!info]`` callout for compact metadata.
+    2. ``> [!info]`` callout for compact metadata. The
+       ``Matched topics`` line is filtered by ``topic_strength_threshold``
+       (Task 9.28) so single-keyword leakage from the relevance scorer
+       doesn't surface as misleading ``[[concept]]`` wikilinks.
     3. Inline teaser figure when ``Wiki/sources/<id>/images/`` already
        has files (extract-images was run for this paper).
     4. ``### Abstract`` — abstract under a proper heading so Obsidian's
@@ -131,6 +153,11 @@ def _render_recommendation(
        ``<!-- paper-wiki:per-paper-slot:{canonical_id} -->`` that SKILL
        synthesis passes (v0.3.7+) will replace with synthesized content.
     """
+    # Local import keeps the reporter and backend modules from
+    # forming an import cycle at module load time (the reporter only
+    # needs the helper at render time).
+    from paperwiki.plugins.backends.markdown_wiki import filter_topics_by_strength
+
     paper = rec.paper
     score = rec.score
 
@@ -147,7 +174,12 @@ def _render_recommendation(
     if pdf_link:
         links_pieces.append(pdf_link)
     links_line = " · ".join(links_pieces)
-    topic_links = ", ".join(f"[[{t}]]" for t in rec.matched_topics) if rec.matched_topics else "—"
+    filtered_topics = filter_topics_by_strength(
+        rec.matched_topics,
+        score,
+        threshold=topic_strength_threshold,
+    )
+    topic_links = ", ".join(f"[[{t}]]" for t in filtered_topics) if filtered_topics else "—"
     score_line = (
         f"{score.composite:.2f} (relevance {score.relevance:.2f} · "
         f"novelty {score.novelty:.2f} · momentum {score.momentum:.2f} · "
@@ -226,12 +258,20 @@ class ObsidianReporter:
         filename_template: str = "{date}-paper-digest.md",
         wiki_backend: bool = False,
         wiki_topic_strength_threshold: float = 0.3,
+        topic_strength_threshold: float = 0.3,
     ) -> None:
+        # ``topic_strength_threshold`` (Task 9.28 / D-9.28.1) gates the
+        # digest callout's ``Matched topics`` wikilinks. Default 0.3
+        # matches ``wiki_topic_strength_threshold`` so the two surfaces
+        # agree out of the box; conservative readers can raise to 0.6
+        # to suppress single-keyword leakage entirely. The two fields
+        # stay separate (D-9.28.2): one gate per consumer.
         self.vault_path = vault_path
         self.daily_subdir = daily_subdir
         self.filename_template = filename_template
         self.wiki_backend = wiki_backend
         self.wiki_topic_strength_threshold = wiki_topic_strength_threshold
+        self.topic_strength_threshold = topic_strength_threshold
 
     async def emit(
         self,
@@ -250,7 +290,12 @@ class ObsidianReporter:
 
         target_dir = self.vault_path / self.daily_subdir
         target_dir.mkdir(parents=True, exist_ok=True)
-        rendered = render_obsidian_digest(recs, ctx, vault_path=self.vault_path)
+        rendered = render_obsidian_digest(
+            recs,
+            ctx,
+            vault_path=self.vault_path,
+            topic_strength_threshold=self.topic_strength_threshold,
+        )
         path = target_dir / filename
         async with aiofiles.open(path, "w", encoding="utf-8") as fh:
             await fh.write(rendered)
