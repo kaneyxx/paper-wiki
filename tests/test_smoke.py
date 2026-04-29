@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.38"
+    assert data["version"] == "0.3.39"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -109,7 +109,7 @@ def test_ensure_env_script_is_executable() -> None:
 def test_bash_helpers_present_with_v0_3_38_tag() -> None:
     """v0.3.38 D-9.38.1: ``lib/bash-helpers.sh`` ships in the repo.
 
-    Pins the helper file's existence, the v0.3.38 tag line (so a release
+    Pins the helper file's existence, the v0.3.39 tag line (so a release
     that bumps version files but forgets the helper tag fails here),
     and the three documented public function names. Behavioral tests
     live in ``tests/unit/test_bash_helpers.py``.
@@ -118,8 +118,8 @@ def test_bash_helpers_present_with_v0_3_38_tag() -> None:
     assert helper.is_file(), f"missing helper at {helper}"
 
     body = helper.read_text(encoding="utf-8")
-    assert "# paperwiki bash-helpers — v0.3.38" in body, (
-        "helper must carry the v0.3.38 version tag line"
+    assert "# paperwiki bash-helpers — v0.3.39" in body, (
+        "helper must carry the v0.3.39 version tag line"
     )
 
     for fn_name in (
@@ -1526,10 +1526,10 @@ def test_ensure_env_contains_shim_tag() -> None:
     script = REPO_ROOT / "hooks" / "ensure-env.sh"
     body = script.read_text(encoding="utf-8")
     expected_tag = (
-        "# paperwiki shim — v0.3.38 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+        "# paperwiki shim — v0.3.39 (shared venv + self-bootstrap + PYTHONPATH fallback)."
     )
     assert expected_tag in body, (
-        "hooks/ensure-env.sh must contain the v0.3.38 shim tag line so "
+        "hooks/ensure-env.sh must contain the v0.3.39 shim tag line so "
         "old shims get overwritten on first SessionStart after upgrade"
     )
 
@@ -1693,8 +1693,8 @@ def test_ensure_env_shim_integration(tmp_path: Path) -> None:
 
     body = shim.read_text(encoding="utf-8")
     assert (
-        "paperwiki shim — v0.3.38 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
-    ), "shim must contain the v0.3.38 expected tag line"
+        "paperwiki shim — v0.3.39 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
+    ), "shim must contain the v0.3.39 expected tag line"
 
 
 def test_ensure_env_shim_is_idempotent(tmp_path: Path) -> None:

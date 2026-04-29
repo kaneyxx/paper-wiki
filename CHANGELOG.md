@@ -9,6 +9,144 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.39] - 2026-04-29
+
+### Fixed
+
+- **`paperwiki update` self-heals when the plugin cache is empty.**
+  Until v0.3.38 the runner refused with `paperwiki: no installed
+  plugin found at ...` when
+  `~/.claude/plugins/cache/paper-wiki/paper-wiki/` had no version
+  subdirs — the dev-workflow scenario where Claude Code's
+  `installed_plugins.json` half-recorded a version while the cache
+  dir was missing. Recovery required four manual bash lines plus a
+  Claude Code restart. v0.3.39 collapses that into a single
+  `paperwiki update` invocation: when the cache is empty, the
+  runner copies the marketplace clone into
+  `cache/paper-wiki/paper-wiki/<version>/` automatically before
+  the existing diff-and-sync logic runs (D-9.39.1). Strict
+  version-only regex `^\d+\.\d+\.\d+$` gates the self-heal —
+  caches with `.bak.*`-only contents also self-heal; caches with
+  any version dir don't.
+
+- **`paperwiki uninstall --everything` now removes
+  `~/.local/lib/paperwiki/`** (D-9.39.2). v0.3.38 introduced this
+  helper-install location but didn't update the uninstall runner's
+  removal-target list — users running a "full reset" between
+  v0.3.38 and v0.3.39 had to `rm -rf ~/.local/lib/paperwiki/`
+  manually. The v0.3.38 CHANGELOG flagged this gap explicitly;
+  v0.3.39 closes the loop. **The v0.3.38 obsolete-warning
+  ("manually `rm -rf ~/.local/lib/paperwiki/` after `--everything`")
+  is no longer needed** — `--everything` covers it now.
+
+### Added
+
+- **`paperwiki_diag` helper function** added to
+  `lib/bash-helpers.sh` (D-9.39.3). Read-only install-state dump
+  callable from any sourced shell:
+
+  ```bash
+  $ source ~/.local/lib/paperwiki/bash-helpers.sh
+  $ paperwiki_diag
+  === paperwiki_diag — install state ===
+  --- helper ---
+  # paperwiki bash-helpers — v0.3.39 (...)
+  --- environment ---
+  PATH=/Users/.../local/bin:/usr/bin:/bin
+  CLAUDE_PLUGIN_ROOT=...
+  --- shim (~/.local/bin/paperwiki) ---
+  ...
+  --- plugin cache versions (...) ---
+  0.3.39
+  --- recipes (...) ---
+  daily.yaml
+  weekly.yaml
+  === end paperwiki_diag ===
+  ```
+
+  Output is **safe to share** when asking for help — the function
+  prints PATH, CLAUDE_PLUGIN_ROOT, helper version, shim status,
+  and `ls -1` of the cache + recipes dirs. It does NOT print
+  `secrets.env` content, recipe file content, or any tool-call
+  output. Function is read-only (no env mutation, no filesystem
+  writes), verified by 4 dedicated unit tests.
+
+  **API contract change**: D-9.39.3 supersedes D-9.38.2's "exactly
+  three functions" constraint. The helper now exposes four public
+  functions; future additions land via a versioned D record and
+  bump the helper version tag.
+
+### Decisions ratified
+
+- **D-9.39.1** `paperwiki update` self-heal — gated on strict
+  version-regex; `cp -R` from marketplace clone before
+  diff-and-sync.
+- **D-9.39.2** `--everything` removes `~/.local/lib/paperwiki/`
+  parallel to the shim.
+- **D-9.39.3** Helper API supersedes D-9.38.2's
+  "exactly three functions"; new contract is "header docstring
+  is the public-API source of truth, additions land via D record".
+- **D-9.39.4** Plan §15.4 R1 retro note placement — append after
+  R1 row, mark "(added in v0.3.39)"; CHANGELOG Lessons learned
+  echoes it.
+
+### Lessons learned
+
+The v0.3.38 plan §15.4 R1 mitigation prose claimed users would see
+a loud restart-Claude-Code error when the helper goes missing.
+Today's runtime test
+(`mv ~/.local/lib/paperwiki/bash-helpers.sh{,.bak}` + fresh Claude
+Code session + `/paper-wiki:status`) showed otherwise: the user
+sees nothing unusual. Two compounding reasons:
+
+1. **SessionStart auto-recovers.** Opening a fresh Claude Code
+   session triggers `ensure-env.sh`, which re-installs the helper
+   from `$CLAUDE_PLUGIN_ROOT/lib/bash-helpers.sh` whenever the
+   install target is missing or has a stale tag. The
+   "missing helper" state is healed before any SKILL runs.
+2. **Claude pragmatically reduces SKILL bash blocks.** Even when
+   the helper genuinely is missing, Claude (the model executing
+   the SKILL) tends to read the prose, identify the meaningful
+   command (`paperwiki status`), and run that directly — skipping
+   the source-or-die boilerplate. PATH was already configured by
+   a prior shim install, so the meaningful command works.
+
+The v0.3.38 contract still holds at the **lint** layer (subprocess
+lint + F6 fixture exercise it directly in a sandbox without
+auto-recovery and without Claude's SKILL adherence heuristics).
+The **user-visible runtime** contract is much narrower than the
+plan claimed.
+
+This doesn't change v0.3.38's design — the source-or-die stanza
+is still the right honest-failure posture in SKILL prose. But the
+v0.3.39 plan §15.4 retro paragraph (D-9.39.4) records this
+honestly so future readers don't treat R1's mitigation prose as
+canonical. A v0.3.40+ candidate (9.114) explores pushing the
+contract from SKILL prose down to the runner layer, where it
+always fires regardless of how Claude executes the SKILL.
+
+### Tests
+
+- 9 new tests in `tests/unit/cli/test_update_self_heal.py` cover
+  the four self-heal acceptance cases (empty / .bak-only /
+  version-present / marketplace-missing) + 5 sub-cases of the
+  `_cache_has_any_version` gating helper.
+- 1 new test in `tests/unit/cli/test_uninstall_flags.py` (extended
+  the existing `test_uninstall_everything_yes_removes_seven_targets`)
+  asserts `~/.local/lib/paperwiki/` is removed by `--everything`.
+- 4 new tests in `tests/unit/test_bash_helpers.py` cover
+  `paperwiki_diag`: emits all six sections, handles missing dirs
+  gracefully, does NOT print secrets, is read-only.
+- 943 → 956 total tests (+13 net). pytest -q green; mypy --strict
+  clean; ruff check + format clean; claude plugin validate passes.
+
+### Note for v0.3.40+ follow-up
+
+A `paperwiki status` install-health check (logged as 9.114 in
+plan §16.6) would push the source-or-die contract from SKILL
+prose down to the runner layer — out of scope for the v0.3.39
+S-version release.
+
 ## [0.3.38] - 2026-04-29
 
 ### Changed
