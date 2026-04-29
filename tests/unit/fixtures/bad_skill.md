@@ -7,7 +7,7 @@ description: Synthetic fixture for the SKILL bash/module-path lint test (D-9.36.
 
 This file is consumed only by `tests/unit/test_skill_bash_snippets_lint.py`
 to verify the lint detects each forbidden pattern. It deliberately
-violates F1, F2, F3, and F4. (F5 was retired in v0.3.37 — see the
+violates F1, F2, F3, F4, and F6. (F5 was retired in v0.3.37 — see the
 test module docstring for the rationale.)
 
 ## Process
@@ -39,4 +39,16 @@ echo "$CLAUDE_PLUGIN_ROOT"
 if [ -z "${X:-}"
     echo "missing then keyword"
 fi
+```
+
+### F6 — helper-sourcing failure (v0.3.38 D-9.38.6 — subprocess only)
+
+This block sources a non-existent helper without the source-or-die
+fallback per D-9.38.4. The static lint doesn't catch it (the bash
+parses fine), but the subprocess execution mode must — exit non-zero
+when the helper is missing.
+
+```bash
+source /nonexistent/helper.sh
+paperwiki_bootstrap
 ```

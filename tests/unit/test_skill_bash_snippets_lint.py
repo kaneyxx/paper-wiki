@@ -35,6 +35,15 @@ exempt from the substring/regex checks (F1/F2). This lets SKILLs
 cite a forbidden pattern in a Common Rationalizations table or Red
 Flags entry as an anti-example without tripping the lint. The bash
 parse check (F4) and the export sweep (F3) are not skip-able.
+
+v0.3.38 D-9.38.6 adds **comprehensive subprocess execution**: every
+fenced ``bash`` block of every shim-using SKILL also runs to exit 0
+in the lint sandbox (``tests/unit/skill_lint_sandbox.py``) — catches
+the helper-sourcing failure mode that ``bash -n`` (syntax-only)
+can't. Blocks that legitimately can't run in the sandbox (real
+network, real interactive flow) are wrapped in
+``<!-- skip-exec --> ... <!-- /skip-exec -->`` markers, which exempt
+the block from subprocess execution but NOT from static lint.
 """
 
 from __future__ import annotations
@@ -156,18 +165,28 @@ def _extract_bash_blocks(body: str) -> list[str]:
 
 # SKILLs document command shapes with `<placeholder>` tokens (e.g.
 # ``paperwiki wiki-ingest <vault> <id>``). Bash parses bare ``<word>``
-# as input redirection, so a verbatim ``bash -n`` would flag these as
-# syntax errors even though the prose intent is clear. Preprocess by
-# wrapping each placeholder in double quotes — same visual, but bash
-# parses it as a string literal. The substitution is non-destructive
-# (it does not touch redirection operators like ``< file`` or
-# ``<<EOF``, both of which need whitespace before the ``<``).
+# as input redirection, so a verbatim ``bash`` invocation tries to
+# redirect from a file named ``word`` — for ``bash -n`` it's fine
+# (parse-only), but for ``bash <file>`` execution it fails with
+# ``No such file or directory``. Worse, when the placeholder sits
+# inside an existing ``"..."`` literal (e.g. ``"<canonical-id>"``),
+# wrapping it in another pair of double quotes (the v0.3.36 approach)
+# produces nested ``""<X>""`` which bash parses as empty-string +
+# redirection — the same bug. Preprocess by replacing the angle-
+# bracket form with a plain alphanumeric stub ``__placeholder__``;
+# bash parses that as a regular literal in both quoted and unquoted
+# contexts.
 _PLACEHOLDER_RE = re.compile(r"<([A-Za-z_][A-Za-z0-9_./-]*)>")
 
 
 def _quote_placeholders(snippet: str) -> str:
-    """Wrap ``<placeholder>`` tokens in double quotes for ``bash -n``."""
-    return _PLACEHOLDER_RE.sub(r'"<\1>"', snippet)
+    """Replace ``<placeholder>`` tokens with neutral ``__placeholder__`` stubs.
+
+    Name kept for backwards compatibility with v0.3.36 callers; the
+    substitution itself changed in v0.3.38 to avoid nested-quote
+    redirection bugs (D-9.38.6 audit).
+    """
+    return _PLACEHOLDER_RE.sub(r"__\1__", snippet)
 
 
 _CLAUDE_ASSIGN_RE = re.compile(r"CLAUDE_PLUGIN_ROOT=\$\(")
@@ -363,3 +382,197 @@ def test_skip_lint_marker_strips_anti_examples() -> None:
         f"skip-lint should strip exactly one citation; got {matches!r}. "
         f"Either the regex is wrong or _strip_skip_lint_regions is broken."
     )
+
+
+# ---------------------------------------------------------------------------
+# Comprehensive subprocess execution mode (v0.3.38 D-9.38.6)
+# ---------------------------------------------------------------------------
+#
+# Every fenced ``bash`` block of every shim-using SKILL runs end-to-end
+# in the v0.3.38 sandbox. The sandbox provides a smart mock paperwiki
+# shim, a real bash-helpers.sh, a stub plugin cache, and a stub vault —
+# enough that the source-or-die bootstrap stanza succeeds and the
+# subsequent ``paperwiki <subcommand>`` invocations return cleanly.
+#
+# Skip-exec markers (``<!-- skip-exec --> ... <!-- /skip-exec -->``)
+# exempt blocks that legitimately can't run in the sandbox (real
+# network, real interactive flow, real $EDITOR invocation). The block
+# is still extracted for static lint coverage; only subprocess
+# execution is skipped.
+
+_SKIP_EXEC_RE = re.compile(
+    r"<!--\s*skip-exec\s*-->.*?<!--\s*/skip-exec\s*-->",
+    re.DOTALL,
+)
+
+
+def _extract_bash_blocks_with_exec_skip(body: str) -> list[tuple[str, bool]]:
+    """Return ``[(block_text, skip_exec_marked)]`` for each fenced bash block.
+
+    A block is marked ``skip_exec_marked=True`` if its full match span lies
+    inside a ``<!-- skip-exec -->...<!-- /skip-exec -->`` region. The block
+    is still extracted (so static lint covers it); the subprocess test
+    calls ``pytest.skip()`` on marked blocks.
+    """
+    skip_spans = [(m.start(), m.end()) for m in _SKIP_EXEC_RE.finditer(body)]
+    blocks: list[tuple[str, bool]] = []
+    for match in _BASH_FENCE_RE.finditer(body):
+        block_text = match.group("body")
+        indent = match.group("indent")
+        if indent:
+            dedented_lines: list[str] = []
+            for line in block_text.split("\n"):
+                if line.startswith(indent):
+                    dedented_lines.append(line[len(indent) :])
+                else:
+                    dedented_lines.append(line)
+            block_text = "\n".join(dedented_lines)
+        block_start, block_end = match.start(), match.end()
+        in_skip = any(s <= block_start and block_end <= e for s, e in skip_spans)
+        blocks.append((block_text, in_skip))
+    return blocks
+
+
+# ``analyze`` SKILL has no bash blocks (D-9.38.5 Tier 3); every other
+# SKILL is a candidate for subprocess execution.
+_SHIM_USING_SKILLS = tuple(p for p in _all_skill_files() if p.parent.name != "analyze")
+
+
+def _all_executable_block_pairs() -> list[tuple[Path, int]]:
+    """Return ``[(skill_path, block_index)]`` for every fenced ```bash block.
+
+    Indices stay stable across edits — adding a skip-exec marker changes
+    a block's exec status but not its index, so test ids don't drift.
+    """
+    pairs: list[tuple[Path, int]] = []
+    for skill_path in _SHIM_USING_SKILLS:
+        body = skill_path.read_text(encoding="utf-8")
+        block_count = len(_extract_bash_blocks(body))
+        pairs.extend((skill_path, i) for i in range(block_count))
+    return pairs
+
+
+_EXECUTABLE_BLOCK_IDS = [
+    f"{skill_path.parent.name}-block{idx}" for skill_path, idx in _all_executable_block_pairs()
+]
+
+
+def _sandbox_subprocess_env(sandbox_home: Path) -> dict[str, str]:
+    """Build the env dict every subprocess test uses."""
+    return {
+        "HOME": str(sandbox_home),
+        "PATH": f"{sandbox_home}/.local/bin:/usr/bin:/bin",
+    }
+
+
+@pytest.mark.skipif(not _BASH_AVAILABLE, reason="bash binary not on PATH")
+@pytest.mark.parametrize(
+    ("skill_path", "block_index"),
+    _all_executable_block_pairs(),
+    ids=_EXECUTABLE_BLOCK_IDS,
+)
+def test_bash_blocks_execute_in_sandbox(
+    skill_path: Path,
+    block_index: int,
+    sandbox_home: Path,
+    tmp_path: Path,
+) -> None:
+    """D-9.38.6: every fenced ```bash block runs to exit 0 in the sandbox.
+
+    The sandbox provides a smart mock paperwiki shim and a real
+    bash-helpers.sh; the source-or-die stanza in each block must succeed
+    (helper present), and the subsequent ``paperwiki <subcommand>``
+    invocations must return cleanly via the mock.
+
+    Skip-exec markers exempt blocks that genuinely can't run in the
+    sandbox (real network, real interactive flow, real $EDITOR call).
+    """
+    body = skill_path.read_text(encoding="utf-8")
+    blocks_with_skip = _extract_bash_blocks_with_exec_skip(body)
+    block, skip_exec = blocks_with_skip[block_index]
+    if skip_exec:
+        pytest.skip(f"block #{block_index} wrapped in <!-- skip-exec --> markers")
+
+    snippet_path = tmp_path / f"{skill_path.parent.name}_block{block_index}.sh"
+    snippet_path.write_text(_quote_placeholders(block), encoding="utf-8")
+
+    proc = subprocess.run(
+        ["bash", str(snippet_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env=_sandbox_subprocess_env(sandbox_home),
+    )
+    assert proc.returncode == 0, (
+        f"{skill_path.relative_to(_REPO_ROOT)} block #{block_index} "
+        f"failed in sandbox (returncode={proc.returncode}):\n"
+        f"--- block ---\n{block}\n"
+        f"--- stdout ---\n{proc.stdout}\n"
+        f"--- stderr ---\n{proc.stderr}"
+    )
+
+
+@pytest.mark.skipif(not _BASH_AVAILABLE, reason="bash binary not on PATH")
+def test_fixture_F6_subprocess_fails(  # noqa: N802 — ID matches the rule name.
+    sandbox_home: Path,
+    tmp_path: Path,
+) -> None:
+    """F6: helper-sourcing failure surfaces as non-zero exit (v0.3.38 regression guard).
+
+    The fixture's F6 block sources ``/nonexistent/helper.sh`` directly,
+    bypassing the source-or-die fallback. Per D-9.38.4 the contract is
+    "fail loud, no silent fallback" — this test asserts the subprocess
+    exits non-zero, proving the lint catches the v0.3.38-introduced
+    helper-sourcing failure mode.
+    """
+    body = _BAD_FIXTURE.read_text(encoding="utf-8")
+    blocks = _extract_bash_blocks(body)
+    f6_block = next((b for b in blocks if "/nonexistent/helper.sh" in b), None)
+    assert f6_block is not None, (
+        f"fixture {_BAD_FIXTURE.name} should contain an F6 block sourcing "
+        f"`/nonexistent/helper.sh` to exercise the helper-sourcing failure "
+        f"regression guard."
+    )
+
+    snippet_path = tmp_path / "f6.sh"
+    snippet_path.write_text(_quote_placeholders(f6_block), encoding="utf-8")
+
+    proc = subprocess.run(
+        ["bash", str(snippet_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env=_sandbox_subprocess_env(sandbox_home),
+    )
+    assert proc.returncode != 0, (
+        f"F6 block expected to fail (non-zero exit) but got 0:\n"
+        f"--- block ---\n{f6_block}\n"
+        f"--- stdout ---\n{proc.stdout}"
+    )
+
+
+def test_skip_exec_marker_excludes_block_from_subprocess() -> None:
+    """A bash block wrapped in skip-exec markers is reported as skip_exec=True."""
+    body = (
+        "Normal prose. Plain bash block:\n\n"
+        "```bash\n"
+        "echo regular\n"
+        "```\n\n"
+        "<!-- skip-exec -->\n"
+        "Wrapped bash block:\n\n"
+        "```bash\n"
+        "echo wrapped\n"
+        "```\n"
+        "<!-- /skip-exec -->\n\n"
+        "Another normal block:\n\n"
+        "```bash\n"
+        "echo trailing\n"
+        "```\n"
+    )
+    blocks = _extract_bash_blocks_with_exec_skip(body)
+    assert len(blocks) == 3
+    assert blocks[0] == ("echo regular\n", False)
+    assert blocks[1] == ("echo wrapped\n", True)
+    assert blocks[2] == ("echo trailing\n", False)
