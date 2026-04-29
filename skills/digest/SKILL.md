@@ -42,7 +42,11 @@ to `paperwiki:setup`.
    # $CLAUDE_PLUGIN_ROOT unset. Resolve the highest-version cache dir
    # defensively so the bundled-template fallback below works.
    if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-       CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
+       # D-9.36.4: `export` is mandatory so subsequent child shells
+       # (bash invocations, `paperwiki` shim subprocesses) inherit
+       # the resolved root. Without it ensure-env.sh exits with
+       # "CLAUDE_PLUGIN_ROOT must be set by Claude Code".
+       export CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
            | grep -v '\.bak\.' \
            | sort -V | tail -1 | sed 's:/$::')
    fi

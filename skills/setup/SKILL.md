@@ -49,12 +49,17 @@ is a legitimate plugin-cache resource that the shim cannot self-shim.
 
 ```bash
 if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
+    export CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
         | grep -v '\.bak\.' \
         | sort -V | tail -1 | sed 's:/$::')
 fi
 bash "$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh"
 ```
+
+The `export` is mandatory (D-9.36.4): the subsequent `bash` invocation
+spawns a child shell that needs `$CLAUDE_PLUGIN_ROOT` set. Without
+`export`, `ensure-env.sh` exits with
+"`CLAUDE_PLUGIN_ROOT must be set by Claude Code`".
 
 Confirm the next step (`paperwiki diagnostics`) runs without error —
 that exit-0 IS the readiness gate (no separate `.installed` stamp
@@ -97,8 +102,14 @@ If user chooses "Keep current config": run Step 0 + Step 1, confirm
 health, then run the **migration heuristic check** before exiting:
 
 1. Read `~/.config/paper-wiki/recipes/daily.yaml`.
-2. Look for any keyword listed in `STALE_MARKERS` (from
-   `paperwiki.config.recipe_migrations`) in the corresponding topic.
+2. Look for any keyword listed in `STALE_MARKERS` in the
+   corresponding topic. Use this exact import (D-9.36.6 — pinning
+   the literal collapses Claude's confabulation surface):
+
+   ```python
+   from paperwiki.config.recipe_migrations import STALE_MARKERS
+   ```
+
    The primary check: does `foundation model` appear in the
    `biomedical-pathology` topic's keyword list?
 3. If yes, surface a 5th option via AskUserQuestion:
@@ -248,27 +259,35 @@ topic with `categories: [cs.CV, cs.LG]` as the catch-all default.
 
 ### Q3 — Semantic Scholar API key (Branch 5)
 
+**v0.3.36 privacy contract: NEVER capture the API key value through
+AskUserQuestion or any free-form follow-up.** A pasted key would enter
+the Claude session transcript, the tool-call logs, and the auto-memory
+store. Instead, the wizard always writes a commented placeholder to
+`~/.config/paper-wiki/secrets.env` (Step 9 below), and the user pastes
+the real key out of band with their own editor (Step 10 guidance).
+
 Use AskUserQuestion to prompt:
 
 **AskUserQuestion call:**
-- question: "Add a Semantic Scholar API key now? (Bumps rate limit ~1 req/s → 100 req/s — strongly recommended.)"
+- question: "Semantic Scholar API key — bumps rate limit from ~1 req/s to ~100 req/s. paper-wiki works fine without one. Either way, setup writes a commented placeholder you can fill in later."
 - header: "S2 API key"
 - multiSelect: false
 - options:
-  1. label: "Paste key now"
-     description: "Key saved to ~/.config/paper-wiki/secrets.env with mode 600."
+  1. label: "I'll add a key later"
+     description: "Write the placeholder template; emphasize the post-setup nano flow at Step 10."
   2. label: "Skip — no key"
-     description: "Rate limited to ~1 req/s; OK for casual use."
-  3. label: "Show how to get one"
-     description: "Open API key signup URL: https://www.semanticscholar.org/product/api#api-key-form"
+     description: "Same placeholder template; mention the nano flow only briefly."
 
-If "Paste key now": follow up with a free-form question to capture it.
-Validate the key looks like a ~40 alphanumeric-char string before writing.
-Write to `~/.config/paper-wiki/secrets.env` as
-`export PAPERWIKI_S2_API_KEY="<key>"` with `chmod 600`.
-Flag malformed keys before writing — the wrong string causes silent 401s later.
+Both options route to the SAME Step 9 logic (always write the
+placeholder template — never capture the key value). The choice only
+affects how prominently Step 10 surfaces the post-setup guidance.
+Record the answer as `s2_key_intent: later | skip` for use in the
+final confirmation summary and Step 10.
 
-If "Show how to get one": display the URL, then re-prompt this same question.
+Note: Claude Code automatically appends a Cancel option — do NOT add
+one manually. Do NOT add a third "Paste key now" option, and do NOT
+follow up with a free-form question to capture the key — that is the
+exact privacy regression v0.3.36 closes.
 
 ---
 
@@ -332,7 +351,8 @@ the confirmation step.
 Display a summary of all values collected:
 - Vault path
 - Topics selected
-- S2 API key: provided / skipped
+- S2 API key: placeholder template (fill in later via Step 10 nano flow)
+  / placeholder template (skipped — public 1 req/s rate)
 - auto_ingest_top value
 - paperclip: registered / not registered / declined
 
@@ -359,7 +379,9 @@ If Cancel (auto-provided): exit without saving.
 
 ---
 
-### Step 9 — Write the recipe
+### Step 9 — Write the recipe and secrets template
+
+#### Step 9a — Write the recipe
 
 Build the YAML from the wizard answers:
 ```yaml
@@ -367,7 +389,8 @@ name: personal-daily
 sources:
   - {name: arxiv, config: {categories: [...], lookback_days: 3, max_results: 200}}
   - {name: semantic_scholar, config: {query: "<first topic keyword>",
-     lookback_days: 7, limit: 50, api_key_env: PAPERWIKI_S2_API_KEY}}
+     lookback_days: 7, limit: 50, api_key_env: PAPERWIKI_S2_API_KEY,
+     api_key_env_optional: true}}
 filters:
   - {name: recency, config: {max_days: 7}}
   - {name: relevance, config: {topics: [...]}}
@@ -382,20 +405,93 @@ top_k: 10
 auto_ingest_top: <n>
 ```
 
-Use the `Write` tool to save it to
+The `api_key_env_optional: true` flag is mandatory on the
+`semantic_scholar` source. With it set, the recipe loader degrades
+gracefully (`logger.warning` + `api_key=None`) when
+`PAPERWIKI_S2_API_KEY` is unset, so the digest pipeline runs at the
+public 1 req/s rate from a fresh install. Drop it ONLY if the user
+explicitly insists on loud-failing when the key is absent.
+
+Use the `Write` tool to save the recipe to
 `~/.config/paper-wiki/recipes/daily.yaml` (or to
 `$PAPERWIKI_CONFIG_DIR/recipes/daily.yaml` if the user has that env
 var set — power users pointing at e.g. `~/dotfiles/paper-wiki/` get
 that directory written instead). Create the dir first (`mkdir -p`).
 
+#### Step 9b — Write the secrets.env placeholder template
+
+Always write the template — regardless of whether the user picked
+"I'll add a key later" or "Skip — no key" at Q3. The wizard never
+captures the key value itself; the file's job is to be a correct,
+runnable placeholder the user can populate out of band.
+
+If `~/.config/paper-wiki/secrets.env` already exists (e.g. a prior
+install left a populated file), DO NOT overwrite it — assume the
+user has already configured it and skip Step 9b silently. Only
+write when the file is missing.
+
+When writing, use the `Write` tool with the following literal
+content:
+
+```bash
+# paper-wiki secrets — sourced by the runner before pipeline build.
+#
+# Optional: Semantic Scholar API key
+#   Without a key:  S2 source still works at ~1 req/s rate limit.
+#   With a key:     ~100 req/s, fewer 429 retries on busy days.
+#
+# To enable:
+#   1. Get a free key at https://www.semanticscholar.org/product/api
+#   2. Uncomment the line below and paste your key in place of the placeholder.
+#   3. (No restart needed — every digest run sources this file fresh.)
+#
+# export PAPERWIKI_S2_API_KEY="paste-your-key-here"
+```
+
+After writing, set mode 600 so the file is only readable by the
+user (`chmod 600 ~/.config/paper-wiki/secrets.env`). The chmod runs
+unconditionally — even on a placeholder-only file — because the
+file's purpose is to become the canonical secrets store the moment
+the user adds anything to it.
+
 ### Step 10 — Confirm + next step
 
 Show the user a summary:
 - Recipe saved to `~/.config/paper-wiki/recipes/daily.yaml`
-- Secrets saved to `~/.config/paper-wiki/secrets.env` (if any)
+- Secrets template at `~/.config/paper-wiki/secrets.env` (mode 600,
+  commented placeholder — fill in to enable the 100 req/s S2 rate)
 - paperclip MCP: registered / not registered / declined
 
-Then suggest: `/paper-wiki:digest` to run their first morning digest.
+Then print the post-setup guidance block verbatim (same wording for
+both `s2_key_intent: later` and `s2_key_intent: skip` — the latter
+just gets it as informational context):
+
+```
+Setup complete. Recipe saved to ~/.config/paper-wiki/recipes/daily.yaml.
+
+Optional next step — Semantic Scholar API key
+  paper-wiki works without it (1 req/s rate limit). To bump to 100 req/s:
+
+    1. Get a free key:    https://www.semanticscholar.org/product/api
+    2. Edit secrets:      $EDITOR ~/.config/paper-wiki/secrets.env
+                          (or nano / vim / code — whatever you use)
+    3. Uncomment the line and paste your key in place of the placeholder.
+    4. Verify (optional): grep PAPERWIKI_S2_API_KEY ~/.config/paper-wiki/secrets.env
+
+Run /paper-wiki:digest to pull your first morning digest.
+```
+
+Print the block as a literal preformatted/quoted region so the
+`$EDITOR` line and the indented commands render as plain text — do
+NOT execute the `$EDITOR` invocation, do NOT shell out to `nano`,
+and do NOT prompt the user with another AskUserQuestion to capture
+their key. The whole point of this step is to hand the key entry
+back to the user's own terminal session.
+
+If `s2_key_intent` was `later`, end with the `/paper-wiki:digest`
+suggestion. If `skip`, still suggest `/paper-wiki:digest` (it works
+fine without a key) and add: "you can flip the comment in
+secrets.env any time later."
 
 ## Common Rationalizations
 
@@ -405,6 +501,7 @@ Then suggest: `/paper-wiki:digest` to run their first morning digest.
 | "I'll trust whatever the user says about their vault path." | Validate that the path exists and is writable; an invalid path silently breaks every later SKILL. Offer to `mkdir -p` it explicitly. |
 | "The venv is probably fine; no need to verify." | Stale or partial venvs are the most common silent failure. Run `ensure-env.sh` and confirm the `.installed` stamp every time. |
 | "The user gave me their API key — I'll just inline it in the recipe." | NEVER inline secrets in YAML files that may be shared. Always go through `api_key_env: PAPERWIKI_S2_API_KEY` + `~/.config/paper-wiki/secrets.env`. The recipe stays shareable; the secret stays secret. |
+| "I'll just have the user paste the key inline — it's faster." | Never. The key enters the Claude transcript, the auto-memory, and tool logs. Always write a commented template and let the user edit `secrets.env` with their own editor. v0.3.36 closes this exact regression — do not re-introduce a `Paste key now` branch in Q3 or any free-form follow-up that captures the key value. |
 | "All five questions in one message — fast for the user!" | Walk through them one at a time using AskUserQuestion. Multi-question prompts get half-answered and the SKILL ends up guessing the rest. |
 | "Default everything; the user can edit later." | The user came to setup specifically to make decisions. Defaults are a fallback for "I don't know", not a substitute for asking. |
 | "I can just render the options as markdown bullet points." | Use AskUserQuestion for every choice point. Rendering options as prose leaves Claude to guess which one the user picked; AskUserQuestion gives a structured selection UI. |
@@ -433,9 +530,11 @@ Then suggest: `/paper-wiki:digest` to run their first morning digest.
 - `mcp_servers` already lists `paperclip` but the user wants it
   registered again — surface the existing registration and ask whether
   to remove it first; do not stack duplicates.
-- The user pastes an S2 API key that doesn't match the expected
-  shape (~40 alphanumeric chars) — flag it before writing, the wrong
-  string will cause silent 401s later.
+- Claude is about to capture the user's API key inline (via
+  AskUserQuestion, free-form follow-up, or Write into secrets.env
+  with a real key value) — STOP. v0.3.36 closes this regression.
+  Always write the commented placeholder and route the user to the
+  Step 10 nano flow. The key must never enter the Claude transcript.
 - Claude renders choice options as markdown prose instead of calling
   AskUserQuestion — this breaks the structured selection UI and is the
   primary failure mode this SKILL is designed to prevent.
@@ -458,8 +557,10 @@ Then suggest: `/paper-wiki:digest` to run their first morning digest.
 - `~/.config/paper-wiki/recipes/daily.yaml` exists and parses as a
   valid `RecipeSchema` (the digest runner will reject it loudly if
   not).
-- `~/.config/paper-wiki/secrets.env` exists with mode `600` when the
-  user provided an API key.
+- `~/.config/paper-wiki/secrets.env` exists with mode `600` after
+  Step 9b. The file always contains the commented-placeholder
+  template by default; the user populates it out of band per the
+  Step 10 guidance. The wizard NEVER captures the key value itself.
 - Claude called AskUserQuestion for each branch (Branches 1–8) rather
   than rendering options as markdown bullet points. If options appear
   only as prose with no AskUserQuestion call, the SKILL has failed its

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -285,6 +286,128 @@ class TestInstantiatePipeline:
             }
         )
         with pytest.raises(UserError, match="PAPERWIKI_S2_NOT_SET"):
+            instantiate_pipeline(recipe)
+
+    # -----------------------------------------------------------------
+    # v0.3.36 D-9.36.3 — graceful degradation for unset S2 key
+    # -----------------------------------------------------------------
+    #
+    # Matrix coverage (api_key_env_optional x env-var presence):
+    #   (True,  set)     -> resolves to the env value
+    #   (True,  unset)   -> warning, api_key=None, source still constructs
+    #   (False, set)     -> resolves to the env value (existing behavior)
+    #   (False, unset)   -> raises UserError (backwards-compatible default)
+
+    def test_s2_optional_flag_with_env_set_resolves_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from paperwiki.plugins.sources.semantic_scholar import SemanticScholarSource
+
+        monkeypatch.setenv("PAPERWIKI_S2_OPT_KEY", "real-key-value")
+
+        recipe = RecipeSchema.model_validate(
+            {
+                **_VALID_RECIPE,
+                "sources": [
+                    {
+                        "name": "semantic_scholar",
+                        "config": {
+                            "query": "x",
+                            "lookback_days": 7,
+                            "api_key_env": "PAPERWIKI_S2_OPT_KEY",
+                            "api_key_env_optional": True,
+                        },
+                    }
+                ],
+            }
+        )
+        pipeline = instantiate_pipeline(recipe)
+        source = pipeline.sources[0]
+        assert isinstance(source, SemanticScholarSource)
+        assert source.api_key == "real-key-value"
+
+    def test_s2_optional_flag_with_env_unset_warns_and_returns_none(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``api_key_env_optional: true`` + unset env → warning + ``api_key=None``."""
+        from paperwiki.plugins.sources.semantic_scholar import SemanticScholarSource
+
+        monkeypatch.delenv("PAPERWIKI_S2_OPT_MISSING", raising=False)
+
+        recipe = RecipeSchema.model_validate(
+            {
+                **_VALID_RECIPE,
+                "sources": [
+                    {
+                        "name": "semantic_scholar",
+                        "config": {
+                            "query": "x",
+                            "lookback_days": 7,
+                            "api_key_env": "PAPERWIKI_S2_OPT_MISSING",
+                            "api_key_env_optional": True,
+                        },
+                    }
+                ],
+            }
+        )
+
+        # loguru -> stdlib propagation: install a sink that mirrors into caplog.
+        from loguru import logger
+
+        handler_id = logger.add(
+            lambda msg: caplog.records.append(  # type: ignore[arg-type]
+                logging.LogRecord(
+                    name="loguru",
+                    level=logging.WARNING,
+                    pathname="",
+                    lineno=0,
+                    msg=str(msg),
+                    args=(),
+                    exc_info=None,
+                )
+            ),
+            level="WARNING",
+            format="{message}",
+        )
+        try:
+            pipeline = instantiate_pipeline(recipe)
+        finally:
+            logger.remove(handler_id)
+
+        source = pipeline.sources[0]
+        assert isinstance(source, SemanticScholarSource)
+        assert source.api_key is None
+
+        warning_messages = [r.getMessage() for r in caplog.records]
+        assert any("rate-limited" in m or "1 req/s" in m for m in warning_messages), (
+            f"expected a 'rate-limited' / '1 req/s' warning, got {warning_messages!r}"
+        )
+
+    def test_s2_optional_false_with_env_unset_still_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Default (``api_key_env_optional: false``) keeps the loud-fail contract."""
+        monkeypatch.delenv("PAPERWIKI_S2_REQUIRED", raising=False)
+
+        recipe = RecipeSchema.model_validate(
+            {
+                **_VALID_RECIPE,
+                "sources": [
+                    {
+                        "name": "semantic_scholar",
+                        "config": {
+                            "query": "x",
+                            "lookback_days": 7,
+                            "api_key_env": "PAPERWIKI_S2_REQUIRED",
+                            "api_key_env_optional": False,
+                        },
+                    }
+                ],
+            }
+        )
+        with pytest.raises(UserError, match="PAPERWIKI_S2_REQUIRED"):
             instantiate_pipeline(recipe)
 
     def test_paperclip_source_builds(self) -> None:

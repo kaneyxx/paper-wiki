@@ -9,6 +9,151 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.36] - 2026-04-28
+
+### Fixed
+
+- **PRIVACY — setup wizard no longer prompts for the Semantic Scholar
+  API key inline.** Up through v0.3.35 the setup SKILL's Q3 used
+  `AskUserQuestion` ("Paste key now") followed by a free-form
+  `Question` to capture the key value, then wrote it into
+  `~/.config/paper-wiki/secrets.env`. That meant the raw key landed
+  in the Claude session transcript, the auto-memory store, and any
+  tool-call log. v0.3.36 collapses Q3 to a two-option choice
+  ("I'll add a key later" / "Skip — no key") and routes the wizard
+  to *always* write a commented placeholder template at Step 9b. The
+  user populates the real key out of band by editing
+  `secrets.env` with their own editor (Step 10 prints a verbatim
+  five-step `$EDITOR` flow). The wizard never sees the key value
+  end-to-end (D-9.36.1).
+
+  **If you ran `/paper-wiki:setup` on v0.3.35 or earlier and pasted
+  an S2 API key, rotate that key now.** The forward-only fix can't
+  reach into past transcripts — your key text is recorded wherever
+  the Claude session was persisted (auto-memory, transcript backups,
+  tool-call logs). Issue a fresh key at
+  https://www.semanticscholar.org/product/api and replace the value
+  in `~/.config/paper-wiki/secrets.env` (R3).
+
+- **`CLAUDE_PLUGIN_ROOT=$(...)` defensive resolver missing
+  `export`.** v0.3.34 D-9.34.2 added a defensive resolver to
+  `skills/setup/SKILL.md` Step 0 and `skills/digest/SKILL.md` Step 1,
+  but both wrote the assignment as a local-scope variable. The
+  next `bash` invocation in the same SKILL spawned a child shell
+  that saw an empty `$CLAUDE_PLUGIN_ROOT` and `ensure-env.sh`
+  exited with `CLAUDE_PLUGIN_ROOT must be set by Claude Code`.
+  v0.3.36 prepends `export ` to both sites (D-9.36.4). Two-site
+  in-place sweep — refactoring into a shared `lib/` helper would
+  need too much indirection for a 5-line copy.
+
+- **Setup SKILL Step 2 import line confabulation.** The fresh-user
+  trace showed Claude writing
+  `from paperwiki.config.recipes import RecipeSchema` (plural,
+  wrong) which raised `ModuleNotFoundError`. The on-disk SKILL
+  source did NOT contain that string — Claude was confabulating
+  around the bare-backtick `paperwiki.config.recipe_migrations`
+  reference. v0.3.36 pins the literal import as a fenced Python
+  block in Step 2 so Claude has nothing to confabulate around
+  (D-9.36.6):
+
+  ```python
+  from paperwiki.config.recipe_migrations import STALE_MARKERS
+  ```
+
+- **`bio-search` SKILL drift.** The `paperwiki.runners.fetch_pdf`
+  reference (line 75) pointed at a module that was never created;
+  the prose qualifier "(when Phase 8 ships)" implies a future API
+  but the bare module path tempts Claude to import it. Replaced
+  with a neutral `MarkdownWikiBackend.upsert_paper` description
+  (Phase 3 sweep, plan §13.3 task 9.76).
+
+### Added
+
+- **Recipe loader graceful-degradation flag for the S2 source.**
+  Recipe authors can now mark `semantic_scholar` as key-optional:
+
+  ```yaml
+  - name: semantic_scholar
+    config:
+      api_key_env: PAPERWIKI_S2_API_KEY
+      api_key_env_optional: true
+  ```
+
+  When the flag is `true` and the env var is unset, the loader
+  emits a `logger.warning` ("S2 API key absent; rate-limited to
+  ~1 req/s") and constructs the source with `api_key=None`, which
+  the source class already accepts (public S2 endpoint at the
+  default rate). When the flag is `false` (default — backwards
+  compatible), the loader still raises `UserError` so existing
+  recipes keep their loud-fail contract. The wizard-emitted recipe
+  template and `recipes/weekly-deep-dive.yaml` both opt in so a
+  fresh-install user without a key gets a working pipeline (D-9.36.3).
+
+- **SKILL bash-block + module-path lint test.**
+  `tests/unit/test_skill_bash_snippets_lint.py` parametrizes across
+  every `skills/*/SKILL.md` and asserts five invariants:
+
+  - F1: no `paperwiki.config.recipes` (plural) anywhere
+  - F2: no `paperwiki.runners.wiki_ingest` not followed by `_plan`
+  - F3: every `CLAUDE_PLUGIN_ROOT=$(...)` has a matching `export`
+    within 12 lines (or inline)
+  - F4: every fenced ``` ```bash ``` block parses with `bash -n`
+  - F5: no `from paperwiki.config import RecipeSchema` (RecipeSchema
+    lives at `paperwiki.config.recipe.RecipeSchema`)
+
+  Anti-example citations in Common Rationalizations or Red Flags
+  tables can be wrapped in
+  `<!-- skip-lint --> ... <!-- /skip-lint -->` markers to be
+  exempt from F1/F2/F5. Bash placeholders like `<vault>` are
+  pre-quoted before `bash -n` so SKILL prose stays readable while
+  the lint still catches real syntax bugs. 75 test items run in
+  ~0.14s. A synthetic `tests/unit/fixtures/bad_skill.md` exercises
+  every forbidden pattern as a positive-detection check
+  (D-9.36.2 + D-9.36.5).
+
+### Changed
+
+- **Setup SKILL Q3, Step 9, Step 10 rewritten** to enforce the new
+  privacy contract end-to-end. Q3 collapses to two options; Step 9
+  splits into 9a (recipe write) + 9b (secrets.env placeholder
+  write, mode 600, never overwrite an existing populated file);
+  Step 10 prints the verbatim post-setup `$EDITOR` guidance.
+  Common Rationalizations gains a row blocking any future
+  "paste the key inline" regression.
+
+- **`recipes/weekly-deep-dive.yaml`** now declares the
+  `api_key_env: PAPERWIKI_S2_API_KEY` + `api_key_env_optional: true`
+  pair on its `semantic_scholar` source. Behavior matches
+  `daily-arxiv` (which the wizard emits): use the key if present,
+  fall back gracefully if not.
+
+### Lessons learned
+
+The fresh-user simulation (`paperwiki uninstall --everything
+--purge-vault ... --nuke-vault --yes` then `/paper-wiki:setup`) is
+worth running before every release. Three of the four v0.3.36
+fixes — the privacy regression, the export sweep, and the
+module-path drift — were caught in a single trace from that
+simulation. Static contract tests (D-9.36.5 forbidden-pattern
+list) are the cheapest way to keep those fixes from regressing,
+because the bugs all share a structural shape (SKILL prose drifts
+from on-disk reality) that a parametric test naturally catches at
+~500ms CI cost. Subprocess-execution mode (option (b) from
+D-9.36.2) stays deferred (9.85) — static lint catches ~80% of the
+class for ~5% of the implementation cost.
+
+### Tests
+
+- 3 new tests in `tests/unit/config/test_recipe.py` covering the
+  graceful-degradation matrix (optional×env-set,
+  optional×env-unset, required×env-unset).
+- 75 test items in the new
+  `tests/unit/test_skill_bash_snippets_lint.py` (parametric across
+  14 SKILLs × 5 invariants minus skip-lint exemptions, plus 5
+  fixture-based positive-detection tests).
+- 909 total tests green; mypy --strict clean; ruff check + format
+  clean.
+
 ## [0.3.35] - 2026-04-28
 
 ### Added

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from paperwiki.core.errors import UserError
@@ -142,12 +143,20 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
         - name: semantic_scholar
           config:
             api_key_env: PAPERWIKI_S2_API_KEY
+            api_key_env_optional: true   # optional, default false
 
-    The env var is resolved at pipeline-build time. A missing env var
-    raises :class:`UserError` so misconfiguration is loud, not silent.
+    The env var is resolved at pipeline-build time. By default a missing
+    env var raises :class:`UserError` so misconfiguration is loud, not
+    silent. Recipes that opt into ``api_key_env_optional: true`` get
+    graceful degradation instead — when the env var is unset, the source
+    is built with ``api_key=None`` (public S2 endpoint at ~1 req/s) and
+    a ``logger.warning`` records the rate-limit downgrade. The starter
+    recipes shipped by the setup wizard set this flag so a fresh-install
+    user without a key still has a working pipeline (D-9.36.3).
     """
     config = dict(config)
     env_name = config.pop("api_key_env", None)
+    optional = bool(config.pop("api_key_env_optional", False))
     if env_name is None:
         return config
     if "api_key" in config:
@@ -158,6 +167,15 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
         raise UserError(msg)
     value = os.environ.get(env_name)
     if not value:
+        if optional:
+            logger.warning(
+                "semantic_scholar: S2 API key absent (env var {env_name!r} "
+                "unset); rate-limited to ~1 req/s. Populate "
+                "~/.config/paper-wiki/secrets.env to enable the 100 req/s rate.",
+                env_name=env_name,
+            )
+            config["api_key"] = None
+            return config
         msg = (
             f"semantic_scholar source: env var {env_name!r} is unset or "
             "empty. Either export it (e.g. via "

@@ -71,11 +71,12 @@ specifically asking for biomedical-domain literature.
    - "Analyze paper #N in depth" → invoke `/paper-wiki:analyze
      paperclip:bio_<id>` (or `arxiv:<id>` if the hit has an arXiv id
      under `external_ids`).
-   - "Save these as wiki sources" → for each chosen hit, invoke
-     `paperwiki.runners.fetch_pdf <vault> <canonical-id>` (when
-     Phase 8 ships) or `MarkdownWikiBackend.upsert_paper` directly so
-     the source lands under `Wiki/sources/`. Then chain to
-     `/paper-wiki:wiki-ingest`.
+   - "Save these as wiki sources" → for each chosen hit, write the
+     source stub under `Wiki/sources/<canonical-id>.md` via
+     `MarkdownWikiBackend.upsert_paper` directly, then chain to
+     `/paper-wiki:wiki-ingest`. (A dedicated `paperwiki fetch-pdf`
+     subcommand is a future-Phase candidate; today the wiki backend
+     handles the upsert without a separate fetcher runner.)
    - "Refine the search" → loop back to step 2 with the new query.
 5. **Summarize at the end.** Tell the user what was added to the wiki
    (canonical ids + concept names if any), and suggest the next step:

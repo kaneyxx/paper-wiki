@@ -18,6 +18,11 @@ sources:
       query: foundation model multimodal reasoning
       lookback_days: 30
       limit: 50
+      # Use the user's S2 key when present (~100 req/s); fall back to
+      # public rate (~1 req/s) when PAPERWIKI_S2_API_KEY is unset rather
+      # than failing loud. v0.3.36 D-9.36.3 graceful-degradation contract.
+      api_key_env: PAPERWIKI_S2_API_KEY
+      api_key_env_optional: true
 
 filters:
   - name: recency
