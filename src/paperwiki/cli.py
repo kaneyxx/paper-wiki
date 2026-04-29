@@ -159,19 +159,48 @@ def _cache_version() -> str | None:
 
 
 def _git_pull(marketplace_dir: Path) -> None:
-    """Fetch + pull --ff-only inside the marketplace clone."""
+    """Best-effort fetch + pull --ff-only inside the marketplace clone.
+
+    v0.3.40 D-9.40.4: changed from strict-fail to best-effort. Failure
+    modes — non-zero exit, ``FileNotFoundError`` (git binary missing),
+    ``TimeoutExpired`` — are logged at WARN level but DO NOT raise.
+    The caller falls through to use the on-disk clone (same outcome as
+    if the upstream had no new commits). 10-second timeout per
+    subprocess guards against hanging on dead connections.
+
+    Rationale (R3 in plan §17.4): an offline first-install or a corrupt
+    marketplace clone shouldn't abort ``paperwiki update`` — the
+    self-heal path can still bootstrap from the on-disk clone, and the
+    user sees the WARN log explaining why the pull was skipped.
+    """
     for cmd in (
         ["git", "-C", str(marketplace_dir), "fetch", "--tags"],
         ["git", "-C", str(marketplace_dir), "pull", "--ff-only"],
     ):
-        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
-        if result.returncode != 0:
-            msg = (
-                f"paperwiki update: git command failed: {' '.join(cmd)}\n"
-                f"stderr: {result.stderr.strip()}"
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-            typer.echo(msg, err=True)
-            raise typer.Exit(1)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            logger.warning(
+                "paperwiki update: marketplace git command skipped "
+                "({cmd}): {exc}; using on-disk clone",
+                cmd=" ".join(cmd[3:]),
+                exc=exc,
+            )
+            continue
+        if result.returncode != 0:
+            logger.warning(
+                "paperwiki update: marketplace git command failed "
+                "({cmd}, exit {rc}): {stderr}; using on-disk clone",
+                cmd=" ".join(cmd[3:]),
+                rc=result.returncode,
+                stderr=result.stderr.strip() or "(no stderr)",
+            )
+            continue
         if result.stdout.strip():
             logger.debug("git.output", cmd=cmd[-1], output=result.stdout.strip())
 

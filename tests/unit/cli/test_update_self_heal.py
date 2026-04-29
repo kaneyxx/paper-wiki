@@ -23,7 +23,9 @@ because they are resolved at import time and don't honor a runtime
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -298,3 +300,160 @@ class TestUpdateNextMessage:
             f"expected at least 2 occurrences of /exit, got "
             f"{result.output.count('/exit')}:\n{result.output}"
         )
+
+
+# ---------------------------------------------------------------------------
+# v0.3.40 D-9.40.4: marketplace git pull is best-effort
+# ---------------------------------------------------------------------------
+
+
+class TestGitPullBestEffort:
+    """Plan §17.3 task 9.118 / D-9.40.4.
+
+    The v0.3.39 ``_git_pull`` aborted ``paperwiki update`` whenever
+    fetch/pull returned non-zero. v0.3.40 makes the pull best-effort
+    so first-install / offline / corrupt-clone scenarios fall through
+    to use the on-disk marketplace clone instead of failing the whole
+    update. Failures land in WARN-level logs; the function still
+    returns normally (no typer.Exit).
+
+    The four cases below match plan §17.3 task 9.118 acceptance:
+    (a) success → no warning
+    (b) non-zero returncode → WARN, function returns
+    (c) git binary missing (FileNotFoundError) → WARN, returns
+    (d) timeout (TimeoutExpired) → WARN, returns
+    """
+
+    def test_pull_success_does_not_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marketplace = tmp_path / "marketplace"
+        marketplace.mkdir()
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        # Should not raise.
+        cli_module._git_pull(marketplace)
+        # Both fetch and pull invoked.
+        assert any("fetch" in c for c in calls)
+        assert any("pull" in c for c in calls)
+
+    def test_pull_failure_returns_normally(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Non-zero exit → WARN log, no exception."""
+        marketplace = tmp_path / "marketplace"
+        marketplace.mkdir()
+
+        def failing_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(cmd, 128, "", "fatal: not a git repo")
+
+        monkeypatch.setattr(subprocess, "run", failing_run)
+        # Should NOT raise.
+        cli_module._git_pull(marketplace)
+
+    def test_pull_git_binary_missing_returns_normally(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``FileNotFoundError`` (no git installed) → no exception raised."""
+        marketplace = tmp_path / "marketplace"
+        marketplace.mkdir()
+
+        def raise_fnf(*_args: Any, **_kwargs: Any) -> None:
+            raise FileNotFoundError("git not installed")
+
+        monkeypatch.setattr(subprocess, "run", raise_fnf)
+        cli_module._git_pull(marketplace)
+
+    def test_pull_times_out_returns_normally(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``TimeoutExpired`` → caught and logged; function returns."""
+        marketplace = tmp_path / "marketplace"
+        marketplace.mkdir()
+
+        def raise_timeout(*_args: Any, **_kwargs: Any) -> None:
+            raise subprocess.TimeoutExpired(cmd="git", timeout=10)
+
+        monkeypatch.setattr(subprocess, "run", raise_timeout)
+        cli_module._git_pull(marketplace)
+
+    def test_pull_passes_timeout_to_subprocess(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D-9.40.4 contract: subprocess.run is called with ``timeout=10``."""
+        marketplace = tmp_path / "marketplace"
+        marketplace.mkdir()
+
+        captured_kwargs: list[dict[str, Any]] = []
+
+        def capturing_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            captured_kwargs.append(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(subprocess, "run", capturing_run)
+        cli_module._git_pull(marketplace)
+        # Both fetch + pull get the timeout kwarg.
+        assert all(kw.get("timeout") == 10 for kw in captured_kwargs), captured_kwargs
+
+
+class TestSelfHealOfflineFlow:
+    """End-to-end: empty cache + git failures → self-heal still completes.
+
+    Built without the ``update_env`` fixture because that fixture stubs
+    ``_git_pull`` with a no-op (which would mask the offline behavior we
+    want to exercise here). We stage HOME + monkeypatch ``subprocess.run``
+    directly so the real (now best-effort per D-9.40.4) ``_git_pull`` runs.
+    """
+
+    def test_self_heal_completes_when_subprocess_run_returns_nonzero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """v0.3.40 R3: offline first-install path completes without abort."""
+        home = tmp_path / "fake-home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        cache_base = home / ".claude" / "plugins" / "cache" / "paper-wiki" / "paper-wiki"
+        marketplace = home / ".claude" / "plugins" / "marketplaces" / "paper-wiki"
+        monkeypatch.setattr(cli_module, "_CACHE_BASE", cache_base)
+        monkeypatch.setattr(cli_module, "_DEFAULT_MARKETPLACE_DIR", marketplace)
+        monkeypatch.setattr(
+            cli_module,
+            "_INSTALLED_PLUGINS_JSON",
+            home / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr(cli_module, "_SETTINGS_JSON", home / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            cli_module,
+            "_SETTINGS_LOCAL_JSON",
+            home / ".claude" / "settings.local.json",
+        )
+
+        _seed_marketplace(marketplace, "0.3.40")
+
+        # Mock subprocess.run to simulate network failure on every call
+        # (covers both fetch and pull commands inside _git_pull).
+        def failing_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(cmd, 1, "", "network unreachable")
+
+        monkeypatch.setattr(subprocess, "run", failing_run)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--marketplace-dir", str(marketplace)],
+        )
+
+        # Self-heal completed despite git failure (D-9.40.4 best-effort pull).
+        assert result.exit_code == 0, result.output
+        assert "bootstrapped from marketplace" in result.output
+        assert (cache_base / "0.3.40").is_dir()
