@@ -106,6 +106,52 @@ def test_ensure_env_script_is_executable() -> None:
     assert "python3 -m venv" in body
 
 
+def test_bash_helpers_present_with_v0_3_38_tag() -> None:
+    """v0.3.38 D-9.38.1: ``lib/bash-helpers.sh`` ships in the repo.
+
+    Pins the helper file's existence, the v0.3.38 tag line (so a release
+    that bumps version files but forgets the helper tag fails here),
+    and the three documented public function names. Behavioral tests
+    live in ``tests/unit/test_bash_helpers.py``.
+    """
+    helper = REPO_ROOT / "lib" / "bash-helpers.sh"
+    assert helper.is_file(), f"missing helper at {helper}"
+
+    body = helper.read_text(encoding="utf-8")
+    assert "# paperwiki bash-helpers — v0.3.38" in body, (
+        "helper must carry the v0.3.38 version tag line"
+    )
+
+    for fn_name in (
+        "paperwiki_ensure_path",
+        "paperwiki_resolve_plugin_root",
+        "paperwiki_bootstrap",
+    ):
+        assert f"{fn_name}()" in body, (
+            f"helper must declare public function `{fn_name}` (D-9.38.2 — exactly three functions)"
+        )
+
+
+def test_ensure_env_installs_bash_helpers() -> None:
+    """v0.3.38 D-9.38.1: ensure-env.sh ships the helper alongside the shim.
+
+    Pins the helper-install block in ``hooks/ensure-env.sh`` so a future
+    edit that drops the block fails here instead of silently breaking
+    every shim-using SKILL on first SessionStart after upgrade.
+    """
+    script = REPO_ROOT / "hooks" / "ensure-env.sh"
+    body = script.read_text(encoding="utf-8")
+    assert "$HOME/.local/lib/paperwiki" in body, (
+        "ensure-env.sh must install the helper at ~/.local/lib/paperwiki/"
+    )
+    assert "EXPECTED_HELPER_TAG" in body, (
+        "ensure-env.sh must define EXPECTED_HELPER_TAG for idempotent rewrite"
+    )
+    assert '"$PLUGIN_ROOT/lib/bash-helpers.sh"' in body, (
+        "ensure-env.sh must source helper content from $PLUGIN_ROOT/lib/bash-helpers.sh"
+    )
+
+
 # ---------------------------------------------------------------------------
 # SKILL & slash command
 # ---------------------------------------------------------------------------

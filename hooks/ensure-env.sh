@@ -84,6 +84,32 @@ case ":$PATH:" in
 esac
 
 # ---------------------------------------------------------------------------
+# Install ~/.local/lib/paperwiki/bash-helpers.sh (D-9.38.1 / v0.3.38+).
+# SKILLs source this helper to get paperwiki_ensure_path,
+# paperwiki_resolve_plugin_root, and paperwiki_bootstrap (D-9.38.2).
+# Idempotent rewrite gated on the version tag line — same pattern as
+# the shim above. Non-blocking: if ~/.local/lib/ is unwritable we
+# emit a warning and continue. The SKILL bootstrap stanza per D-9.38.4
+# emits its own loud restart-Claude-Code error at SKILL time when the
+# helper is missing, so SessionStart never aborts on this failure.
+# ---------------------------------------------------------------------------
+HELPER_DIR="$HOME/.local/lib/paperwiki"
+HELPER_PATH="$HELPER_DIR/bash-helpers.sh"
+EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v0.3.38 (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
+
+if ! mkdir -p "$HELPER_DIR" 2>/dev/null; then
+  echo "paperwiki: warning: $HELPER_DIR is not writable; bash-helpers not installed." >&2
+  echo "  SKILLs that source the helper will emit a restart-Claude-Code error." >&2
+elif ! [ -f "$HELPER_PATH" ] || ! grep -qF "$EXPECTED_HELPER_TAG" "$HELPER_PATH" 2>/dev/null; then
+  if cat "$PLUGIN_ROOT/lib/bash-helpers.sh" > "$HELPER_PATH" 2>/dev/null; then
+    chmod 644 "$HELPER_PATH" 2>/dev/null || true
+  else
+    echo "paperwiki: warning: failed to write $HELPER_PATH" >&2
+    echo "  SKILLs that source the helper will emit a restart-Claude-Code error." >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Migration (Task 9.31): if ${PLUGIN_ROOT}/.venv exists as a real
 # directory (legacy per-version venv from <= v0.3.28) and the shared
 # venv doesn't yet exist, COPY the legacy venv to the shared path
