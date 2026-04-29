@@ -483,3 +483,51 @@ class TestInstantiatePipeline:
         reporter = pipeline.reporters[0]
         assert isinstance(reporter, MarkdownReporter)
         assert "~" not in str(reporter.output_dir)
+
+
+# ---------------------------------------------------------------------------
+# v0.3.37 D-9.37.2 — package-root re-exports
+# ---------------------------------------------------------------------------
+#
+# The setup smoke trace from v0.3.35 showed Claude reaching for
+# `from paperwiki.config import RecipeSchema` (no `.recipe.` segment),
+# which historically raised ImportError because `__init__.py` was an
+# empty stub. v0.3.37 re-exports `RecipeSchema` and `load_recipe` at
+# the package root so the user's mental model matches reality. The
+# replacement for the v0.3.36 F5 forbidden-pattern lint (D-9.37.3) is
+# this positive-import smoke test — if the re-export ever breaks, the
+# test catches it.
+
+
+class TestPackageRootReExports:
+    def test_recipe_schema_importable_from_package_root(self) -> None:
+        from paperwiki.config import RecipeSchema as PackageRoot
+
+        assert PackageRoot is RecipeSchema, (
+            "paperwiki.config.RecipeSchema must be the same object as "
+            "paperwiki.config.recipe.RecipeSchema (re-export, not a copy)."
+        )
+        assert hasattr(PackageRoot, "model_validate"), (
+            "Re-exported RecipeSchema must still be a pydantic BaseModel."
+        )
+
+    def test_load_recipe_importable_from_package_root(self) -> None:
+        from paperwiki.config import load_recipe as package_root_load
+
+        assert package_root_load is load_recipe, (
+            "paperwiki.config.load_recipe must be the same object as "
+            "paperwiki.config.recipe.load_recipe (re-export, not a copy)."
+        )
+        assert callable(package_root_load)
+
+    def test_dunder_all_advertises_the_re_exports(self) -> None:
+        import paperwiki.config as config_pkg
+
+        assert hasattr(config_pkg, "__all__"), (
+            "paperwiki.config must declare __all__ so `from paperwiki.config "
+            "import *` lands the documented surface."
+        )
+        assert set(config_pkg.__all__) == {"RecipeSchema", "load_recipe"}, (
+            f"__all__ should contain exactly the re-exports per D-9.37.2; "
+            f"got {config_pkg.__all__!r}"
+        )

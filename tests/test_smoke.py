@@ -42,7 +42,7 @@ def test_plugin_manifest_is_valid_json() -> None:
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.36"
+    assert data["version"] == "0.3.37"
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
@@ -394,6 +394,30 @@ def test_paperclip_setup_doc_exists() -> None:
     assert "https://gxl.ai/blog/paperclip" in body or "paperclip.gxl.ai" in body
     # Stance: optional opt-in, never required.
     assert "optional" in body.lower()
+
+
+def test_release_history_v0_3_35_retro_exists() -> None:
+    """v0.3.37 D-9.37.4: docs/release-history/v0.3.35.md is the bootstrap retro.
+
+    Pins both the file existence (so the README cross-link doesn't bitrot)
+    and the commit-SHA reference (so the retro keeps pointing at the
+    actual v0.3.35 commit instead of drifting into prose-only narrative).
+    """
+    retro = REPO_ROOT / "docs" / "release-history" / "v0.3.35.md"
+    assert retro.is_file(), "docs/release-history/v0.3.35.md must exist"
+    body = retro.read_text(encoding="utf-8")
+    assert "3ceccb7" in body, (
+        "v0.3.35 retro must cite the actual release commit SHA "
+        "(3ceccb7) so the cross-reference stays anchored."
+    )
+    assert "v0.3.35" in body, "retro must name the tag it documents"
+
+    index = REPO_ROOT / "docs" / "release-history" / "README.md"
+    assert index.is_file(), "docs/release-history/README.md must exist"
+    assert "CHANGELOG.md" in index.read_text(encoding="utf-8"), (
+        "release-history index must point readers at CHANGELOG.md "
+        "as the canonical user-facing changelog"
+    )
 
 
 def test_bio_search_skill_documents_mcp_dependency_and_fallback() -> None:
@@ -1454,10 +1478,10 @@ def test_ensure_env_contains_shim_tag() -> None:
     script = REPO_ROOT / "hooks" / "ensure-env.sh"
     body = script.read_text(encoding="utf-8")
     expected_tag = (
-        "# paperwiki shim — v0.3.36 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+        "# paperwiki shim — v0.3.37 (shared venv + self-bootstrap + PYTHONPATH fallback)."
     )
     assert expected_tag in body, (
-        "hooks/ensure-env.sh must contain the v0.3.36 shim tag line so "
+        "hooks/ensure-env.sh must contain the v0.3.37 shim tag line so "
         "old shims get overwritten on first SessionStart after upgrade"
     )
 
@@ -1621,8 +1645,8 @@ def test_ensure_env_shim_integration(tmp_path: Path) -> None:
 
     body = shim.read_text(encoding="utf-8")
     assert (
-        "paperwiki shim — v0.3.36 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
-    ), "shim must contain the v0.3.36 expected tag line"
+        "paperwiki shim — v0.3.37 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
+    ), "shim must contain the v0.3.37 expected tag line"
 
 
 def test_ensure_env_shim_is_idempotent(tmp_path: Path) -> None:

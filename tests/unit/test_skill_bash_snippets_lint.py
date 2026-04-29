@@ -21,12 +21,17 @@ The fix is a static lint that catches the whole class:
   hardened in v0.3.36 D-9.36.4.
 * **F4**: ``bash -n`` parse failure on any fenced ``bash`` block.
   Catches actual syntax errors that would never run as a subprocess.
-* **F5**: ``from paperwiki.config import RecipeSchema`` (without the
-  ``.recipe.`` segment). Currently fails at import time;
-  ``RecipeSchema`` lives at ``paperwiki.config.recipe.RecipeSchema``.
+* **F5 — RETIRED in v0.3.37**: was
+  ``from paperwiki.config import RecipeSchema`` (without the
+  ``.recipe.`` segment). The bare import used to raise ImportError
+  because ``__init__.py`` was an empty stub; v0.3.37 D-9.37.2
+  re-exports ``RecipeSchema`` and ``load_recipe`` at the package
+  root, so the import is valid forever. Coverage moves to
+  ``tests/unit/config/test_recipe.py::TestPackageRootReExports``
+  (positive-import smoke test — D-9.37.3).
 
 A region wrapped in ``<!-- skip-lint --> ... <!-- /skip-lint -->`` is
-exempt from the substring/regex checks (F1/F2/F5). This lets SKILLs
+exempt from the substring/regex checks (F1/F2). This lets SKILLs
 cite a forbidden pattern in a Common Rationalizations table or Red
 Flags entry as an anti-example without tripping the lint. The bash
 parse check (F4) and the export sweep (F3) are not skip-able.
@@ -76,15 +81,10 @@ FORBIDDEN_PATTERNS: dict[str, dict[str, object]] = {
             "trace bug — the bare name doesn't exist."
         ),
     },
-    "F5": {
-        "regex": re.compile(r"from\s+paperwiki\.config\s+import\s+RecipeSchema\b"),
-        "description": "missing `.recipe.` segment in RecipeSchema import",
-        "rationale": (
-            "RecipeSchema lives at `paperwiki.config.recipe.RecipeSchema` "
-            "(singular). The package root does not re-export it, so "
-            "`from paperwiki.config import RecipeSchema` raises ImportError."
-        ),
-    },
+    # F5 retired in v0.3.37 (D-9.37.3): the bare
+    # `from paperwiki.config import RecipeSchema` is now valid because
+    # `paperwiki.config.__init__` re-exports the symbol. Coverage moved
+    # to TestPackageRootReExports in tests/unit/config/test_recipe.py.
 }
 
 
@@ -303,9 +303,9 @@ def test_fixture_exists() -> None:
     )
 
 
-def test_fixture_trips_F1_F2_F5() -> None:  # noqa: N802 — IDs match the rule names.
+def test_fixture_trips_F1_F2() -> None:  # noqa: N802 — IDs match the rule names.
     body = _strip_skip_lint_regions(_BAD_FIXTURE.read_text(encoding="utf-8"))
-    for pattern_id in ("F1", "F2", "F5"):
+    for pattern_id in ("F1", "F2"):
         regex: re.Pattern[str] = FORBIDDEN_PATTERNS[pattern_id]["regex"]  # type: ignore[assignment]
         assert regex.search(body) is not None, (
             f"fixture {_BAD_FIXTURE.name} should contain forbidden pattern "

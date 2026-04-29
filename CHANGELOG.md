@@ -9,6 +9,104 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.37] - 2026-04-28
+
+### Added
+
+- **`RecipeSchema` and `load_recipe` re-exported at the
+  `paperwiki.config` package root.** Until v0.3.36 the package
+  `__init__.py` was an empty docstring stub, so callers had to
+  remember the singular submodule name (`paperwiki.config.recipe`,
+  not `paperwiki.config.recipes`). The v0.3.35 setup smoke trace
+  showed Claude reaching for the cleaner `from paperwiki.config
+  import RecipeSchema` and getting an `ImportError`, then
+  self-correcting via package introspection. v0.3.37 makes the
+  expected import work — both forms now resolve to the same object
+  identity (D-9.37.2):
+
+  ```python
+  from paperwiki.config import RecipeSchema, load_recipe          # v0.3.37+
+  from paperwiki.config.recipe import RecipeSchema, load_recipe   # also fine
+  ```
+
+  The submodule paths still work — re-exports are additive, not
+  replacements.
+
+- **`docs/release-history/` directory** bootstrapped with the
+  v0.3.35 retro at [`docs/release-history/v0.3.35.md`](docs/release-history/v0.3.35.md).
+  This is the new tracked home for per-release retros — the "why"
+  behind notable releases — separated from the day-to-day engineering
+  plan (`tasks/plan.md`, gitignored) and the user-facing changelog
+  (this file). Going forward, retros are written by the release
+  author at their discretion; most releases stay well-served by the
+  CHANGELOG alone (D-9.37.4). The README "More Documentation" list
+  now cross-links to the directory.
+
+### Changed
+
+- **F5 forbidden-pattern retired from the SKILL bash/module-path
+  lint.** v0.3.36 introduced F5 to forbid the bare `from
+  paperwiki.config import RecipeSchema` because it raised
+  `ImportError`. With the v0.3.37 re-export landed, that import is
+  valid forever — F5 is now noise, not signal. Coverage moves to
+  `tests/unit/config/test_recipe.py::TestPackageRootReExports`,
+  which positively asserts both names import from the package root
+  and resolve to the same object as the submodule path (D-9.37.3).
+  The lint test drops from 75 to 61 parametric items
+  (14 SKILLs × 4 patterns + 14 export-check + 14 bash-parse + 5
+  fixture tests).
+
+### Decisions ratified
+
+- **D-9.37.1** Release split — Option B. v0.3.37 ships only the
+  cosmetic improvements (re-export + retro bootstrap); the structural
+  v0.3.36 §13.6 candidates 9.84 (shared `lib/bash-helpers.sh`) and
+  9.85 (subprocess-execution lint mode) are deferred to v0.3.38 so
+  the helper refactor's blast radius gets release-level risk
+  isolation.
+- **D-9.37.2** Re-export scope: `RecipeSchema` and `load_recipe`
+  only. `PluginSpec` / `instantiate_pipeline` / `STALE_MARKERS` stay
+  submodule-only (internal schema details and runner-only helpers,
+  not user code).
+- **D-9.37.3** F5 lint dropped entirely (not whitelisted, not
+  comment-deprecated).
+- **D-9.37.4** `docs/release-history/vN.M.P.md` layout for retros;
+  v0.3.36 not auto-backfilled (its plan §13 + CHANGELOG entry are
+  rich enough).
+
+### Lessons learned
+
+The v0.3.35 setup smoke trace caught Claude confabulating a wrong
+module path (`paperwiki.config.recipes`, plural) in the same trace
+where it also reached for the bare `from paperwiki.config import
+RecipeSchema` (which didn't exist either). v0.3.36 closed the
+confabulation hole by pinning the literal correct import in setup
+SKILL Step 2 and adding an F5 lint forbidding the broken bare form.
+v0.3.37 closes the *other* half of the same UX gap: making the
+form Claude (and humans) intuitively reach for actually work. The
+lint-then-fix sequence is the right order — we needed the F5 lint
+in place to confirm the bare import wasn't sneaking in elsewhere
+before deciding it was safe to make valid. Once F5 had a clean
+sweep across all 14 SKILLs at v0.3.36 ship time, the v0.3.37
+re-export was a small, targeted improvement instead of an
+open-ended API change.
+
+### Tests
+
+- 3 new tests in
+  `tests/unit/config/test_recipe.py::TestPackageRootReExports`
+  (positive-import + identity check + `__all__` shape).
+- 1 new smoke test in `tests/test_smoke.py` pinning the
+  `docs/release-history/v0.3.35.md` retro file existence + commit-SHA
+  cross-reference.
+- F5 row removed from
+  `tests/unit/test_skill_bash_snippets_lint.py::FORBIDDEN_PATTERNS`
+  and from `tests/unit/fixtures/bad_skill.md`. Lint test count drops
+  to 61 (was 75). Net: 909 + 4 - 1 = 912 tests target
+  (verify on commit gate).
+- mypy --strict clean; ruff check + format clean; claude plugin
+  validate passes.
+
 ## [0.3.36] - 2026-04-28
 
 ### Fixed

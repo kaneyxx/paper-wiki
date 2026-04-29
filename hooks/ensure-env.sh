@@ -39,13 +39,13 @@ PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 # ---------------------------------------------------------------------------
 SHIM_DIR="$HOME/.local/bin"
 SHIM_PATH="$SHIM_DIR/paperwiki"
-EXPECTED_TAG="# paperwiki shim — v0.3.36 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+EXPECTED_TAG="# paperwiki shim — v0.3.37 (shared venv + self-bootstrap + PYTHONPATH fallback)."
 
 mkdir -p "$SHIM_DIR"
 if ! [ -f "$SHIM_PATH" ] || ! grep -qF "$EXPECTED_TAG" "$SHIM_PATH" 2>/dev/null; then
   cat > "$SHIM_PATH" <<'SHIM_EOF'
 #!/usr/bin/env bash
-# paperwiki shim — v0.3.36 (shared venv + self-bootstrap + PYTHONPATH fallback).
+# paperwiki shim — v0.3.37 (shared venv + self-bootstrap + PYTHONPATH fallback).
 set -euo pipefail
 CACHE_ROOT="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
 PAPERWIKI_HOME_RESOLVED="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"

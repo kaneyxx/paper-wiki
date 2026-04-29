@@ -404,6 +404,7 @@ contradictions and stale entries.
 - [SPEC.md](SPEC.md) — operating contract (domain models, protocols, error codes)
 - [tasks/plan.md](tasks/plan.md) — Phase 6/7/8 implementation plans
 - [CHANGELOG.md](CHANGELOG.md) — release history (Keep a Changelog format)
+- [docs/release-history/](docs/release-history/) — per-release retros (the "why" behind notable releases)
 - [docs/wiki.md](docs/wiki.md) — wiki ingest/query/lint/compile reference
 - [docs/paperclip-setup.md](docs/paperclip-setup.md) — paperclip MCP setup
 - The Python implementation lives under `src/paperwiki/`. End users do
