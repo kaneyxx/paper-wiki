@@ -15,6 +15,7 @@ with the runners.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -256,6 +257,45 @@ def _find_cache_dir(version: str) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+# v0.3.39 D-9.39.1: cache "is empty" means no version subdir at all.
+# Strict version-only regex — ``.bak.<ts>`` etc. are NOT versions.
+_VERSION_DIR_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def _cache_has_any_version(cache_base: Path) -> bool:
+    """Return True if ``cache_base`` contains at least one version subdir.
+
+    Used by ``paperwiki update`` to gate the self-heal path
+    (D-9.39.1). Treats ``.bak.<ts>`` and other non-version names as
+    "not a version" — strict ``\\d+\\.\\d+\\.\\d+`` match only. The
+    cache base not existing at all also counts as "no version".
+    """
+    if not cache_base.is_dir():
+        return False
+    return any(d.is_dir() and _VERSION_DIR_RE.match(d.name) for d in cache_base.iterdir())
+
+
+def _self_heal_from_marketplace(
+    marketplace_dir: Path,
+    cache_base: Path,
+    version: str,
+) -> None:
+    """Bootstrap an empty cache by copying the marketplace clone whole-sale.
+
+    Per v0.3.39 D-9.39.1: when ``_cache_has_any_version(cache_base)`` is
+    False, this fills the gap so the rest of the update flow has
+    something to base on. Copies ``marketplace_dir`` to
+    ``cache_base / version`` byte-for-byte (including ``.git``, mirroring
+    a manual ``cp -R``). No-op if the target dir already exists (race
+    safety / idempotency).
+    """
+    cache_base.mkdir(parents=True, exist_ok=True)
+    target = cache_base / version
+    if target.exists():
+        return
+    shutil.copytree(marketplace_dir, target)
+
+
 # ---------------------------------------------------------------------------
 # update
 # ---------------------------------------------------------------------------
@@ -297,6 +337,19 @@ def update(
             err=True,
         )
         raise typer.Exit(1)
+
+    # v0.3.39 D-9.39.1 self-heal: when the plugin cache contains no
+    # version subdirs (empty dir, or ``.bak.*``-only), bootstrap from
+    # the marketplace clone before running the diff-and-sync logic.
+    # Catches the dev-workflow corner case where Claude Code's plugin
+    # manager half-fails (installed_plugins.json points at a non-
+    # existent cache dir) — without this, ``paperwiki update`` would
+    # exit "already at vX.Y.Z" while leaving the cache empty.
+    if not _cache_has_any_version(_CACHE_BASE):
+        _self_heal_from_marketplace(marketplace_dir, _CACHE_BASE, marketplace_ver)
+        typer.echo(
+            f"paper-wiki: cache was empty — bootstrapped from marketplace at v{marketplace_ver}."
+        )
 
     cache_ver = _cache_version()
 

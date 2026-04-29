@@ -126,9 +126,11 @@ def test_bash_helpers_present_with_v0_3_38_tag() -> None:
         "paperwiki_ensure_path",
         "paperwiki_resolve_plugin_root",
         "paperwiki_bootstrap",
+        "paperwiki_diag",
     ):
         assert f"{fn_name}()" in body, (
-            f"helper must declare public function `{fn_name}` (D-9.38.2 — exactly three functions)"
+            f"helper must declare public function `{fn_name}` "
+            f"(D-9.38.2 expanded by D-9.39.3 — four functions)"
         )
 
 

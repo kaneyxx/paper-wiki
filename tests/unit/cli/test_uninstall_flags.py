@@ -123,6 +123,15 @@ def _seed_everything_layer(home: Path) -> dict[str, Path]:
     marker = local_bin / ".paperwiki-path-warned"
     marker.write_text("", encoding="utf-8")
 
+    # v0.3.38+ helper install location — populated by ensure-env.sh
+    # on every SessionStart. v0.3.39 D-9.39.2: --everything removes it.
+    helper_lib = home / ".local" / "lib" / "paperwiki"
+    helper_lib.mkdir(parents=True)
+    (helper_lib / "bash-helpers.sh").write_text(
+        "# paperwiki bash-helpers — v0.3.38 (test fixture)\n",
+        encoding="utf-8",
+    )
+
     clone = home / ".claude" / "plugins" / "marketplaces" / "paper-wiki"
     clone.mkdir(parents=True, exist_ok=True)
     (clone / ".claude-plugin").mkdir()
@@ -134,6 +143,7 @@ def _seed_everything_layer(home: Path) -> dict[str, Path]:
         "config": config,
         "shim": shim,
         "marker": marker,
+        "helper_lib": helper_lib,
         "clone": clone,
     }
 
@@ -204,6 +214,9 @@ def test_uninstall_everything_yes_removes_seven_targets(fake_home: Path) -> None
     assert not extras["config"].exists(), "~/.config/paper-wiki must be wiped"
     assert not extras["shim"].exists(), "~/.local/bin/paperwiki must be removed"
     assert not extras["marker"].exists(), "~/.local/bin/.paperwiki-path-warned must be removed"
+    assert not extras["helper_lib"].exists(), (
+        "~/.local/lib/paperwiki must be removed (v0.3.39 D-9.39.2)"
+    )
     assert not extras["clone"].exists(), "marketplace clone must be wiped"
 
 

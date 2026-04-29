@@ -117,6 +117,19 @@ def _shim_marker(opts: UninstallOpts) -> Path:
     return _home(opts) / ".local" / "bin" / ".paperwiki-path-warned"
 
 
+def _helper_lib_dir(opts: UninstallOpts) -> Path:
+    """``~/.local/lib/paperwiki/`` — installed by ensure-env.sh since v0.3.38.
+
+    v0.3.39 D-9.39.2: parallel to ``_shim_path`` — ``--everything``
+    removes both. The dir typically holds ``bash-helpers.sh`` (the
+    shared SKILL helper); future ensure-env.sh installs may add more
+    files here. Note the dirname is the literal ``paperwiki`` (no
+    hyphen, matches the shim's ``~/.local/bin/paperwiki``) — NOT
+    ``_PLUGIN_NAME`` which is the marketplace key ``paper-wiki``.
+    """
+    return _home(opts) / ".local" / "lib" / "paperwiki"
+
+
 def _marketplace_clone(opts: UninstallOpts) -> Path:
     return _claude_home(opts) / "plugins" / "marketplaces" / _PLUGIN_NAME
 
@@ -335,6 +348,21 @@ def plan_targets(opts: UninstallOpts) -> list[Target]:
                     kind="file",
                     detail="+ .paperwiki-path-warned" if extra else "",
                     extra_paths=extra,
+                )
+            )
+
+        # v0.3.39 D-9.39.2: ~/.local/lib/paperwiki/ holds bash-helpers.sh
+        # (and any future helper files). Treat parallel to the shim — the
+        # ensure-env.sh installer creates both on every SessionStart, so
+        # ``--everything`` removes both.
+        helper_lib = _helper_lib_dir(opts)
+        if helper_lib.is_dir():
+            targets.append(
+                Target(
+                    label="~/.local/lib/paperwiki helper dir",
+                    path=helper_lib,
+                    kind="dir",
+                    detail=_format_size(_dir_size(helper_lib)),
                 )
             )
 

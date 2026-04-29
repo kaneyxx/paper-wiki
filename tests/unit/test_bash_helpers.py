@@ -1,13 +1,16 @@
-"""Unit tests for ``lib/bash-helpers.sh`` (v0.3.38 D-9.38.2).
+"""Unit tests for ``lib/bash-helpers.sh`` (v0.3.38 D-9.38.2 + v0.3.39 D-9.39.3).
 
 The helper is sourced by every shim-using SKILL via the
-``source-or-die`` stanza (D-9.38.4). Its three public functions —
-``paperwiki_ensure_path``, ``paperwiki_resolve_plugin_root``, and
-``paperwiki_bootstrap`` — must be idempotent and side-effect-free
-beyond the documented exports. These tests run each function in a
-fresh ``bash -c`` subprocess with `env=` overrides for ``HOME`` and
-``PATH`` so the assertions don't depend on the developer's real
-environment.
+``source-or-die`` stanza (D-9.38.4). Its four public functions —
+``paperwiki_ensure_path``, ``paperwiki_resolve_plugin_root``,
+``paperwiki_bootstrap``, and ``paperwiki_diag`` (added in v0.3.39
+D-9.39.3, superseding the v0.3.38 "exactly three functions"
+constraint) — must be idempotent and side-effect-free beyond the
+documented exports. ``paperwiki_diag`` is additionally read-only
+(no env mutation, no filesystem writes, no secret content). These
+tests run each function in a fresh ``bash -c`` subprocess with
+``env=`` overrides for ``HOME`` and ``PATH`` so the assertions
+don't depend on the developer's real environment.
 
 The smoke-test pin in ``tests/test_smoke.py`` covers file-existence
 and tag-line checks; here we exercise the runtime contract.
@@ -71,8 +74,8 @@ def test_helper_parses_with_bash_n() -> None:
     assert proc.returncode == 0, f"bash -n failed:\n{proc.stderr}"
 
 
-def test_helper_declares_three_public_functions(tmp_path: Path) -> None:
-    """``declare -F`` lists exactly the documented public surface."""
+def test_helper_declares_four_public_functions(tmp_path: Path) -> None:
+    """``declare -F`` lists exactly the documented public surface (v0.3.39 D-9.39.3)."""
     proc = _run_bash(
         f"source {_HELPER_PATH}; declare -F | awk '{{print $3}}'",
         env_overrides={"HOME": str(tmp_path)},
@@ -83,6 +86,7 @@ def test_helper_declares_three_public_functions(tmp_path: Path) -> None:
         "paperwiki_ensure_path",
         "paperwiki_resolve_plugin_root",
         "paperwiki_bootstrap",
+        "paperwiki_diag",
     } <= declared, f"missing public functions; declared = {declared!r}"
 
 
@@ -227,3 +231,118 @@ def test_bootstrap_idempotent(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     # Single prefix, despite three calls.
     assert proc.stdout.strip() == f"PATH={tmp_path}/.local/bin:/usr/bin:/bin"
+
+
+# ---------------------------------------------------------------------------
+# paperwiki_diag (v0.3.39 D-9.39.3)
+# ---------------------------------------------------------------------------
+
+
+def test_diag_emits_all_six_sections(tmp_path: Path) -> None:
+    """``paperwiki_diag`` produces a six-section dump under controlled HOME."""
+    _build_fake_cache(tmp_path, "0.3.38", "0.3.39")
+    # Seed shim + recipes so the dump shows real content.
+    shim_dir = tmp_path / ".local" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "paperwiki"
+    shim.write_text(
+        "#!/usr/bin/env bash\n# paperwiki shim — v0.3.39 (test)\n",
+        encoding="utf-8",
+    )
+    recipes_dir = tmp_path / ".config" / "paper-wiki" / "recipes"
+    recipes_dir.mkdir(parents=True)
+    (recipes_dir / "daily.yaml").write_text("name: daily\n", encoding="utf-8")
+    (recipes_dir / "weekly.yaml").write_text("name: weekly\n", encoding="utf-8")
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    # Header + footer.
+    assert "=== paperwiki_diag — install state ===" in out
+    assert "=== end paperwiki_diag ===" in out
+    # Six section dividers.
+    for section in (
+        "--- helper ---",
+        "--- environment ---",
+        "--- shim ",
+        "--- plugin cache versions ",
+        "--- recipes ",
+    ):
+        assert section in out, f"missing section {section!r} in diag output"
+    # Helper version tag echoed (head -1 of the helper file).
+    assert "paperwiki bash-helpers" in out
+    # Cache versions listed.
+    assert "0.3.38" in out
+    assert "0.3.39" in out
+    # Recipes listed.
+    assert "daily.yaml" in out
+    assert "weekly.yaml" in out
+    # PATH + CLAUDE_PLUGIN_ROOT echoed.
+    assert "PATH=" in out
+    assert "CLAUDE_PLUGIN_ROOT=" in out
+
+
+def test_diag_handles_missing_dirs_gracefully(tmp_path: Path) -> None:
+    """``paperwiki_diag`` doesn't crash when shim/cache/recipes don't exist."""
+    # No cache, no shim, no recipes — bare HOME.
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "(not installed)" in out  # shim missing
+    assert "(directory does not exist)" in out  # cache + recipes missing
+
+
+def test_diag_does_not_dump_secrets(tmp_path: Path) -> None:
+    """``paperwiki_diag`` MUST NOT print ``secrets.env`` content (D-9.39.3 R2)."""
+    config_dir = tmp_path / ".config" / "paper-wiki"
+    config_dir.mkdir(parents=True)
+    (config_dir / "secrets.env").write_text(
+        "export PAPERWIKI_S2_API_KEY=SUPER_SECRET_KEY_123\n",
+        encoding="utf-8",
+    )
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "SUPER_SECRET_KEY_123" not in proc.stdout, (
+        "paperwiki_diag must NEVER print secrets.env content (D-9.39.3 R2)"
+    )
+    assert "PAPERWIKI_S2_API_KEY" not in proc.stdout, (
+        "paperwiki_diag must not name secret env vars from secrets.env"
+    )
+
+
+def test_diag_is_read_only(tmp_path: Path) -> None:
+    """``paperwiki_diag`` must not mutate state (no env changes, no file writes)."""
+    _build_fake_cache(tmp_path, "0.3.38")
+    # Capture state before.
+    before_listing = sorted(p.name for p in tmp_path.rglob("*"))
+
+    diff_check = (
+        'echo "PATH_CHANGED=$([ \\"$PATH\\" = \\"$orig_path\\" ] '
+        '&& echo no || echo yes)"; '
+        'echo "ROOT_CHANGED=$([ \\"${CLAUDE_PLUGIN_ROOT:-}\\" = \\"$orig_root\\" ] '
+        '&& echo no || echo yes)"'
+    )
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; "
+        f"orig_path=$PATH; "
+        f"orig_root=${{CLAUDE_PLUGIN_ROOT:-}}; "
+        f"paperwiki_diag > /dev/null; "
+        f"{diff_check}",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "PATH_CHANGED=no" in proc.stdout, "paperwiki_diag mutated PATH"
+    assert "ROOT_CHANGED=no" in proc.stdout, "paperwiki_diag mutated CLAUDE_PLUGIN_ROOT"
+
+    # Filesystem unchanged.
+    after_listing = sorted(p.name for p in tmp_path.rglob("*"))
+    assert before_listing == after_listing, "paperwiki_diag mutated the filesystem under HOME"
