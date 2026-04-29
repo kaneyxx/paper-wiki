@@ -9,6 +9,164 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.38] - 2026-04-29
+
+### Changed
+
+- **Shared `lib/bash-helpers.sh` replaces 18 inline PATH guards +
+  2 inline `CLAUDE_PLUGIN_ROOT=$(...)` resolvers across 13 SKILLs.**
+  Until v0.3.37 every shim-using SKILL inlined `export
+  PATH="$HOME/.local/bin:$PATH"` (a 1-line "always-defensive" guard
+  that landed in v0.3.34 D-9.34.6), and setup + digest additionally
+  inlined the v0.3.34 D-9.34.2 plugin-cache resolver (a 5-line
+  pipeline). The duplication wasn't catastrophic, but the v0.3.36
+  export-sweep miss (D-9.36.4 had to patch the resolver in 2 places)
+  showed the pattern that bites: when the duplicated snippet evolves,
+  every copy has to be chased, and a missed copy is a bug.
+
+  v0.3.38 collapses both patterns into three idempotent functions
+  exported by `~/.local/lib/paperwiki/bash-helpers.sh` (D-9.38.2):
+  `paperwiki_ensure_path` (PATH guard), `paperwiki_resolve_plugin_root`
+  (CLAUDE_PLUGIN_ROOT resolver), `paperwiki_bootstrap` (both). Each
+  shim-using SKILL now opens its first bash block with the
+  `source-or-die` stanza (D-9.38.4) — sourcing the helper, then
+  calling the appropriate function. Tier 1 (11 SKILLs with only
+  PATH guard) calls `paperwiki_ensure_path`; Tier 2 (setup +
+  digest, which also need the resolver) calls
+  `paperwiki_bootstrap`; Tier 3 (`analyze`, no shell-out) is
+  unchanged. Final state: zero `export PATH=...` and zero
+  `CLAUDE_PLUGIN_ROOT=$(` literals across `skills/`.
+
+- **No silent fallback when the helper is missing.** Each SKILL
+  bootstrap stanza fails loud with a restart-Claude-Code instruction
+  if `~/.local/lib/paperwiki/bash-helpers.sh` is absent (D-9.38.4
+  rejects the silent-fallback approach). Honest failure mode: a
+  stale Claude Code session that predates the v0.3.38 helper install
+  sees broken SKILLs, the user reads the error message ("exit Claude
+  Code and re-open — the SessionStart hook installs the helper"),
+  restart triggers SessionStart → helper installs → SKILL works.
+  Quieter, less-honest fallbacks would let v0.3.38 sessions silently
+  use v0.3.37 inline behavior, defeating the upgrade contract.
+
+### Added
+
+- **`hooks/ensure-env.sh` ships the helper to `~/.local/lib/paperwiki/`
+  on every SessionStart** (D-9.38.1). Mirrors the existing shim
+  install pattern: `EXPECTED_HELPER_TAG`-gated idempotent rewrite,
+  byte-identical content via `cat $PLUGIN_ROOT/lib/bash-helpers.sh
+  > $HELPER_PATH`, non-blocking on read-only `~/.local/lib/`
+  (warning + continue; the SKILL bootstrap stanza handles
+  missing-helper at SKILL-time per D-9.38.4).
+
+- **Comprehensive subprocess lint mode in
+  `tests/unit/test_skill_bash_snippets_lint.py`** (D-9.38.6).
+  Every fenced ```bash block of every shim-using SKILL runs
+  end-to-end in a sandboxed HOME tree: smart mock paperwiki shim
+  with per-subcommand dispatch, real bash-helpers.sh, stub plugin
+  cache, stub vault. Catches the helper-sourcing failure mode
+  that the v0.3.36 static lint (`bash -n` syntax-only) couldn't
+  see. Audit pass during 9.100 development used **zero**
+  `<!-- skip-exec -->` markers — the smart mock shim covered every
+  invocation cleanly. The marker is in the contract for future
+  blocks that need it (e.g. real-network or interactive-flow
+  blocks).
+
+  Side effect: the v0.3.36 placeholder substitution
+  (`<X>` → `"<X>"`) had a latent bug — when the placeholder sat
+  inside an existing `"..."` literal (e.g. `"<canonical-id>"`),
+  nested `""<X>""` parsed as empty-string + redirection. Static
+  lint never caught this (it's only a problem under real
+  execution). v0.3.38 switches the substitution to
+  `<X>` → `__X__` (alphanumeric stub, no redirection hazard).
+
+- **F6 forbidden-pattern fixture** in
+  `tests/unit/fixtures/bad_skill.md` (D-9.38.6). A bash block that
+  sources `/nonexistent/helper.sh` directly without the
+  source-or-die fallback — the regression guard for the
+  helper-sourcing failure mode v0.3.38 introduces. The
+  fixture-based test asserts the subprocess exits non-zero.
+
+### Decisions ratified
+
+- **D-9.38.1** Helper distribution: `~/.local/lib/paperwiki/
+  bash-helpers.sh`, installed by ensure-env.sh on every
+  SessionStart. Reject the alternative of shipping the helper
+  inside the plugin cache — the resolver itself uses
+  `$CLAUDE_PLUGIN_ROOT`, chicken-and-egg.
+- **D-9.38.2** Helper API: exactly three idempotent public
+  functions (`paperwiki_ensure_path`,
+  `paperwiki_resolve_plugin_root`, `paperwiki_bootstrap`).
+- **D-9.38.3** Helper carries a `# paperwiki bash-helpers — v0.3.38`
+  version tag for the idempotent-rewrite gate.
+- **D-9.38.4** Source-or-die SKILL bootstrap stanza — no silent
+  fallback. Reject the if/else fallback approach because it would
+  silently degrade to v0.3.37 inline behavior under the v0.3.38
+  label.
+- **D-9.38.5** SKILL sweep tiered into Tier 1 (11 files, PATH-only)
+  + Tier 2 (2 files, PATH + resolver) + Tier 3 (analyze, no
+  shell-out). Each tier ships as a separate commit for rollback
+  granularity.
+- **D-9.38.6** Subprocess lint scope: comprehensive (every block,
+  not just Block #0). Smart mock paperwiki shim handles all 13
+  runner subcommands; `<!-- skip-exec -->` markers exempt blocks
+  that genuinely can't run in the sandbox.
+- **D-9.38.7** Shim tag and helper tag bump in lockstep to v0.3.38;
+  smoke tests pin both.
+
+### Lessons learned
+
+The "shared helper extracted from N inline copies" pattern is a
+classic refactor; the lessons are about the *contract* around it,
+not the extraction itself. Two surfaced during this work:
+
+1. **Be honest about failure modes.** The first instinct was to
+   inline a fallback (`if helper exists, use it; else inline the
+   v0.3.37 PATH guard`). That would have silently made v0.3.38 a
+   no-op for stale sessions — users on a v0.3.38 install would see
+   v0.3.37 behavior with no signal. The source-or-die contract
+   (D-9.38.4) is honest: when the upgrade hasn't fully landed, the
+   user sees a loud restart instruction, not a quiet downgrade.
+   Restart cost is ~5 seconds; the quiet-downgrade alternative
+   would have cost weeks of debugging "v0.3.38 didn't actually
+   change anything for me".
+
+2. **Comprehensive subprocess lint is cheaper than expected.** The
+   plan budgeted ~3-4h for the sandbox + audit. Actual: ~75 minutes
+   to build the sandbox + write the test, plus zero
+   `<!-- skip-exec -->` markers needed in the audit pass. The smart
+   mock shim's per-subcommand dispatch covered every SKILL bash
+   invocation cleanly. The one bug surfaced by the audit was the
+   v0.3.36 placeholder-substitution bug (latent because static
+   lint never executed the blocks), not a SKILL-prose issue. Worth
+   the investment — the lint test catches the entire class of
+   helper-sourcing regressions, and the helper-tag-bump test pin
+   guards against the helper itself drifting.
+
+### Note for future cleanups
+
+`paperwiki uninstall --everything` does NOT yet remove
+`~/.local/lib/paperwiki/`. Cleanup deferred to v0.3.39 (logged as
+9.105 in plan §15.6). Users doing a full reset between v0.3.38
+and v0.3.39 should manually `rm -rf ~/.local/lib/paperwiki/` after
+the uninstall; otherwise the v0.3.38 helper file stays on disk.
+
+### Tests
+
+- 12 new unit tests in `tests/unit/test_bash_helpers.py` cover
+  the helper's runtime contract.
+- 6 new sanity tests in `tests/unit/test_skill_lint_sandbox.py`
+  cover the sandbox infrastructure.
+- 22 new parametric tests in
+  `tests/unit/test_skill_bash_snippets_lint.py::test_bash_blocks_execute_in_sandbox`
+  cover every fenced bash block of every shim-using SKILL.
+- 1 new `test_fixture_F6_subprocess_fails` regression guard.
+- 1 new `test_skip_exec_marker_excludes_block_from_subprocess`
+  marker semantics test.
+- 2 new smoke tests pin the helper file + ensure-env.sh
+  helper-install block.
+- 919 → 943 total tests (+44 net). pytest -q green; mypy --strict
+  clean; ruff check + format clean; claude plugin validate passes.
+
 ## [0.3.37] - 2026-04-28
 
 ### Added
