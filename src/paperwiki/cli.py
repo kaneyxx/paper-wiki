@@ -407,6 +407,13 @@ def update(
             )
 
     old_display = cache_ver if cache_ver else "not installed"
+    # v0.3.40 D-9.40.2: 5-step "Next:" message — the upgrade flow needs
+    # TWO restart cycles, not one. v0.3.39 user feedback: the 3-step
+    # version implied a single restart sufficed, so users hit the
+    # half-installed state and reported it as a regression.
+    #   restart 1 → /plugin install registers the plugin
+    #   restart 2 → SessionStart fires ensure-env.sh which rewrites
+    #               the shim and helper to the new version
     typer.echo(
         f"paper-wiki: {old_display} → {marketplace_ver}"
         + bak_suffix
@@ -416,6 +423,10 @@ def update(
         + "\n  1. Exit any running session: /exit (or Ctrl-D)"
         + "\n  2. Open a fresh session: claude"
         + "\n  3. Inside: /plugin install paper-wiki@paper-wiki"
+        + "\n  4. Exit again: /exit"
+        + "\n  5. Open another fresh session: claude"
+        + "\n     (SessionStart fires ensure-env.sh against the now-registered"
+        + "\n      plugin and rewrites the shim/helper to the new version)"
     )
 
 

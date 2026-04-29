@@ -77,18 +77,16 @@ paperwiki_bootstrap() {
     paperwiki_resolve_plugin_root
 }
 
-paperwiki_diag() {
-    # paper-wiki install-state diagnostic dump (v0.3.39 D-9.39.3).
-    #
-    # Read-only — no side effects, no env mutation, no secret content.
-    # Output is safe to share when asking for help: prints PATH (not
-    # secret), CLAUDE_PLUGIN_ROOT (already public via SKILL prose),
-    # the helper's own version tag, the shim's first lines, and ``ls -1``
-    # of two known directories. Does NOT print secrets.env, recipe
-    # contents, or any tool-call output.
+_paperwiki_diag_render() {
+    # Internal helper — emits the full diag dump to stdout. Split from
+    # ``paperwiki_diag`` (v0.3.40 D-9.40.5) so the public function can
+    # redirect to a file via ``--file <path>`` without duplicating the
+    # body. Underscore-prefix marks this as private API; downstream
+    # callers must use ``paperwiki_diag``.
     local helper_self="${BASH_SOURCE[0]}"
     local shim_path="$HOME/.local/bin/paperwiki"
     local cache_root="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
+    local installed_plugins="$HOME/.claude/plugins/installed_plugins.json"
     local recipes_dir="$HOME/.config/paper-wiki/recipes"
 
     echo "=== paperwiki_diag — install state ==="
@@ -117,6 +115,37 @@ paperwiki_diag() {
         echo "(directory does not exist)"
     fi
     echo
+    # v0.3.40 D-9.40.3: domain-bounded read of Claude Code's
+    # installed_plugins.json — print ONLY the paper-wiki entry. The file
+    # itself is Claude Code's domain (we never write it); this section
+    # exists because the v0.3.39 debug session needed exactly this
+    # information to diagnose a half-fail (file recorded a version +
+    # gitCommitSha + installPath that didn't match the on-disk cache).
+    # Defensive: file-missing AND entry-missing both yield "(not registered)";
+    # malformed JSON yields "(read failed: <msg>)" — never crashes the
+    # diag function.
+    echo "--- installed_plugins.json (paper-wiki entry) ---"
+    if [ -f "$installed_plugins" ]; then
+        python3 - "$installed_plugins" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+    plugins = data.get("plugins", {}) if isinstance(data, dict) else {}
+    entry = plugins.get("paper-wiki@paper-wiki")
+    if entry is None:
+        print("(not registered)")
+    else:
+        print(json.dumps(entry, indent=2))
+except Exception as exc:  # noqa: BLE001 — defensive catch-all per D-9.40.3
+    print(f"(read failed: {exc})")
+PYEOF
+    else
+        echo "(not registered)"
+    fi
+    echo
     echo "--- recipes ($recipes_dir) ---"
     if [ -d "$recipes_dir" ]; then
         ls -1 "$recipes_dir" 2>/dev/null || echo "(empty)"
@@ -124,4 +153,53 @@ paperwiki_diag() {
         echo "(directory does not exist)"
     fi
     echo "=== end paperwiki_diag ==="
+}
+
+paperwiki_diag() {
+    # paper-wiki install-state diagnostic dump (v0.3.39 D-9.39.3 +
+    # v0.3.40 D-9.40.5).
+    #
+    # Read-only on the install state — no env mutation, no secret
+    # content, no writes EXCEPT the user-supplied ``--file <path>``.
+    # Output is safe to share when asking for help: prints PATH (not
+    # secret), CLAUDE_PLUGIN_ROOT (already public via SKILL prose),
+    # the helper's own version tag, the shim's first lines, and
+    # ``ls -1`` of two known directories. Does NOT print secrets.env,
+    # recipe contents, or any tool-call output.
+    #
+    # Modes:
+    #   paperwiki_diag                        Print full dump to stdout (default).
+    #   paperwiki_diag --file <path>          Atomic-write the full dump to <path>
+    #                                         (creating parent dirs as needed) and
+    #                                         echo "wrote diag to <path>" to stdout.
+    local output_path=""
+    case "${1:-}" in
+        --file)
+            shift
+            if [ -z "${1:-}" ]; then
+                echo "paperwiki_diag: --file requires a path" >&2
+                return 1
+            fi
+            output_path="$1"
+            shift
+            ;;
+    esac
+
+    if [ -n "$output_path" ]; then
+        # Best-effort parent-dir creation. ``mkdir -p`` succeeds when
+        # the dir already exists, so this is idempotent. The file
+        # write itself happens inside a subshell with stdout
+        # redirected — atomic from the caller's POV (no partial-write
+        # midstate visible on stdout).
+        local parent_dir
+        parent_dir=$(dirname "$output_path")
+        mkdir -p "$parent_dir" || {
+            echo "paperwiki_diag: failed to create parent dir: $parent_dir" >&2
+            return 1
+        }
+        _paperwiki_diag_render > "$output_path"
+        echo "wrote diag to $output_path"
+    else
+        _paperwiki_diag_render
+    fi
 }

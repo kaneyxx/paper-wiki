@@ -18,6 +18,7 @@ and tag-line checks; here we exercise the runtime contract.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -238,8 +239,13 @@ def test_bootstrap_idempotent(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_diag_emits_all_six_sections(tmp_path: Path) -> None:
-    """``paperwiki_diag`` produces a six-section dump under controlled HOME."""
+def test_diag_emits_all_seven_sections(tmp_path: Path) -> None:
+    """``paperwiki_diag`` produces a seven-section dump under controlled HOME.
+
+    v0.3.40 D-9.40.3 added a 7th section for the
+    ``installed_plugins.json`` paper-wiki entry between cache-versions and
+    recipes.
+    """
     _build_fake_cache(tmp_path, "0.3.38", "0.3.39")
     # Seed shim + recipes so the dump shows real content.
     shim_dir = tmp_path / ".local" / "bin"
@@ -263,12 +269,13 @@ def test_diag_emits_all_six_sections(tmp_path: Path) -> None:
     # Header + footer.
     assert "=== paperwiki_diag — install state ===" in out
     assert "=== end paperwiki_diag ===" in out
-    # Six section dividers.
+    # Seven section dividers (v0.3.40 D-9.40.3 added installed_plugins.json).
     for section in (
         "--- helper ---",
         "--- environment ---",
         "--- shim ",
         "--- plugin cache versions ",
+        "--- installed_plugins.json (paper-wiki entry) ---",
         "--- recipes ",
     ):
         assert section in out, f"missing section {section!r} in diag output"
@@ -346,3 +353,209 @@ def test_diag_is_read_only(tmp_path: Path) -> None:
     # Filesystem unchanged.
     after_listing = sorted(p.name for p in tmp_path.rglob("*"))
     assert before_listing == after_listing, "paperwiki_diag mutated the filesystem under HOME"
+
+
+# ---------------------------------------------------------------------------
+# v0.3.40 D-9.40.3: paperwiki_diag prints installed_plugins.json paper-wiki entry
+# ---------------------------------------------------------------------------
+
+
+def _seed_installed_plugins(
+    tmp_path: Path, *, paper_wiki_version: str | None = None, extra_plugin: bool = False
+) -> Path:
+    """Stage ``$HOME/.claude/plugins/installed_plugins.json``.
+
+    When ``paper_wiki_version`` is given, seeds a paper-wiki@paper-wiki
+    entry at that version. When None, the JSON file exists but the
+    paper-wiki key is absent. ``extra_plugin`` adds a sibling plugin
+    entry to verify domain-bounded printing (D-9.40.3).
+    """
+    plugins_dir = tmp_path / ".claude" / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    path = plugins_dir / "installed_plugins.json"
+    plugins: dict[str, object] = {}
+    if paper_wiki_version is not None:
+        plugins["paper-wiki@paper-wiki"] = [
+            {
+                "scope": "user",
+                "version": paper_wiki_version,
+                "gitCommitSha": "deadbeefcafe",
+                "installPath": str(
+                    plugins_dir / "cache" / "paper-wiki" / "paper-wiki" / paper_wiki_version
+                ),
+            }
+        ]
+    if extra_plugin:
+        plugins["other-plugin@other-source"] = [{"scope": "user", "version": "1.2.3"}]
+    path.write_text(
+        json.dumps({"version": 2, "plugins": plugins}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_diag_prints_installed_plugins_entry_when_present(tmp_path: Path) -> None:
+    """When the paper-wiki entry exists, diag prints its keys (D-9.40.3 case a/b)."""
+    _seed_installed_plugins(tmp_path, paper_wiki_version="0.3.40")
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    # Section header.
+    assert "--- installed_plugins.json (paper-wiki entry) ---" in out
+    # Entry keys appear (version + gitCommitSha + installPath per D-9.40.3).
+    assert "0.3.40" in out
+    assert "deadbeefcafe" in out
+    assert "installPath" in out
+
+
+def test_diag_shows_not_registered_when_file_missing(tmp_path: Path) -> None:
+    """When installed_plugins.json doesn't exist, diag prints (not registered) (D-9.40.3 case c)."""
+    # Don't seed the file at all.
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "--- installed_plugins.json (paper-wiki entry) ---" in out
+    # Pull out the installed-plugins section to scope the assertion.
+    section = out.split("--- installed_plugins.json (paper-wiki entry) ---", 1)[1].split("---", 1)[
+        0
+    ]
+    assert "(not registered)" in section
+
+
+def test_diag_shows_not_registered_when_paper_wiki_entry_absent(tmp_path: Path) -> None:
+    """When the file exists but paper-wiki key is absent, diag prints (not registered).
+
+    D-9.40.3: same fallback for missing-file and missing-entry cases.
+    """
+    # File present, paper-wiki entry absent, sibling plugin present.
+    _seed_installed_plugins(tmp_path, paper_wiki_version=None, extra_plugin=True)
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    section = out.split("--- installed_plugins.json (paper-wiki entry) ---", 1)[1].split("---", 1)[
+        0
+    ]
+    assert "(not registered)" in section
+
+
+def test_diag_handles_malformed_installed_plugins_json(tmp_path: Path) -> None:
+    """When the file is unparseable JSON, diag prints (read failed: <msg>) (D-9.40.3 case d)."""
+    plugins_dir = tmp_path / ".claude" / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    (plugins_dir / "installed_plugins.json").write_text("{ not valid json", encoding="utf-8")
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    section = out.split("--- installed_plugins.json (paper-wiki entry) ---", 1)[1].split("---", 1)[
+        0
+    ]
+    assert "read failed" in section.lower(), (
+        f"expected read-failed fallback in installed-plugins section:\n{section!r}"
+    )
+
+
+def test_diag_does_not_print_other_plugin_entries(tmp_path: Path) -> None:
+    """Domain-bounded scope: diag prints ONLY the paper-wiki entry (D-9.40.3)."""
+    _seed_installed_plugins(tmp_path, paper_wiki_version="0.3.40", extra_plugin=True)
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    # Sibling plugin must NOT leak into the diag output.
+    assert "other-plugin@other-source" not in out
+    assert "other-plugin" not in out
+
+
+# ---------------------------------------------------------------------------
+# v0.3.40 D-9.40.5: paperwiki_diag --file <path> write mode
+# ---------------------------------------------------------------------------
+
+
+def test_diag_file_flag_writes_full_dump_to_path(tmp_path: Path) -> None:
+    """``--file <path>`` writes all 7 sections to the file + confirmation to stdout."""
+    _build_fake_cache(tmp_path, "0.3.40")
+    out_file = tmp_path / "diag.txt"
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag --file {out_file}",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    # Stdout shows confirmation only — the dump went to the file.
+    assert f"wrote diag to {out_file}" in proc.stdout
+    # No section headers in stdout (they all went to the file).
+    assert "=== paperwiki_diag" not in proc.stdout
+
+    # File contains the full 7-section dump.
+    content = out_file.read_text(encoding="utf-8")
+    assert "=== paperwiki_diag — install state ===" in content
+    assert "=== end paperwiki_diag ===" in content
+    for section in (
+        "--- helper ---",
+        "--- environment ---",
+        "--- shim ",
+        "--- plugin cache versions ",
+        "--- installed_plugins.json (paper-wiki entry) ---",
+        "--- recipes ",
+    ):
+        assert section in content, f"missing {section!r} in file content"
+
+
+def test_diag_default_mode_still_prints_to_stdout(tmp_path: Path) -> None:
+    """No flag → behaves as today (prints full dump to stdout)."""
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "=== paperwiki_diag — install state ===" in proc.stdout
+    assert "=== end paperwiki_diag ===" in proc.stdout
+    # No "wrote diag to" line in stdout-only mode.
+    assert "wrote diag to" not in proc.stdout
+
+
+def test_diag_file_flag_creates_parent_dirs(tmp_path: Path) -> None:
+    """``--file`` with a path whose parent doesn't exist creates parents."""
+    out_file = tmp_path / "deeply" / "nested" / "subdir" / "diag.txt"
+    assert not out_file.parent.exists()
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag --file {out_file}",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert out_file.is_file()
+    assert "=== paperwiki_diag — install state ===" in out_file.read_text(encoding="utf-8")
+
+
+def test_diag_file_flag_without_arg_fails_loudly(tmp_path: Path) -> None:
+    """``--file`` without a path arg → non-zero exit + actionable error message."""
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag --file",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode != 0, (
+        f"expected non-zero exit when --file has no arg; got 0:\n"
+        f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    )
+    # Error mentions --file and "path" (actionable).
+    combined = proc.stdout + proc.stderr
+    assert "--file" in combined
+    assert "path" in combined.lower()

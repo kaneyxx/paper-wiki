@@ -239,3 +239,62 @@ class TestUpdateSelfHeal:
         assert "marketplace clone not found" in result.output
         # Cache untouched — no self-heal happened (we never even read marketplace_ver).
         assert not cache_base.exists()
+
+
+# ---------------------------------------------------------------------------
+# v0.3.40 D-9.40.2: "Next:" message must call out TWO restart cycles
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateNextMessage:
+    """Plan §17.3 task 9.121 / D-9.40.2.
+
+    The v0.3.39 "Next:" message implied a single Claude Code restart was
+    sufficient, but the actual upgrade flow requires TWO: (1) the first
+    restart so ``/plugin install`` can register the plugin in
+    ``installed_plugins.json``; (2) the second restart so SessionStart's
+    ``ensure-env.sh`` fires against the now-registered plugin and
+    rewrites the shim/helper. v0.3.40 makes this explicit.
+
+    Acceptance criteria:
+    (a) Substring ``"Open another fresh session"`` appears (= step 5).
+    (b) ``"/exit"`` appears at least twice (= steps 1 and 4).
+    """
+
+    def test_next_message_calls_out_two_restarts_on_upgrade(
+        self, update_env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+        # Marketplace at v0.3.40 (the new version we're upgrading to).
+        _seed_marketplace(marketplace, "0.3.40")
+        # Cache at v0.3.39 (the old version we're upgrading from) — triggers
+        # the actual upgrade path (cache_ver != marketplace_ver) which is
+        # the only branch that emits the "Next:" message.
+        old_cache = cache_base / "0.3.39"
+        old_cache.mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.39")
+        # Stub the editable-install uninstall — there's no real venv in
+        # tmp_path. The function is best-effort but we don't want the
+        # subprocess.run call to fire.
+        monkeypatch.setattr(cli_module, "_uninstall_stale_editable_paperwiki", lambda: None)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--marketplace-dir", str(update_env["marketplace_dir"])],
+        )
+
+        assert result.exit_code == 0, result.output
+        # Sanity: the upgrade headline appears (this is the only branch
+        # that emits "Next:").
+        assert "0.3.39 → 0.3.40" in result.output
+        # D-9.40.2 acceptance (a): step 5 substring present.
+        assert "Open another fresh session" in result.output, (
+            f"missing 5th step in output:\n{result.output}"
+        )
+        # D-9.40.2 acceptance (b): /exit appears for both step 1 and step 4.
+        assert result.output.count("/exit") >= 2, (
+            f"expected at least 2 occurrences of /exit, got "
+            f"{result.output.count('/exit')}:\n{result.output}"
+        )
