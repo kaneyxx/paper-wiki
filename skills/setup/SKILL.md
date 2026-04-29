@@ -42,24 +42,28 @@ recipe; use AskUserQuestion to ask the user whether to reconfigure first.
 
 ### Step 0 — Verify the venv
 
-Run this exact bash to bootstrap (or refresh) the shared venv. The
-defensive resolver is required because `$CLAUDE_PLUGIN_ROOT` is often
-unset inside Claude bash subprocesses (D-9.34.2), and the hook script
-is a legitimate plugin-cache resource that the shim cannot self-shim.
+Run this exact bash to bootstrap (or refresh) the shared venv.
+`paperwiki_bootstrap` (from the v0.3.38 shared helper) ensures
+`~/.local/bin` is on PATH and resolves `$CLAUDE_PLUGIN_ROOT` from the
+highest-version paper-wiki plugin cache, so the subsequent `bash
+"$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh"` invocation always sees a
+non-empty value (D-9.38.2).
 
 ```bash
-if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-    export CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
-        | grep -v '\.bak\.' \
-        | sort -V | tail -1 | sed 's:/$::')
-fi
+source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+    echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+    echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+    echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+    exit 1
+}
+paperwiki_bootstrap
 bash "$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh"
 ```
 
-The `export` is mandatory (D-9.36.4): the subsequent `bash` invocation
-spawns a child shell that needs `$CLAUDE_PLUGIN_ROOT` set. Without
-`export`, `ensure-env.sh` exits with
-"`CLAUDE_PLUGIN_ROOT must be set by Claude Code`".
+The source-or-die stanza is mandatory per D-9.38.4 — there is no
+silent fallback. A stale Claude Code session that predates the
+helper install fails loud with a restart instruction; restart →
+SessionStart hook installs the helper → SKILL works.
 
 Confirm the next step (`paperwiki diagnostics`) runs without error —
 that exit-0 IS the readiness gate (no separate `.installed` stamp
@@ -68,11 +72,17 @@ check; v0.3.34+ collapses the gate into the shim).
 ### Step 1 — Run diagnostics
 
 Run this exact bash to call the diagnostics runner via the shim and
-parse the JSON. The `export PATH=...` line is mandatory — fresh-install
-users may not have `~/.local/bin` on PATH yet (D-9.34.6).
+parse the JSON. Sourcing the helper is mandatory — fresh-install
+users may not have `~/.local/bin` on PATH yet (D-9.34.6 → D-9.38.4).
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+    echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+    echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+    echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+    exit 1
+}
+paperwiki_ensure_path
 paperwiki diagnostics
 ```
 

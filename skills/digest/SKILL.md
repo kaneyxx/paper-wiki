@@ -37,19 +37,16 @@ to `paperwiki:setup`.
    land in the plugin starter directory and pick the wrong recipe.
 
    ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   # D-9.34.2: Claude bash subprocesses sometimes start with
-   # $CLAUDE_PLUGIN_ROOT unset. Resolve the highest-version cache dir
-   # defensively so the bundled-template fallback below works.
-   if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-       # D-9.36.4: `export` is mandatory so subsequent child shells
-       # (bash invocations, `paperwiki` shim subprocesses) inherit
-       # the resolved root. Without it ensure-env.sh exits with
-       # "CLAUDE_PLUGIN_ROOT must be set by Claude Code".
-       export CLAUDE_PLUGIN_ROOT=$(ls -d "$HOME/.claude/plugins/cache/paper-wiki/paper-wiki/"*/ 2>/dev/null \
-           | grep -v '\.bak\.' \
-           | sort -V | tail -1 | sed 's:/$::')
-   fi
+   source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+       echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+       echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+       echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+       exit 1
+   }
+   # paperwiki_bootstrap = paperwiki_ensure_path + paperwiki_resolve_plugin_root.
+   # The resolver populates $CLAUDE_PLUGIN_ROOT (D-9.38.2 → D-9.34.2 + D-9.36.4
+   # rolled into the helper) so the bundled-template fallback below works.
+   paperwiki_bootstrap
    CONFIG_ROOT="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
    name="${1:-daily}"
    case "$name" in
@@ -93,7 +90,13 @@ to `paperwiki:setup`.
    run; tell the user to exit and restart Claude Code.
 
    ```bash
-   export PATH="$HOME/.local/bin:$PATH"
+   source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+       echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+       echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+       echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+       exit 1
+   }
+   paperwiki_ensure_path
    paperwiki status
    ```
 
@@ -104,7 +107,13 @@ to `paperwiki:setup`.
    the v0.3.32 ambiguity that routed users to the bundled starter.
 
    ```bash
-   export PATH="$HOME/.local/bin:$PATH"
+   source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+       echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+       echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+       echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+       exit 1
+   }
+   paperwiki_ensure_path
    paperwiki digest "$RECIPE"
    ```
 5. **Inspect the exit code.** 0 = success, 1 = user error
@@ -123,7 +132,13 @@ to `paperwiki:setup`.
       bash so figures are on disk before wiki-ingest runs:
 
       ```bash
-      export PATH="$HOME/.local/bin:$PATH"
+      source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+          echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+          echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+          echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+          exit 1
+      }
+      paperwiki_ensure_path
       paperwiki extract-images <vault> <canonical-id>
       ```
 
@@ -163,7 +178,13 @@ to `paperwiki:setup`.
       literal shim subcommand:
 
       ```bash
-      export PATH="$HOME/.local/bin:$PATH"
+      source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+          echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+          echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+          echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+          exit 1
+      }
+      paperwiki_ensure_path
       paperwiki wiki-ingest "$VAULT_PATH" "<canonical-id>" --auto-bootstrap
       ```
 
