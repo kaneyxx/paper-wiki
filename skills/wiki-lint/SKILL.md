@@ -36,7 +36,13 @@ or query knowledge (`wiki-query`).
    not have `~/.local/bin` on PATH yet (D-9.34.6).
 
    ```bash
-   export PATH="$HOME/.local/bin:$PATH"
+   source "$HOME/.local/lib/paperwiki/bash-helpers.sh" 2>/dev/null || {
+       echo "ERROR: paper-wiki bash-helpers missing at ~/.local/lib/paperwiki/bash-helpers.sh." >&2
+       echo "  Fix: exit Claude Code and re-open — the SessionStart hook installs the helper." >&2
+       echo "  Persistent failures: ~/.local/lib/ may be unwritable; re-run \$CLAUDE_PLUGIN_ROOT/hooks/ensure-env.sh." >&2
+       exit 1
+   }
+   paperwiki_ensure_path
    paperwiki wiki-lint <vault>
    ```
 
