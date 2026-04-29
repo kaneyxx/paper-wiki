@@ -9,6 +9,132 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.40] - 2026-04-29
+
+### Added
+
+- **`paperwiki status` install-health check** (D-9.40.1). The status
+  command now appends a 4-row health section after the existing
+  4-line state report:
+
+  ```
+  install health   : 4/4 healthy
+    ✓ helper present
+    ✓ helper tag matches
+    ✓ shim present + tag matches
+    ✓ ~/.local/bin on PATH
+  ```
+
+  When unhealthy, ✗ rows include an action hint
+  (`(action: restart Claude Code)` or
+  `(action: add 'export PATH="$HOME/.local/bin:$PATH"' to your shell rc)`).
+  The status command remains exit-0 in every healthy/unhealthy
+  combination — warnings are loud but non-fatal, so automation
+  pipes through `paperwiki status` aren't broken by helper-state
+  issues. This delivers on the v0.3.39 §15.4 R1 retro promise:
+  pushing the source-or-die contract from SKILL prose down to the
+  runner layer where it always fires regardless of how Claude
+  executes the SKILL.
+
+- **`paperwiki_diag` includes `installed_plugins.json` paper-wiki
+  entry** (D-9.40.3). The diag dump grew a 7th section between
+  cache-versions and recipes that prints just the
+  `paper-wiki@paper-wiki` entry from
+  `~/.claude/plugins/installed_plugins.json` (or `(not registered)`
+  when the file is missing or doesn't have the entry, or
+  `(read failed: <msg>)` when the JSON is malformed). Domain-bounded
+  scope: never prints other plugins' entries. The v0.3.39 debug
+  session needed this exact information to diagnose a half-fail
+  install state; now it's one command away.
+
+- **`paperwiki_diag --file <path>` write mode** (D-9.40.5). Optional
+  `--file <path>` flag writes the multi-line diag dump to the given
+  path (creating parent dirs as needed) and echoes
+  `wrote diag to <path>` to stdout. Default mode (no flag) still
+  prints to stdout. Makes "share the diag output" trivial:
+  `paperwiki_diag --file ~/Desktop/paper-wiki-diag.txt`. `--file`
+  without a path arg exits non-zero with an actionable error.
+
+### Changed
+
+- **`paperwiki update` "Next:" message expanded to 5 steps**
+  (D-9.40.2). v0.3.39 user feedback called out that the 3-step
+  message implied a single Claude Code restart was sufficient, but
+  the actual upgrade requires TWO restart cycles. The new message
+  spells out both:
+
+  ```
+  Next:
+    1. Exit any running session: /exit (or Ctrl-D)
+    2. Open a fresh session: claude
+    3. Inside: /plugin install paper-wiki@paper-wiki
+    4. Exit again: /exit
+    5. Open another fresh session: claude
+       (SessionStart fires ensure-env.sh against the now-registered
+        plugin and rewrites the shim/helper to the new version)
+  ```
+
+- **Marketplace `git fetch` + `git pull --ff-only` are now
+  best-effort** (D-9.40.4). v0.3.39's `_git_pull` aborted
+  `paperwiki update` on any non-zero exit, which prevented the
+  self-heal path from running on offline first-install or
+  corrupt-clone scenarios. v0.3.40 catches `TimeoutExpired`,
+  `FileNotFoundError`, and non-zero exit codes; logs at WARN
+  level; and falls through to the on-disk clone. 10-second
+  timeout per subprocess guards against hanging connections.
+
+### Decisions ratified
+
+- **D-9.40.1** `paperwiki status` adds a 4-row install-health
+  section; status command remains exit-0 in all combinations
+  (warn-not-error). `--strict` mode deferred to 9.125.
+- **D-9.40.2** `paperwiki update` "Next:" message expanded from 3
+  to 5 steps to call out both restart cycles required.
+- **D-9.40.3** `paperwiki_diag` adds an `installed_plugins.json`
+  paper-wiki entry section — domain-bounded (only the paper-wiki
+  entry, never other plugins).
+- **D-9.40.4** Marketplace `git pull` is best-effort with 10s
+  timeout; failures log WARN and fall through to on-disk clone.
+- **D-9.40.5** `paperwiki_diag --file <path>` write mode; only
+  user-supplied paths, no defaults, no auto-pathing.
+
+### Lessons learned
+
+The v0.3.39 retro identified that the v0.3.38 source-or-die contract
+is strong at the lint layer but weak at the user-visible runtime
+layer (SessionStart auto-recovery + Claude SKILL pragmatic-reduction
+mask the loud-error path). v0.3.40's `paperwiki status` install-health
+check (9.114) closes that gap — a contract enforced by the runner
+fires deterministically regardless of how Claude executes the SKILL,
+and the user sees the ✗ row directly when running `paperwiki status`
+from a terminal.
+
+The v0.3.39 release-gate verification surfaced another gap: the
+upgrade flow requires TWO Claude Code restart cycles, but the
+v0.3.39 "Next:" message implied one. v0.3.40's 5-step message
+(D-9.40.2) closes that loop. Lesson: messaging matters as much as
+runner correctness — a runner that succeeds while the user
+misunderstands the flow is functionally indistinguishable from a
+broken runner.
+
+### Tests
+
+- 11 new tests in `tests/unit/cli/test_status_health.py` cover the
+  4-row install-health check (6 direct unit tests of
+  `_check_install_health` + 5 integration tests via CliRunner).
+- 5 new tests extend `tests/unit/cli/test_update_self_heal.py`:
+  4 unit tests on `_git_pull` error paths (success / non-zero /
+  FileNotFoundError / TimeoutExpired) + 1 integration test
+  (offline self-heal completes despite simulated network failure)
+  + 1 wording test for the 5-step "Next:" message.
+- 9 new tests extend `tests/unit/test_bash_helpers.py`: 5 for
+  `installed_plugins.json` section (entry-present / file-missing /
+  entry-absent / malformed-JSON / domain-boundary) + 4 for
+  `--file` mode (writes file / default stdout / parent-dir
+  creation / arg-error).
+- 956 → 983 total tests (+27 net). pytest -q green;
+  mypy --strict clean; ruff check + format clean.
+
 ## [0.3.39] - 2026-04-29
 
 ### Fixed
