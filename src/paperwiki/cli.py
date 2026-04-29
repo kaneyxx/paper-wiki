@@ -15,6 +15,7 @@ with the runners.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ from typing import Annotated
 import typer
 from loguru import logger
 
+from paperwiki import __version__ as _PAPERWIKI_VERSION  # noqa: N812 — module constant alias
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki._internal.paths import resolve_paperwiki_venv_dir
 from paperwiki.runners.diagnostics import main as _diagnostics_main
@@ -479,6 +481,115 @@ def status(
     else:
         bak_line = f"{bak_count} kept; oldest {oldest_ts or 'unknown'}"
     typer.echo(f"bak directories  : {bak_line}")
+
+    # v0.3.40 Task 9.114 / D-9.40.1: install-health check.
+    # Pushes the source-or-die contract from SKILL prose down to the
+    # runner layer per the v0.3.39 §15.4 R1 retro. Status command stays
+    # exit-0 in all healthy/unhealthy combinations — warnings are loud
+    # but non-fatal so automation that pipes status output isn't broken
+    # by helper-state issues.
+    health_rows = _check_install_health()
+    healthy = sum(1 for _label, ok, _hint in health_rows if ok)
+    typer.echo(f"install health   : {healthy}/{len(health_rows)} healthy")
+    for label, ok, hint in health_rows:
+        if ok:
+            typer.echo(f"  ✓ {label}")
+        else:
+            typer.echo(f"  ✗ {label}  (action: {hint})")
+
+
+_VERSION_TAG_RE = re.compile(r"v(\d+\.\d+\.\d+)")
+
+
+def _check_install_health() -> list[tuple[str, bool, str | None]]:
+    """Return ``[(label, ok, action_hint)]`` for the 4 install-health checks.
+
+    Per plan §17.3 task 9.114 + D-9.40.1, ``paperwiki status`` calls this
+    to surface helper/shim/PATH issues that the v0.3.39 §15.4 R1 retro
+    showed are otherwise invisible (SessionStart auto-recovery + Claude
+    SKILL pragmatic-reduction mask the user-visible loud-error path).
+
+    The four rows checked, in order:
+      1. ``~/.local/lib/paperwiki/bash-helpers.sh`` exists.
+      2. Helper's first-line tag matches ``paperwiki.__version__``.
+      3. ``~/.local/bin/paperwiki`` exists AND its tag line matches.
+      4. ``~/.local/bin`` is on ``$PATH``.
+
+    Read-only — no side effects, no env mutation. Each row is computed
+    independently; missing helper does NOT short-circuit row 2 (the
+    label "helper tag matches" reports False with the same restart hint).
+    """
+    home = Path.home()
+    helper_path = home / ".local" / "lib" / "paperwiki" / "bash-helpers.sh"
+    shim_path = home / ".local" / "bin" / "paperwiki"
+    expected_tag = f"v{_PAPERWIKI_VERSION}"
+    restart_hint = "restart Claude Code"
+    path_hint = 'add `export PATH="$HOME/.local/bin:$PATH"` to your shell rc'
+
+    rows: list[tuple[str, bool, str | None]] = []
+
+    # Row 1: helper file present.
+    helper_present = helper_path.is_file()
+    rows.append(
+        (
+            "helper present",
+            helper_present,
+            None if helper_present else restart_hint,
+        )
+    )
+
+    # Row 2: helper tag matches expected version.
+    helper_tag_match = False
+    if helper_present:
+        try:
+            content = helper_path.read_text(encoding="utf-8")
+            first_line = content.splitlines()[0] if content else ""
+            match = _VERSION_TAG_RE.search(first_line)
+            if match is not None and match.group(0) == expected_tag:
+                helper_tag_match = True
+        except (OSError, UnicodeDecodeError, IndexError):
+            helper_tag_match = False
+    rows.append(
+        (
+            "helper tag matches",
+            helper_tag_match,
+            None if helper_tag_match else restart_hint,
+        )
+    )
+
+    # Row 3: shim present AND tag matches (combined per plan §17.3).
+    shim_ok = False
+    if shim_path.is_file():
+        try:
+            content = shim_path.read_text(encoding="utf-8")
+            for line in content.splitlines()[:2]:
+                match = _VERSION_TAG_RE.search(line)
+                if match and match.group(0) == expected_tag:
+                    shim_ok = True
+                    break
+        except (OSError, UnicodeDecodeError):
+            shim_ok = False
+    rows.append(
+        (
+            "shim present + tag matches",
+            shim_ok,
+            None if shim_ok else restart_hint,
+        )
+    )
+
+    # Row 4: ~/.local/bin on PATH (read os.environ — no subprocess).
+    local_bin = str(home / ".local" / "bin")
+    path_value = os.environ.get("PATH", "")
+    path_ok = local_bin in path_value.split(":")
+    rows.append(
+        (
+            "~/.local/bin on PATH",
+            path_ok,
+            None if path_ok else path_hint,
+        )
+    )
+
+    return rows
 
 
 def _summarize_bak_state(cache_root: Path) -> tuple[int, str | None]:
