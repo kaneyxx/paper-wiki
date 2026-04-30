@@ -624,6 +624,140 @@ After the digest is produced, summarize the top 3 papers in chat.
 
 ---
 
+## 8. Upgrade flow
+
+paper-wiki upgrades require **two Claude Code restarts** between the
+release tag landing on `main` and the new version becoming
+user-visible. This is a structural constraint imposed by Claude
+Code's plugin lifecycle, **not** a paperwiki design defect. This
+section documents the constraint, why it exists, and what
+`paperwiki update` does to minimize friction inside the boundary.
+
+### 8.1 The five-step user flow
+
+```
+1. paperwiki update                            ← prep + cleanup (no Claude restart yet)
+2. /exit  (or Ctrl-D)                          ← restart 1
+3. claude                                      ← fresh session
+4.   /plugin install paper-wiki@paper-wiki     ← Claude Code re-installs at new version
+5. /exit                                       ← restart 2
+6. claude                                      ← fresh session
+                                               ← SessionStart fires the v0.3.43 hook,
+                                                 which writes the new shim + helper +
+                                                 rc-block via ensure-env.sh
+```
+
+### 8.2 Why TWO restarts are structural
+
+Two trust-boundary lines force the two-restart shape:
+
+**Restart 1 — `/plugin install` is owned by Claude Code.**
+`~/.claude/plugins/cache/<owner>/<plugin>/<version>/` and
+`~/.claude/plugins/installed_plugins.json` are Claude Code's
+domain. Only `/plugin install` updates them — and `/plugin install`
+runs **inside** a Claude Code session via the plugin manager, not
+from any external CLI. paperwiki cannot simulate `/plugin install`
+without re-implementing Claude Code's plugin manager, including:
+
+- The schema of `installed_plugins.json` (which has changed
+  multiple times across Claude Code 2.x — v0.3.41 release-gate
+  documented at least three shape variations).
+- Per-entry metadata like `gitCommitSha` and `installPath`
+  (computed by Claude Code from the marketplace clone state).
+- Validation that future `/plugin install` runs would do — if
+  paperwiki wrote a partial entry, Claude Code would either
+  detect drift on next operation or refuse to load the plugin.
+
+**Restart 2 — SessionStart hooks load from the registered version.**
+`hooks/hooks.json` is part of the plugin manifest. Claude Code reads
+it at SessionStart from the version recorded in
+`installed_plugins.json`. To fire the new version's
+`ensure-env.sh` (which writes the new shim, helper, and rc block),
+the session must start AFTER `/plugin install` registered the new
+version — i.e., AFTER restart 1. So restart 2 is mandatory to give
+the new hook a chance to run.
+
+### 8.3 What `paperwiki update` does inside the boundary
+
+To minimize friction, `paperwiki update` does as much as possible
+without crossing the trust boundary into Claude Code's domain:
+
+```
+paperwiki update
+  │
+  ├── git pull marketplace clone (best-effort, 10s timeout per
+  │   subprocess; D-9.40.4)
+  │
+  ├── _migrate_legacy_bak()  (v0.3.43 D-9.43.2)
+  │   └── moves any <cache>/<ver>.bak.<ts>/ → <bak-root>/
+  │       (collision-safe; idempotent)
+  │
+  ├── _uninstall_stale_editable_paperwiki()  (v0.3.31-B)
+  │   └── pip-uninstall the editable .pth from the shared venv so
+  │       the rename below doesn't orphan it
+  │
+  ├── shutil.move(old_cache_dir, <bak-root>/<ver>.bak.<ts>)
+  │   (cross-filesystem-safe; D-9.43.2)
+  │
+  ├── _drop_from_installed_plugins()
+  │   └── removes paper-wiki entry from installed_plugins.json
+  │
+  ├── _drop_from_enabled_plugins()  ×2
+  │   └── removes paper-wiki entry from settings.json + settings.local.json
+  │
+  ├── gc_bak (auto-prune per PAPERWIKI_BAK_KEEP retention; D-9.33.2)
+  │
+  └── prints the 5-step "Next:" message + rc-just-added note (D-9.43.4)
+```
+
+The cleanup ensures `/plugin install` does a fresh install, not a
+"version conflict" merge — Claude Code sees no existing entry and
+clones the v0.3.43 marketplace state into a brand-new cache dir.
+
+### 8.4 What `paperwiki update` deliberately does NOT do
+
+- **Does not re-create `installed_plugins.json` entries.** Schema
+  is owned by Claude Code; reverse-engineering it would couple
+  paperwiki to a specific Claude Code minor version.
+- **Does not write hook configs into Claude Code's plugin
+  registry.** Same reason.
+- **Does not invoke `/plugin install` via IPC.** No such API
+  exists in Claude Code today.
+
+### 8.5 Failure-mode self-heal
+
+`paperwiki update` survives a half-installed state where Claude
+Code's registry says `vX` but the cache dir is missing. v0.3.39
+D-9.39.1 added `_self_heal_from_marketplace()` — when the cache
+contains no version subdirs, paperwiki copies the marketplace
+clone into `cache_base/<version>/` so the diff-and-sync logic has
+something to work with. v0.3.42 D-9.42.5 added `--check` for
+preview, and the "you appear to be mid-upgrade" hint surfaces when
+`installed_plugins.json` records `vX` but only `vX.bak.<ts>` exists
+on disk.
+
+### 8.6 What a future v0.4.x design might explore
+
+These are non-blocking ideas, recorded so future contributors don't
+re-debate the architecture:
+
+- **Aggressive self-heal mode**: have `paperwiki update` write a
+  minimal valid `installed_plugins.json` entry + pre-install shim
+  and helper at the new version, reducing the user-visible flow
+  to one restart. **Risk**: Claude Code schema drift would break
+  the upgrade path silently.
+- **IPC trigger for `/plugin install`**: if Claude Code adds an
+  external API to drive plugin installation, `paperwiki update`
+  could collapse the manual `/plugin install` step. **Risk**:
+  fully out of paperwiki's control.
+
+The TWO-restart constraint is therefore the **canonical stopping
+point** for the v0.3.39–v0.3.43 install-UX line. Future
+ergonomics work should focus on the digest + wiki pipeline, not
+plugin lifecycle.
+
+---
+
 ## Decision log
 
 - **Manifest at `.claude-plugin/plugin.json`**: matches the official
