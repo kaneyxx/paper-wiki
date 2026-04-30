@@ -9,6 +9,141 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.43] - 2026-04-30
+
+Bug fix + architectural cleanup release. Fixes the v0.3.42 release-gate
+`paperwiki diag` double-wrapped JSON list (B1); relocates `.bak`
+rollback directories outside the plugin cache so they survive
+`/plugin install`; introduces `paperwiki doctor` as the canonical
+one-command install-health check; closes three v0.3.42 polish gaps
+(message ordering, fish shell support, stale in-memory function
+warning).
+
+### Fixed
+
+- **`paperwiki diag` double-wrapped `installed_plugins.json` list**
+  (D-9.43.1). v0.3.42's `_read_paper_wiki_entry` wrapped the
+  per-plugin entry list in another list, producing `[[{...}]]`
+  instead of the correct `[{...}]`. The bug was masked by a unit-
+  test fixture using a dict shape (real Claude Code data is a list-
+  of-dicts for multi-scope support). Fix updates both the runner
+  and the fixture, and adds a regression test pinning the exact
+  JSON-output shape so the wrap can never reappear silently. The
+  ``paperwiki diag`` and ``paperwiki_diag`` outputs now match the
+  inline bash form's pre-v0.3.42 shape.
+
+### Added
+
+- **`paperwiki doctor` one-command install health check** (D-9.43.3).
+  Aggregates v0.3.42's three separate probes (`status`, `diag`, the
+  implicit "is the venv working" question) behind a single command:
+
+  ```
+  paperwiki doctor              # pretty multi-section output
+  paperwiki doctor --json       # structured JSON for automation
+  paperwiki doctor --strict     # exit 1 on any ✗ row
+  ```
+
+  Sections: Cache & marketplace, Install integrity (shared with
+  `paperwiki status` via the new `paperwiki._internal.health`
+  module), Python venv (subprocess probe with 5s timeout), Shell-rc
+  integration (n/a counts as healthy for fish/csh and for
+  `PAPERWIKI_NO_RC_INTEGRATION=1` opt-out). The `--json` schema is
+  marked `@experimental` until v0.4.
+
+- **Fish shell auto-source support** (D-9.43.5). `hooks/rc-integration.sh`
+  now writes a fish-syntax block to `~/.config/fish/config.fish`
+  when `$SHELL` ends with `/fish`. The block adds `~/.local/bin`
+  to `$fish_user_paths` (so the `paperwiki` shim is discoverable)
+  and notes that `paperwiki_diag` (bash form) requires bash/zsh
+  while `paperwiki diag` (CLI) works in fish. Honest no-attempt-
+  to-source-bash answer beats v0.3.42's silent no-op for fish
+  users. Removed by `paperwiki uninstall --everything` alongside
+  the bash/zsh blocks.
+
+- **`paperwiki_diag` stale-version warning** (D-9.43.6). When the
+  on-disk helper at `~/.local/lib/paperwiki/bash-helpers.sh`
+  declares a version tag DIFFERENT from the in-memory
+  `_PAPERWIKI_HELPER_VERSION` constant (typical post-`paperwiki
+  update` state until the user opens a new terminal), the bash
+  function prepends a 2-line ⚠ warning telling the user to open a
+  new terminal or `source` the helper. Defensive: missing helper
+  → silent skip; matching versions → no warning.
+
+### Changed
+
+- **`.bak` directories relocated outside the plugin cache subdir**
+  (D-9.43.2). v0.3.42 wrote `.bak` under
+  `~/.claude/plugins/cache/paper-wiki/paper-wiki/<ver>.bak.<ts>/`
+  — but `/plugin install` (a normal step in the upgrade flow)
+  wipes the cache subdir, so the rollback target disappeared between
+  TWO-restart steps. v0.3.43 D-9.43.2 relocates them to
+  `~/.local/share/paperwiki/bak/<ver>.bak.<ts>/` (XDG-style). New
+  precedence chain for the resolver: `PAPERWIKI_BAK_DIR` >
+  `XDG_DATA_HOME/paperwiki/bak` > `$HOME/.local/share/paperwiki/bak`.
+  Cross-filesystem-safe `shutil.move` replaces `Path.rename`. The
+  v0.3.41 D-9.41.1 "Note: cleared by /plugin install" warning is
+  replaced with the positive form ("survive /plugin install") and
+  the bak-directory location is printed inline.
+
+  **Migration**: existing `<cache>/<ver>.bak.<ts>/` directories are
+  automatically moved to the new location on the next `paperwiki
+  update` apply (idempotent, collision-safe — never overwrites an
+  existing target). No user action required.
+
+- **`paperwiki update --check` and apply mode print rc-just-added
+  AFTER the plan/result, not before** (D-9.43.4). v0.3.42 ran the
+  `_consume_rc_just_added_stamp()` call at the top of `update()`,
+  which broke the natural reading order (plan → side-note). The
+  call now runs at the end of each branch.
+
+- **Refactor: `_check_install_health` extracted to
+  `paperwiki._internal.health`**. Both `paperwiki status` and the
+  new `paperwiki doctor` consume the shared module — single source
+  of truth for the four install-integrity rows (helper present,
+  helper tag matches, shim present + tag, ~/.local/bin on PATH).
+
+### Decisions ratified (D-9.43.x)
+
+- D-9.43.1 — fix `paperwiki diag` double-wrapped JSON
+- D-9.43.2 — relocate `.bak` outside plugin cache (XDG-style)
+- D-9.43.3 — `paperwiki doctor` one-command health check
+- D-9.43.4 — `paperwiki update` rc-just-added ordering
+- D-9.43.5 — fish shell auto-source block + uninstall parity
+- D-9.43.6 — `paperwiki_diag` in-memory vs on-disk version warning
+
+### Lessons learned
+
+- **Test fixtures must match production data shape.** The v0.3.42 B1
+  bug existed because the unit-test fixture wrote a dict where Claude
+  Code stores a list. Tests that lie about shape can't catch shape
+  bugs. v0.3.43 adds explicit "real shape" pin tests that fail-then-
+  pass when the shape is wrong.
+
+- **Domain-bounded persistence.** v0.3.42's `.bak` lived under
+  Claude Code's plugin cache because that's where the rest of paper-
+  wiki's runtime lived — but Claude Code's plugin manager owns that
+  directory and we never had a write contract to keep things across
+  `/plugin install` cycles. v0.3.43 moves rollback targets into
+  paper-wiki's own XDG-style data dir where we DO own the lifecycle.
+
+- **Aggregation > naming.** v0.3.42 shipped `status` + `diag` as
+  two distinct probes, expecting users to remember which one to
+  use. v0.3.43's `doctor` collapses the cognitive load — one
+  command, four sections, one healthy/total summary.
+
+### Tests
+
+- 1065 tests passing (+30 vs v0.3.42 baseline of 1035).
+- New: `tests/unit/runners/test_doctor.py` (9 cases),
+  `tests/unit/cli/test_doctor_cli.py` (4 cases),
+  `tests/unit/cli/test_update_bak_relocation.py` (5 cases).
+- New regression coverage in `tests/unit/runners/test_diag.py` (3
+  cases pinning single-list shape + multi-scope + legacy dict
+  fallback).
+- Plus 4 fish-shell tests, 3 stale-version warning tests, 1 update-
+  ordering test.
+
 ## [0.3.42] - 2026-04-30
 
 Smooth one-touch install/upgrade release. Closes the v0.3.41 release-

@@ -871,9 +871,7 @@ def test_paperwiki_diag_warns_on_stale_in_memory_function(tmp_path: Path) -> Non
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "⚠" in out, f"mismatching versions must emit ⚠ stale warning:\n{out}"
-    assert "in-memory function" in out, (
-        f"warning text must mention in-memory function:\n{out}"
-    )
+    assert "in-memory function" in out, f"warning text must mention in-memory function:\n{out}"
     assert "v0.3.99" in out, f"warning must surface the on-disk version:\n{out}"
     # Diag still runs to completion — the warning is a prepended note,
     # not an abort.

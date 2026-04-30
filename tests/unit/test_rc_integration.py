@@ -253,9 +253,7 @@ def test_rc_install_writes_fish_block(tmp_path: Path) -> None:
     assert _BEGIN_MARKER in content
     assert _END_MARKER in content
     # Fish-specific syntax.
-    assert "fish_add_path" in content, (
-        f"fish block must use fish_add_path syntax, got:\n{content}"
-    )
+    assert "fish_add_path" in content, f"fish block must use fish_add_path syntax, got:\n{content}"
     # Honest advisory about the bash function.
     assert "paperwiki_diag" in content
     assert "paperwiki diag" in content

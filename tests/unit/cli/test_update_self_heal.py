@@ -606,9 +606,7 @@ class TestRcFirstRunStamp:
         assert result.exit_code == 0, result.output
         assert "Added auto-source line to" not in result.output
 
-    def test_stamp_message_appears_after_check_plan(
-        self, update_env: dict[str, Path]
-    ) -> None:
+    def test_stamp_message_appears_after_check_plan(self, update_env: dict[str, Path]) -> None:
         """v0.3.43 D-9.43.4: ``--check`` mode prints plan first, rc-edit note last.
 
         v0.3.42 D-9.42.5 added ``--check``. v0.3.42 9.141 also dropped
