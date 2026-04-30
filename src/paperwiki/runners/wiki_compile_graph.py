@@ -114,13 +114,18 @@ class CompileGraphResult:
 
 
 @dataclass(frozen=True, slots=True)
-class _ParsedEntity:
-    """Internal representation of one parsed wiki note."""
+class ParsedEntity:
+    """Public read-only view of one parsed wiki note.
+
+    Exposed so the wiki-lint runner (task 9.158) can reuse the
+    typed-subdir walker without duplicating the parser.
+    """
 
     entity_id: str
     entity_type: str
     aliases: frozenset[str]
     body_wikilinks: tuple[str, ...]
+    frontmatter: dict[str, Any]
 
 
 def graph_is_stale(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> bool:
@@ -236,7 +241,7 @@ def _aliases_for_entity(
     return frozenset(aliases)
 
 
-def _parse_entity_file(file_path: Path, wiki_root: Path) -> _ParsedEntity | None:
+def _parse_entity_file(file_path: Path, wiki_root: Path) -> ParsedEntity | None:
     """Parse one ``.md`` file. Returns ``None`` for non-typed files."""
     rel = file_path.relative_to(wiki_root)
     if not rel.parts:
@@ -249,11 +254,12 @@ def _parse_entity_file(file_path: Path, wiki_root: Path) -> _ParsedEntity | None
     entity_id = _entity_id_from_path(file_path, wiki_root)
     aliases = _aliases_for_entity(entity_id, frontmatter)
     body_wikilinks = tuple(_WIKILINK_RE.findall(body))
-    return _ParsedEntity(
+    return ParsedEntity(
         entity_id=entity_id,
         entity_type=entity_type,
         aliases=aliases,
         body_wikilinks=body_wikilinks,
+        frontmatter=frontmatter,
     )
 
 
@@ -269,8 +275,24 @@ def _walk_typed_subdirs(wiki_root: Path) -> Iterator[Path]:
             yield md
 
 
+def walk_entities(wiki_root: Path) -> list[ParsedEntity]:
+    """Public typed-subdir walker (used by wiki-lint task 9.158).
+
+    Returns parsed entities from all four typed subdirs in entity-id
+    sorted order. Skips dotfiles and non-typed subdirs (e.g. ``.graph``).
+    """
+    return sorted(
+        (
+            entity
+            for path in _walk_typed_subdirs(wiki_root)
+            if (entity := _parse_entity_file(path, wiki_root)) is not None
+        ),
+        key=lambda e: e.entity_id,
+    )
+
+
 def _build_alias_map(
-    entities: list[_ParsedEntity],
+    entities: list[ParsedEntity],
 ) -> dict[str, str]:
     """Flatten entity aliases into ``alias -> entity_id``.
 
@@ -300,7 +322,7 @@ def _infer_edge_type(src_kind: str, dst_kind: str) -> EdgeType:
 
 
 def _build_records(
-    entities: list[_ParsedEntity],
+    entities: list[ParsedEntity],
     alias_map: dict[str, str],
 ) -> tuple[list[EdgeRecord], list[CitationRecord]]:
     edges: list[EdgeRecord] = []
@@ -504,7 +526,9 @@ __all__ = [
     "CitationRecord",
     "CompileGraphResult",
     "EdgeRecord",
+    "ParsedEntity",
     "compile_graph",
     "graph_is_stale",
     "iter_edges_jsonl",
+    "walk_entities",
 ]
