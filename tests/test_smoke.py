@@ -109,7 +109,7 @@ def test_ensure_env_script_is_executable() -> None:
 def test_bash_helpers_present_with_v0_3_38_tag() -> None:
     """v0.3.38 D-9.38.1: ``lib/bash-helpers.sh`` ships in the repo.
 
-    Pins the helper file's existence, the v0.3.42 tag line (so a release
+    Pins the helper file's existence, the v0.3.43 tag line (so a release
     that bumps version files but forgets the helper tag fails here),
     and the three documented public function names. Behavioral tests
     live in ``tests/unit/test_bash_helpers.py``.
@@ -118,8 +118,8 @@ def test_bash_helpers_present_with_v0_3_38_tag() -> None:
     assert helper.is_file(), f"missing helper at {helper}"
 
     body = helper.read_text(encoding="utf-8")
-    assert "# paperwiki bash-helpers — v0.3.42" in body, (
-        "helper must carry the v0.3.42 version tag line"
+    assert "# paperwiki bash-helpers — v0.3.43" in body, (
+        "helper must carry the v0.3.43 version tag line"
     )
 
     for fn_name in (
