@@ -311,3 +311,72 @@ def test_legacy_bak_migration_collision_skip(bak_env: dict[str, Path]) -> None:
     # Legacy bak left in place (skip + warn semantics).
     assert legacy_bak.is_dir(), "legacy bak preserved on collision"
     assert (legacy_bak / "LEGACY").read_text() == "legacy"
+
+
+# ---------------------------------------------------------------------------
+# v0.3.44 D-9.44.1 — migration must run on no-op update too
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_bak_migrates_on_no_op_update(bak_env: dict[str, Path]) -> None:
+    """v0.3.44 D-9.44.1: legacy in-cache .bak migrates even when no version drift.
+
+    v0.3.43 only ran ``_migrate_legacy_bak`` inside the upgrade branch
+    (``if cache_ver != marketplace_ver``). When the user upgraded
+    via the v0.3.42 binary (which wrote .bak in-cache), then completed
+    the TWO-restart, the v0.3.43 binary saw "already at 0.3.43" and
+    exited BEFORE migration. Result: the in-cache .bak stayed there
+    forever (or got eaten by the next /plugin install).
+
+    v0.3.44 fix: run the migration unconditionally — even when no
+    upgrade is happening, the user gets a one-time housekeeping pass
+    that moves any in-cache .bak to the durable XDG location.
+    """
+    marketplace = bak_env["marketplace_dir"]
+    cache_base = bak_env["cache_base"]
+    bak_root = bak_env["bak_root_default"]
+    # Already at the latest version — no upgrade.
+    _seed_marketplace(marketplace, "0.3.43")
+    _seed_old_cache(cache_base, "0.3.43")  # active cache at v0.3.43
+    _seed_installed_plugins_json(bak_env["installed_plugins"], "0.3.43")
+
+    # Pre-existing legacy bak in cache (from v0.3.42 update).
+    legacy_bak = cache_base / "0.3.42.bak.20260430T150312Z"
+    legacy_bak.mkdir(parents=True)
+    (legacy_bak / "LEGACY_SENTINEL").write_text("preserve me", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
+
+    assert result.exit_code == 0, result.output
+    # No drift → "already at 0.3.43" message.
+    assert "already at 0.3.43" in result.output
+
+    # Legacy bak migrated out of cache.
+    assert not legacy_bak.is_dir(), "legacy .bak should have been migrated even on no-op"
+
+    # Migrated to new location with the SAME name.
+    migrated = bak_root / "0.3.42.bak.20260430T150312Z"
+    assert migrated.is_dir(), f"migrated bak missing at {migrated}"
+    assert (migrated / "LEGACY_SENTINEL").read_text() == "preserve me"
+
+
+def test_no_op_update_with_no_legacy_bak_is_silent(bak_env: dict[str, Path]) -> None:
+    """v0.3.44 D-9.44.1: no-op update without legacy baks doesn't crash or chatter.
+
+    Migration helper short-circuits when there's nothing to do (cache
+    base empty, or only contains active version dir). Output stays
+    minimal — just "already at vX".
+    """
+    marketplace = bak_env["marketplace_dir"]
+    cache_base = bak_env["cache_base"]
+    _seed_marketplace(marketplace, "0.3.43")
+    _seed_old_cache(cache_base, "0.3.43")
+    _seed_installed_plugins_json(bak_env["installed_plugins"], "0.3.43")
+    # No legacy bak.
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
+
+    assert result.exit_code == 0, result.output
+    assert "already at 0.3.43" in result.output
