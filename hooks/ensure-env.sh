@@ -39,13 +39,13 @@ PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 # ---------------------------------------------------------------------------
 SHIM_DIR="$HOME/.local/bin"
 SHIM_PATH="$SHIM_DIR/paperwiki"
-EXPECTED_TAG="# paperwiki shim — v0.3.41 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+EXPECTED_TAG="# paperwiki shim — v0.3.42 (shared venv + self-bootstrap + PYTHONPATH fallback)."
 
 mkdir -p "$SHIM_DIR"
 if ! [ -f "$SHIM_PATH" ] || ! grep -qF "$EXPECTED_TAG" "$SHIM_PATH" 2>/dev/null; then
   cat > "$SHIM_PATH" <<'SHIM_EOF'
 #!/usr/bin/env bash
-# paperwiki shim — v0.3.41 (shared venv + self-bootstrap + PYTHONPATH fallback).
+# paperwiki shim — v0.3.42 (shared venv + self-bootstrap + PYTHONPATH fallback).
 set -euo pipefail
 CACHE_ROOT="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
 PAPERWIKI_HOME_RESOLVED="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
@@ -95,7 +95,7 @@ esac
 # ---------------------------------------------------------------------------
 HELPER_DIR="$HOME/.local/lib/paperwiki"
 HELPER_PATH="$HELPER_DIR/bash-helpers.sh"
-EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v0.3.41 (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
+EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v0.3.42 (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
 
 if ! mkdir -p "$HELPER_DIR" 2>/dev/null; then
   echo "paperwiki: warning: $HELPER_DIR is not writable; bash-helpers not installed." >&2
@@ -106,6 +106,41 @@ elif ! [ -f "$HELPER_PATH" ] || ! grep -qF "$EXPECTED_HELPER_TAG" "$HELPER_PATH"
   else
     echo "paperwiki: warning: failed to write $HELPER_PATH" >&2
     echo "  SKILLs that source the helper will emit a restart-Claude-Code error." >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Shell-rc auto-source (v0.3.42 D-9.42.2). Sources rc-integration.sh
+# from the plugin root and calls ``paperwiki_rc_install`` so the
+# helper functions land in the user's interactive shells without a
+# manual ``source`` step. Idempotent and opt-out via
+# ``PAPERWIKI_NO_RC_INTEGRATION=1``. The "first-run" stamp
+# ``$HELPER_DIR/.rc-just-added`` is dropped on the first install so
+# the next ``paperwiki update`` invocation can surface a one-line
+# user-visible message (D-9.41.1 follow-up — task 9.141).
+# ---------------------------------------------------------------------------
+if [ -f "$PLUGIN_ROOT/hooks/rc-integration.sh" ]; then
+  RC_INTEGRATION="$PLUGIN_ROOT/hooks/rc-integration.sh"
+  RC_FILE_BEFORE=""
+  # shellcheck disable=SC1090
+  if . "$RC_INTEGRATION" 2>/dev/null; then
+    RC_FILE_BEFORE=$(_pick_rc_file 2>/dev/null || true)
+    RC_BLOCK_PRESENT=0
+    if [ -n "$RC_FILE_BEFORE" ] \
+        && [ -f "$RC_FILE_BEFORE" ] \
+        && grep -qF "# >>> paperwiki helpers >>>" "$RC_FILE_BEFORE" 2>/dev/null; then
+      RC_BLOCK_PRESENT=1
+    fi
+    paperwiki_rc_install 2>/dev/null || true
+    # Drop a stamp when the block was newly added (the install
+    # function is idempotent so we detect "newly added" by the
+    # before-state). The stamp is consumed by ``paperwiki update``.
+    if [ "$RC_BLOCK_PRESENT" = "0" ] \
+        && [ -n "$RC_FILE_BEFORE" ] \
+        && [ -f "$RC_FILE_BEFORE" ] \
+        && grep -qF "# >>> paperwiki helpers >>>" "$RC_FILE_BEFORE" 2>/dev/null; then
+      printf '%s\n' "$RC_FILE_BEFORE" > "$HELPER_DIR/.rc-just-added" 2>/dev/null || true
+    fi
   fi
 fi
 

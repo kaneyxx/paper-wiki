@@ -506,3 +506,214 @@ class TestSelfHealOfflineFlow:
         assert result.exit_code == 0, result.output
         assert "bootstrapped from marketplace" in result.output
         assert (cache_base / "0.3.40").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# v0.3.42 9.141 / D-9.42.2 — first-run rc-block UX message
+#
+# When ensure-env.sh writes the auto-source block to ``~/.zshrc`` (or
+# similar) for the first time, it drops a ``$HELPER_DIR/.rc-just-added``
+# stamp containing the rc-file path. The next ``paperwiki update``
+# invocation reads the stamp, surfaces a one-line note to the user
+# (so they know an rc-edit happened), and deletes the stamp
+# (consume-once semantics). Subsequent updates without the stamp are
+# silent on this front.
+# ---------------------------------------------------------------------------
+
+
+class TestRcFirstRunStamp:
+    """Tests for ``paperwiki update`` reading + consuming the .rc-just-added stamp."""
+
+    def _seed_stamp(self, home: Path, rc_path: str) -> Path:
+        helper_dir = home / ".local" / "lib" / "paperwiki"
+        helper_dir.mkdir(parents=True)
+        stamp = helper_dir / ".rc-just-added"
+        stamp.write_text(rc_path + "\n", encoding="utf-8")
+        return stamp
+
+    def test_stamp_present_surfaces_message_and_deletes_stamp(
+        self, update_env: dict[str, Path]
+    ) -> None:
+        """First-run: rc-edit note appears + stamp is consumed."""
+        home = update_env["home"]
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        # Simulate "we're already at v0.3.41" so update is a no-op upgrade.
+        # The stamp path runs regardless of upgrade outcome.
+        _seed_marketplace(marketplace, "0.3.41")
+        (cache_base / "0.3.41").mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.41")
+
+        stamp = self._seed_stamp(home, str(home / ".zshrc"))
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
+        assert result.exit_code == 0, result.output
+        assert "Added auto-source line to" in result.output, (
+            f"first-run rc-edit message must appear in update output:\n{result.output}"
+        )
+        assert ".zshrc" in result.output
+        # Stamp must be consumed (deleted) so subsequent updates are silent.
+        assert not stamp.exists(), "the .rc-just-added stamp must be deleted after surfacing once"
+
+    def test_stamp_absent_no_message(self, update_env: dict[str, Path]) -> None:
+        """Subsequent update (no stamp) does NOT surface the rc message."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.41")
+        (cache_base / "0.3.41").mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.41")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
+        assert result.exit_code == 0, result.output
+        assert "Added auto-source line to" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# v0.3.42 9.142 / D-9.42.5 — `paperwiki update --check` dry-run flag
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateCheckMode:
+    """``--check`` previews planned actions without applying them."""
+
+    def test_check_at_latest_reports_no_op(self, update_env: dict[str, Path]) -> None:
+        """Cache + marketplace at same version → "already at" + no mutations."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.42")
+        (cache_base / "0.3.42").mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.42")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--check", "--marketplace-dir", str(marketplace)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "0.3.42" in result.output
+        # Cache dir untouched; no .bak created.
+        assert (cache_base / "0.3.42").is_dir()
+        assert not list(cache_base.glob("*.bak.*"))
+
+    def test_check_drift_detected_previews_rename_without_applying(
+        self, update_env: dict[str, Path]
+    ) -> None:
+        """Cache vX, marketplace vY → "would upgrade" with no actual rename."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.42")
+        (cache_base / "0.3.41").mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.41")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--check", "--marketplace-dir", str(marketplace)],
+        )
+        assert result.exit_code == 0, result.output
+        out = result.output
+        # The dry-run output mentions the planned upgrade.
+        assert "would" in out.lower() or "plan" in out.lower(), (
+            f"--check should describe planned actions:\n{out}"
+        )
+        assert "0.3.41" in out
+        assert "0.3.42" in out
+        # No-mutation invariants: original cache dir still present, no .bak.
+        assert (cache_base / "0.3.41").is_dir(), "--check must not rename the cache dir"
+        assert not list(cache_base.glob("*.bak.*"))
+        # installed_plugins.json untouched.
+        installed = json.loads(update_env["installed_plugins"].read_text(encoding="utf-8"))
+        assert "paper-wiki@paper-wiki" in installed.get("plugins", {}), (
+            "--check must not drop the installed_plugins entry"
+        )
+
+    def test_check_cache_empty_previews_self_heal(self, update_env: dict[str, Path]) -> None:
+        """Empty cache + valid marketplace → preview self-heal without copy."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.42")
+        cache_base.mkdir(parents=True)  # empty cache base
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--check", "--marketplace-dir", str(marketplace)],
+        )
+        assert result.exit_code == 0, result.output
+        # No version subdir created.
+        assert not list(cache_base.iterdir()), "--check must not bootstrap the cache"
+
+
+# ---------------------------------------------------------------------------
+# v0.3.42 9.143 / D-9.42.5 — mid-upgrade "between steps" detection
+# ---------------------------------------------------------------------------
+
+
+class TestMidUpgradeStateDetection:
+    """``installed_plugins.json`` records vX, but cache has only vX.bak.<ts>.
+
+    This is the half-installed state users reach when they run
+    ``paperwiki update`` but forget to follow the TWO-restart guidance.
+    Both apply mode and ``--check`` mode surface a "you appear to be
+    mid-upgrade" hint pointing at the right next step.
+    """
+
+    def test_apply_mode_surfaces_between_steps_hint(self, update_env: dict[str, Path]) -> None:
+        """Apply mode prints the hint when cache contains only the bak dir."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.42")
+        # Cache shape: only ``0.3.41.bak.<ts>`` — no plain ``0.3.41``.
+        cache_base.mkdir(parents=True)
+        (cache_base / "0.3.41.bak.20260430T000000Z").mkdir()
+        # installed_plugins.json still records 0.3.41 (the half-state).
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.41")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
+        assert result.exit_code == 0, result.output
+        assert "mid-upgrade" in result.output, (
+            f"between-steps hint missing in output:\n{result.output}"
+        )
+        assert "/plugin install paper-wiki@paper-wiki" in result.output
+
+    def test_check_mode_surfaces_between_steps_hint_too(self, update_env: dict[str, Path]) -> None:
+        """``--check`` reports the same hint without applying anything."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.42")
+        cache_base.mkdir(parents=True)
+        (cache_base / "0.3.41.bak.20260430T000000Z").mkdir()
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.41")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--check", "--marketplace-dir", str(marketplace)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "mid-upgrade" in result.output
+        assert "nothing applied" in result.output
+
+    def test_normal_state_does_not_emit_hint(self, update_env: dict[str, Path]) -> None:
+        """Healthy state (cache vX present + installed_plugins records vX) → no hint."""
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        _seed_marketplace(marketplace, "0.3.42")
+        (cache_base / "0.3.42").mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.42")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
+        assert result.exit_code == 0, result.output
+        assert "mid-upgrade" not in result.output

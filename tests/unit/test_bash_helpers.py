@@ -590,3 +590,227 @@ def test_diag_file_flag_default_path_is_timestamped(tmp_path: Path) -> None:
     assert _re.match(r"^paper-wiki-diag-\d{8}T\d{6}Z\.txt$", candidates[0].name), (
         f"default filename must be timestamped; got {candidates[0].name!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.3.42 D-9.42.3: helper self-path captured at source time
+# (shell-agnostic — fixes zsh BASH_SOURCE bug surfaced by v0.3.41 release-gate)
+# ---------------------------------------------------------------------------
+
+_ZSH_PATH = shutil.which("zsh")
+
+
+def _run_zsh(
+    script: str,
+    *,
+    env_overrides: dict[str, str],
+    base_path: str = "/usr/bin:/bin",
+) -> subprocess.CompletedProcess[str]:
+    """Run ``script`` in a clean ``zsh -c`` subprocess.
+
+    Mirrors :func:`_run_bash` but invokes zsh so v0.3.42 D-9.42.3 can
+    verify shell-agnostic helper-path detection. Falls through to
+    ``pytest.skip`` (via the ``@skipif`` on the calling test) when zsh
+    isn't installed.
+    """
+    assert _ZSH_PATH is not None  # guarded by skipif on call sites
+    env = {"PATH": base_path}
+    env.update(env_overrides)
+    return subprocess.run(
+        [_ZSH_PATH, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+
+@pytest.mark.skipif(_ZSH_PATH is None, reason="zsh not on PATH")
+def test_diag_helper_path_resolves_in_zsh(tmp_path: Path) -> None:
+    """v0.3.42 D-9.42.3: helper-path captured at source time, zsh-safe.
+
+    Pre-v0.3.42, ``_paperwiki_diag_render`` read ``${BASH_SOURCE[0]}``
+    inside the function body. zsh doesn't auto-set ``BASH_SOURCE`` so
+    the variable was empty, producing the broken
+    ``(helper self-path not resolvable: )`` line in real-machine
+    diag output. The fix captures the path at source time using
+    ``${BASH_SOURCE[0]:-$0}`` (works in both shells: bash sets
+    ``BASH_SOURCE``; zsh sets ``$0`` to the sourced file path).
+    """
+    proc = _run_zsh(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    # The bug-symptom line must NOT appear when sourcing under zsh.
+    assert "(helper self-path not resolvable" not in out, (
+        f"diag must resolve helper path under zsh (v0.3.42 D-9.42.3); output:\n{out}"
+    )
+    # The helper version-tag line (head -1 output) must appear in the
+    # --- helper --- section, proving the captured path was readable.
+    assert "paperwiki bash-helpers" in out, (
+        f"expected helper version-tag in --- helper --- section; output:\n{out}"
+    )
+
+
+@pytest.mark.skipif(_ZSH_PATH is None, reason="zsh not on PATH")
+def test_diag_helper_path_variable_set_at_source_time_in_zsh(tmp_path: Path) -> None:
+    """``_PAPERWIKI_HELPER_PATH`` is populated when sourced under zsh.
+
+    Direct check of the source-time capture: after ``source`` in zsh,
+    ``$_PAPERWIKI_HELPER_PATH`` must equal the actual helper file path.
+    Belt-and-suspenders companion to the diag-output test above.
+    """
+    proc = _run_zsh(
+        f'source {_HELPER_PATH}; echo "VAR=$_PAPERWIKI_HELPER_PATH"',
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    expected_line = f"VAR={_HELPER_PATH}"
+    assert expected_line in proc.stdout, (
+        f"_PAPERWIKI_HELPER_PATH must equal helper file path under zsh; "
+        f"expected {expected_line!r}, got:\n{proc.stdout}"
+    )
+
+
+def test_diag_helper_path_variable_set_at_source_time_in_bash(tmp_path: Path) -> None:
+    """``_PAPERWIKI_HELPER_PATH`` is populated when sourced under bash too.
+
+    Bash-side regression coverage: the source-time capture must not
+    break bash detection (which already worked via ``BASH_SOURCE[0]``).
+    """
+    proc = _run_bash(
+        f'source {_HELPER_PATH}; echo "VAR=$_PAPERWIKI_HELPER_PATH"',
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    expected_line = f"VAR={_HELPER_PATH}"
+    assert expected_line in proc.stdout, (
+        f"_PAPERWIKI_HELPER_PATH must equal helper file path under bash; "
+        f"expected {expected_line!r}, got:\n{proc.stdout}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.3.42 D-9.42.4: paperwiki_diag delegates to `paperwiki diag` CLI when shim
+# is present + executable; falls back to inline implementation otherwise.
+# ---------------------------------------------------------------------------
+
+
+def test_diag_uses_cli_when_shim_executable(tmp_path: Path) -> None:
+    """When shim is +x, bash function shells out to ``paperwiki diag``.
+
+    Mock shim writes a sentinel string and exits 0. The bash function
+    should print the sentinel (proving it called the shim) instead of
+    the inline 7-section dump.
+    """
+    shim_dir = tmp_path / ".local" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "paperwiki"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "# paperwiki shim — mock for test\n"
+        'echo "DELEGATED_TO_CLI_v0.3.42_SENTINEL"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "DELEGATED_TO_CLI_v0.3.42_SENTINEL" in proc.stdout, (
+        f"bash function should delegate to executable shim; output:\n{proc.stdout}"
+    )
+    # Inline-mode header should NOT appear (CLI mock didn't print it).
+    assert "=== paperwiki_diag — install state ===" not in proc.stdout
+
+
+def test_diag_falls_back_to_inline_when_shim_missing(tmp_path: Path) -> None:
+    """When shim is absent, bash function uses inline implementation.
+
+    Verified by checking that the inline header / footer appear in
+    output (the CLI delegation would have skipped both).
+    """
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "=== paperwiki_diag — install state ===" in proc.stdout
+    assert "=== end paperwiki_diag ===" in proc.stdout
+
+
+def test_diag_falls_back_to_inline_when_shim_not_executable(
+    tmp_path: Path,
+) -> None:
+    """When shim exists but is not +x, bash function uses inline path.
+
+    Pre-v0.3.42 tests created a non-+x shim under tmp_path; the
+    delegation must NOT trigger, otherwise those tests' assertions
+    (inline 7-section output) regress. Verified by checking that the
+    inline header / footer + ``--- helper ---`` section all appear in
+    stdout — those would be absent under CLI delegation because a
+    non-+x shim can't be invoked.
+    """
+    shim_dir = tmp_path / ".local" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "paperwiki"
+    shim.write_text(
+        "#!/usr/bin/env bash\n# stub — never executed (no +x)\n",
+        encoding="utf-8",
+    )
+    # Deliberately NOT chmod +x.
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "=== paperwiki_diag — install state ===" in out
+    assert "=== end paperwiki_diag ===" in out
+    # ``--- helper ---`` only appears in the inline implementation
+    # because the CLI form has different formatting (the section
+    # header still mentions "helper" so we pin the exact divider).
+    assert "--- helper ---" in out
+
+
+def test_diag_helper_path_falls_back_to_canonical_when_var_empty(
+    tmp_path: Path,
+) -> None:
+    """v0.3.42 9.134: defensive fallback when ``_PAPERWIKI_HELPER_PATH`` empty.
+
+    If the source-time capture fails (corrupt source, exotic shell),
+    ``_paperwiki_diag_render`` falls back to the canonical install path
+    string ``$HOME/.local/lib/paperwiki/bash-helpers.sh`` rather than
+    rendering ``(helper self-path not resolvable: )`` with empty value.
+
+    Simulated by sourcing the helper, then unsetting
+    ``_PAPERWIKI_HELPER_PATH`` before invoking ``paperwiki_diag``.
+    """
+    # Place a stub canonical helper so the fallback path is readable
+    # (otherwise diag prints the not-resolvable line because the file
+    # doesn't exist). The stub doesn't need to be functional — only its
+    # first line gets read by ``head -1``.
+    canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
+    canonical_dir.mkdir(parents=True)
+    (canonical_dir / "bash-helpers.sh").write_text(
+        "# paperwiki bash-helpers — canonical-fallback-stub\n",
+        encoding="utf-8",
+    )
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; unset _PAPERWIKI_HELPER_PATH; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    # The unresolved-path line must NOT appear — fallback should kick in.
+    assert "(helper self-path not resolvable" not in out, (
+        f"expected canonical fallback; got unresolved-path line in output:\n{out}"
+    )
+    # The fallback's first line must appear (proves head -1 ran on the
+    # canonical stub).
+    assert "canonical-fallback-stub" in out, f"expected canonical fallback content; output:\n{out}"
