@@ -553,7 +553,13 @@ class TestRcFirstRunStamp:
     def test_stamp_present_surfaces_message_and_deletes_stamp(
         self, update_env: dict[str, Path]
     ) -> None:
-        """First-run: rc-edit note appears + stamp is consumed."""
+        """First-run: rc-edit note appears + stamp is consumed.
+
+        v0.3.43 D-9.43.4: the rc-just-added note must appear AFTER the
+        plan/result text, not before. v0.3.42 ran the consume call at
+        the top of update() so the note showed up first; this assertion
+        pins the corrected ordering.
+        """
         home = update_env["home"]
         marketplace = update_env["marketplace_dir"]
         cache_base = update_env["cache_base"]
@@ -573,6 +579,16 @@ class TestRcFirstRunStamp:
             f"first-run rc-edit message must appear in update output:\n{result.output}"
         )
         assert ".zshrc" in result.output
+        # v0.3.43 D-9.43.4: the rc-edit note must come AFTER the
+        # primary result line ("already at vX" in this no-op case).
+        result_pos = result.output.find("already at")
+        rc_pos = result.output.find("Added auto-source line to")
+        assert result_pos != -1
+        assert rc_pos != -1
+        assert result_pos < rc_pos, (
+            f"rc-edit message must appear AFTER the result line; "
+            f"result_pos={result_pos}, rc_pos={rc_pos}\n{result.output}"
+        )
         # Stamp must be consumed (deleted) so subsequent updates are silent.
         assert not stamp.exists(), "the .rc-just-added stamp must be deleted after surfacing once"
 
@@ -589,6 +605,49 @@ class TestRcFirstRunStamp:
         result = runner.invoke(app, ["update", "--marketplace-dir", str(marketplace)])
         assert result.exit_code == 0, result.output
         assert "Added auto-source line to" not in result.output
+
+    def test_stamp_message_appears_after_check_plan(
+        self, update_env: dict[str, Path]
+    ) -> None:
+        """v0.3.43 D-9.43.4: ``--check`` mode prints plan first, rc-edit note last.
+
+        v0.3.42 D-9.42.5 added ``--check``. v0.3.42 9.141 also dropped
+        the ``.rc-just-added`` stamp consumption at the top of
+        ``update()``, which printed the rc-edit note BEFORE the plan
+        when both events fired in the same run. v0.3.43 D-9.43.4 moves
+        the consumption to the end of each branch — the user sees the
+        plan first, side-note last.
+        """
+        home = update_env["home"]
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+
+        # Set up a drift scenario so ``--check`` prints a meaningful plan.
+        _seed_marketplace(marketplace, "0.3.43")
+        (cache_base / "0.3.42").mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.42")
+
+        # Drop a stamp so the first-run note fires too.
+        self._seed_stamp(home, str(home / ".zshrc"))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--check", "--marketplace-dir", str(marketplace)],
+        )
+        assert result.exit_code == 0, result.output
+
+        # Both messages present.
+        assert "plan:" in result.output
+        assert "Added auto-source line to" in result.output
+
+        # Plan first, rc-edit note last.
+        plan_pos = result.output.find("plan:")
+        rc_pos = result.output.find("Added auto-source line to")
+        assert plan_pos < rc_pos, (
+            f"plan must appear before rc-edit note in --check mode; "
+            f"plan_pos={plan_pos}, rc_pos={rc_pos}\n{result.output}"
+        )
 
 
 # ---------------------------------------------------------------------------

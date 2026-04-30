@@ -535,12 +535,12 @@ def update(
     """Refresh marketplace clone and upgrade plugin cache when version drifts."""
     configure_runner_logging(verbose=verbose)
 
-    # v0.3.42 9.141 / D-9.42.2: consume the ``.rc-just-added`` stamp
-    # dropped by ``ensure-env.sh`` on first-run rc integration. Surface
-    # a one-line note pointing the user at the rc file (so they know an
-    # edit happened) and delete the stamp (consume-once semantics —
-    # subsequent updates are silent on this front).
-    _consume_rc_just_added_stamp()
+    # v0.3.43 D-9.43.4: ``_consume_rc_just_added_stamp()`` was previously
+    # called HERE (top of update()), which printed the rc-edit note
+    # BEFORE the plan/result. Reading order should be plan → side-note,
+    # not side-note → plan. The call is now made at the END of each
+    # branch (--check exit, apply-mode end) so the rc-edit hint appears
+    # after the user has read the primary result.
 
     if not marketplace_dir.is_dir():
         typer.echo(
@@ -577,6 +577,8 @@ def update(
             cache_empty=cache_empty,
             mid_upgrade=mid_upgrade,
         )
+        # v0.3.43 D-9.43.4: rc-edit note appears AFTER the plan, not before.
+        _consume_rc_just_added_stamp()
         return
 
     # v0.3.39 D-9.39.1 self-heal: when the plugin cache contains no
@@ -606,6 +608,8 @@ def update(
 
     if cache_ver == marketplace_ver:
         typer.echo(f"paper-wiki is already at {marketplace_ver}")
+        # v0.3.43 D-9.43.4: rc-edit note appears AFTER the result line.
+        _consume_rc_just_added_stamp()
         return
 
     # Versions differ — perform upgrade.
@@ -700,6 +704,11 @@ def update(
         + "\n     (SessionStart fires ensure-env.sh against the now-registered"
         + "\n      plugin and rewrites the shim/helper to the new version)"
     )
+
+    # v0.3.43 D-9.43.4: rc-edit note appears AFTER the upgrade summary +
+    # Next: block, not before. Consume-once semantics preserved (the
+    # stamp is deleted after the message is printed).
+    _consume_rc_just_added_stamp()
 
 
 # ---------------------------------------------------------------------------
