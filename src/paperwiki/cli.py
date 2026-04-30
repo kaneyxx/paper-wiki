@@ -29,7 +29,10 @@ from loguru import logger
 
 from paperwiki import __version__ as _PAPERWIKI_VERSION  # noqa: N812 — module constant alias
 from paperwiki._internal.logging import configure_runner_logging
-from paperwiki._internal.paths import resolve_paperwiki_venv_dir
+from paperwiki._internal.paths import (
+    resolve_paperwiki_bak_dir,
+    resolve_paperwiki_venv_dir,
+)
 from paperwiki.runners.diag import render_diag as _render_diag
 from paperwiki.runners.diagnostics import main as _diagnostics_main
 from paperwiki.runners.digest import main as _digest_main
@@ -329,6 +332,66 @@ def _self_heal_from_marketplace(
     shutil.copytree(marketplace_dir, target)
 
 
+# v0.3.43 D-9.43.2: legacy ``.bak`` filenames live under the plugin cache
+# subdir as ``<ver>.bak.<UTC-ts>/``. Match the same shape gc_bak uses
+# (``BAK_FILENAME_RE`` in ``runners.gc_bak``) so we never confuse a
+# user-added directory with an old paperwiki backup.
+_LEGACY_BAK_FILENAME_RE = re.compile(r"^\d+\.\d+\.\d+\.bak\.\d{8}T\d{6}Z$")
+
+
+def _migrate_legacy_bak(cache_base: Path, bak_root: Path) -> None:
+    """Move ``<cache>/<ver>.bak.<ts>/`` into ``<bak_root>/<ver>.bak.<ts>/``.
+
+    v0.3.43 D-9.43.2 migration helper. v0.3.42 wrote ``.bak`` under the
+    plugin cache subdir; v0.3.43 relocates them outside cache so they
+    survive ``/plugin install``. This helper runs at the top of
+    ``paperwiki update`` apply mode and idempotently relocates any
+    legacy backups.
+
+    Behavior:
+
+    - Missing ``cache_base`` → no-op (no backups to migrate).
+    - Each ``<ver>.bak.<ts>/`` matching the canonical regex is moved
+      via ``shutil.move`` (cross-filesystem-safe).
+    - Collisions (same name already at ``bak_root``) are skipped with
+      a warn-log; never overwrites the existing target.
+    - ``shutil.move`` failures (permissions, filesystem read-only) are
+      logged at WARN; the migration loop continues with the next entry.
+
+    Idempotent — second invocation finds nothing legacy to migrate.
+    """
+    if not cache_base.is_dir():
+        return
+    bak_root.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(cache_base.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not _LEGACY_BAK_FILENAME_RE.match(entry.name):
+            continue
+        target = bak_root / entry.name
+        if target.exists():
+            logger.warning(
+                "paperwiki update: legacy .bak migration collision; preserving "
+                "{target} and leaving source at {source}",
+                target=target,
+                source=entry,
+            )
+            continue
+        try:
+            shutil.move(str(entry), str(target))
+            logger.info(
+                "paperwiki update: migrated legacy .bak {name} from cache to {target}",
+                name=entry.name,
+                target=target,
+            )
+        except OSError as exc:
+            logger.warning(
+                "paperwiki update: failed to migrate {source}: {exc}; leaving in cache",
+                source=entry,
+                exc=exc,
+            )
+
+
 # ---------------------------------------------------------------------------
 # update
 # ---------------------------------------------------------------------------
@@ -403,14 +466,14 @@ def _print_update_check_plan(
         return
 
     old_display = cache_ver if cache_ver else "not installed"
+    bak_root = resolve_paperwiki_bak_dir()
     typer.echo(
         f"plan: would upgrade {old_display} → {marketplace_ver}\n"
-        f"  → would rename cache dir {old_display} to "
-        f"{old_display}.bak.<UTC-timestamp>\n"
+        f"  → would move cache dir {old_display} to "
+        f"{bak_root}/{old_display}.bak.<UTC-timestamp>\n"
         "  → would drop paper-wiki entry from installed_plugins.json\n"
         "  → would drop paper-wiki from settings.json enabledPlugins\n"
-        "Note: .bak directories are cleared by /plugin install — "
-        "back up manually if you need long-term rollback access.\n"
+        f"Note: .bak directories live at {bak_root} and survive /plugin install.\n"
         "nothing applied — re-run without --check to apply."
     )
 
@@ -549,17 +612,28 @@ def update(
     # fallback (v0.3.31-A) covers the runtime gap.
     _uninstall_stale_editable_paperwiki()
 
+    # v0.3.43 D-9.43.2: migrate any legacy in-cache .bak directories
+    # before we lay down a new one. Idempotent — second run finds
+    # nothing to migrate.
+    bak_root = resolve_paperwiki_bak_dir()
+    _migrate_legacy_bak(_CACHE_BASE, bak_root)
+
     old_cache_dir = _find_cache_dir(cache_ver) if cache_ver else None
     bak_suffix = ""
     if old_cache_dir is not None and cache_ver:
         ts = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         bak_name = f"{cache_ver}.bak.{ts}"
-        bak_path = old_cache_dir.parent / bak_name
+        # v0.3.43 D-9.43.2: write .bak outside the plugin cache subdir
+        # so it survives /plugin install. ``shutil.move`` handles
+        # cross-filesystem renames (rename(2) fails on EXDEV when
+        # ``~/.local/share`` is on a different mount).
+        bak_root.mkdir(parents=True, exist_ok=True)
+        bak_path = bak_root / bak_name
         try:
-            old_cache_dir.rename(bak_path)
-            bak_suffix = f"\n(cache backed up to {bak_name})"
+            shutil.move(str(old_cache_dir), str(bak_path))
+            bak_suffix = f"\n(cache backed up to {bak_path})"
         except OSError as exc:
-            typer.echo(f"paper-wiki: could not rename cache dir: {exc}", err=True)
+            typer.echo(f"paper-wiki: could not move cache dir: {exc}", err=True)
             raise typer.Exit(1) from exc
 
     _drop_from_installed_plugins()
@@ -570,11 +644,12 @@ def update(
     # PAPERWIKI_BAK_KEEP retention. Default 3 keeps current cache + 2
     # rollback targets. PAPERWIKI_BAK_KEEP=0 = skip auto-prune (escape
     # hatch for power users who manage .bak themselves).
+    # v0.3.43 D-9.43.2: scan the new bak root, not the in-cache location.
     bak_summary = ""
     keep_recent = _resolve_bak_keep()
     if keep_recent > 0:
         prune_report = _gc_bak_run(
-            _CACHE_BASE,
+            bak_root,
             keep_recent=keep_recent,
             dry_run=False,
         )
@@ -593,20 +668,18 @@ def update(
     #   restart 2 → SessionStart fires ensure-env.sh which rewrites
     #               the shim and helper to the new version
     #
-    # v0.3.41 D-9.41.1: prepend a one-line ``Note:`` warning that the
-    # ``.bak`` directories created by this update are cleared by
-    # ``/plugin install`` (release-gate verification of v0.3.40
-    # confirmed Claude Code's plugin manager wipes the cache subdir
-    # before re-populating). Users relying on ``.bak`` for rollback
-    # need to know — without this NOTE the rollback path silently
-    # disappears between steps 3 and 5 of the upgrade flow.
+    # v0.3.41 D-9.41.1 / v0.3.43 D-9.43.2: ``.bak`` directories now live
+    # at ``~/.local/share/paperwiki/bak/`` (outside Claude Code's plugin
+    # cache subdir) so they survive the next ``/plugin install``. The
+    # v0.3.41 "cleared by /plugin install" warning no longer applies —
+    # rollback access is durable. Old in-cache backups are migrated by
+    # ``_migrate_legacy_bak`` at the top of this function.
     typer.echo(
         f"paper-wiki: {old_display} → {marketplace_ver}"
         + bak_suffix
         + bak_summary
         + "\n"
-        + "\nNote: .bak directories are cleared by /plugin install — "
-        + "back up manually if you need long-term rollback access."
+        + f"\nNote: .bak directories live at {bak_root} and survive /plugin install."
         + "\n"
         + "\nNext:"
         + "\n  1. Exit any running session: /exit (or Ctrl-D)"
@@ -670,11 +743,14 @@ def status(
     )
 
     # Task 9.33: 4th line surfaces the .bak retention state at a glance.
-    bak_count, oldest_ts = _summarize_bak_state(_CACHE_BASE)
+    # v0.3.43 D-9.43.2: scan the new bak root (outside cache); print the
+    # location so users know where to look for rollback targets.
+    bak_root = resolve_paperwiki_bak_dir()
+    bak_count, oldest_ts = _summarize_bak_state(bak_root)
     if bak_count == 0:
-        bak_line = "no backups"
+        bak_line = f"no backups  (location: {bak_root})"
     else:
-        bak_line = f"{bak_count} kept; oldest {oldest_ts or 'unknown'}"
+        bak_line = f"{bak_count} kept; oldest {oldest_ts or 'unknown'}  (location: {bak_root})"
     typer.echo(f"bak directories  : {bak_line}")
 
     # v0.3.40 Task 9.114 / D-9.40.1: install-health check.
@@ -794,17 +870,21 @@ def _check_install_health() -> list[tuple[str, bool, str | None]]:
     return rows
 
 
-def _summarize_bak_state(cache_root: Path) -> tuple[int, str | None]:
-    """Return (count, oldest_timestamp) for .bak directories under cache_root.
+def _summarize_bak_state(bak_root: Path) -> tuple[int, str | None]:
+    """Return (count, oldest_timestamp) for .bak directories under ``bak_root``.
 
     Used by ``paperwiki status`` to show retention state at a glance.
-    Returns ``(0, None)`` when the cache root is missing or empty.
+    Returns ``(0, None)`` when the directory is missing or empty.
+
+    v0.3.43 D-9.43.2: ``bak_root`` is the post-relocation backup
+    directory (``~/.local/share/paperwiki/bak`` by default, overridable
+    via ``PAPERWIKI_BAK_DIR``), no longer the in-cache subdir.
     """
-    if not cache_root.is_dir():
+    if not bak_root.is_dir():
         return (0, None)
     matches: list[str] = [
         entry.name
-        for entry in cache_root.iterdir()
+        for entry in bak_root.iterdir()
         if entry.is_dir() and BAK_FILENAME_RE.match(entry.name)
     ]
     if not matches:

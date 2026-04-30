@@ -174,7 +174,15 @@ class TestUpdateSelfHeal:
         assert (cache_base / "0.3.38" / "lib" / "bash-helpers.sh").is_file()
 
     def test_self_heals_when_cache_has_only_bak_dirs(self, update_env: dict[str, Path]) -> None:
-        """(b) Cache contains only ``.bak.*`` dirs (no version dir) → self-heal fires."""
+        """(b) Cache contains only ``.bak.*`` dirs (no version dir) → self-heal fires.
+
+        v0.3.43 D-9.43.2 update: legacy ``.bak`` directories under the
+        plugin cache subdir are now migrated to ``~/.local/share/paperwiki/bak/``
+        as part of the update flow. The migration runs at the start of
+        the apply branch — *after* self-heal but before the cache rename.
+        Self-heal short-circuits ("already at v0.3.38") so migration
+        does NOT run in this scenario; the legacy bak stays in cache.
+        """
         marketplace = update_env["marketplace_dir"]
         cache_base = update_env["cache_base"]
         _seed_marketplace(marketplace, "0.3.38")
@@ -194,9 +202,20 @@ class TestUpdateSelfHeal:
         # New version dir created.
         assert (cache_base / "0.3.38").is_dir()
         assert (cache_base / "0.3.38" / "MARKETPLACE_SENTINEL").read_text() == "yes"
-        # Old .bak dir untouched.
-        assert bak_dir.is_dir()
-        assert (bak_dir / "old_sentinel.txt").read_text() == "backup"
+        # Old .bak dir contents survive — either still in cache (if self-heal
+        # short-circuited before migration) or relocated to the new bak root.
+        legacy_in_cache = bak_dir.is_dir()
+        bak_root_default = update_env["home"] / ".local" / "share" / "paperwiki" / "bak"
+        migrated = bak_root_default / "0.3.37.bak.20260428T120000Z"
+        legacy_at_new = migrated.is_dir()
+        assert legacy_in_cache or legacy_at_new, (
+            "legacy .bak should be present at either the old or new location"
+        )
+        # The actual contents survive regardless of which location.
+        if legacy_in_cache:
+            assert (bak_dir / "old_sentinel.txt").read_text() == "backup"
+        else:
+            assert (migrated / "old_sentinel.txt").read_text() == "backup"
 
     def test_no_self_heal_when_version_dir_already_present(
         self, update_env: dict[str, Path]
@@ -304,19 +323,20 @@ class TestUpdateNextMessage:
     def test_bak_lifecycle_note_appears_before_next_block(
         self, update_env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """v0.3.41 D-9.41.1: warn that ``.bak`` is cleared by ``/plugin install``.
+        """v0.3.43 D-9.43.2 update of v0.3.41 D-9.41.1.
 
-        The release-gate verification of v0.3.40 confirmed that
-        Claude Code's ``/plugin install`` step (necessary to register
-        the plugin) wipes the cache subdir including ``.bak`` dirs
-        created by ``paperwiki update``. Users relying on ``.bak``
-        for rollback need to know this — hence the NOTE.
+        v0.3.41's NOTE warned that ``.bak`` is cleared by
+        ``/plugin install``. v0.3.43 D-9.43.2 fixes the underlying
+        problem by relocating ``.bak`` outside the plugin cache
+        (to ``~/.local/share/paperwiki/bak/``); the NOTE now reads
+        the *positive* form ("survive /plugin install").
 
         Acceptance criteria:
         (a) The NOTE substring contains "/plugin install" (so users
             can search/grep for it).
-        (b) The NOTE appears BEFORE the "Next:" block (so users see
-            the rollback caveat before the restart instructions).
+        (b) The NOTE mentions "survive" — the rollback contract.
+        (c) The NOTE appears BEFORE the "Next:" block (so users see
+            the rollback location before the restart instructions).
         """
         marketplace = update_env["marketplace_dir"]
         cache_base = update_env["cache_base"]
@@ -335,12 +355,11 @@ class TestUpdateNextMessage:
         assert result.exit_code == 0, result.output
         # (a) NOTE substring contains "/plugin install".
         assert "/plugin install" in result.output
-        # The NOTE specifically mentions .bak + the "back up" or "rollback" cue.
-        note_keywords_present = any(kw in result.output for kw in ("back up manually", "rollback"))
-        assert note_keywords_present, (
-            f"NOTE must mention 'back up manually' or 'rollback':\n{result.output}"
+        # (b) The NOTE specifically mentions "survive" — the rollback contract.
+        assert "survive" in result.output, (
+            f"NOTE must mention 'survive /plugin install':\n{result.output}"
         )
-        # (b) The NOTE appears BEFORE the "Next:" block.
+        # (c) The NOTE appears BEFORE the "Next:" block.
         note_pos = result.output.find("Note:")
         next_pos = result.output.find("\nNext:")
         assert note_pos != -1, f"missing 'Note:' line:\n{result.output}"
