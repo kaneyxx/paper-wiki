@@ -1,4 +1,4 @@
-# paperwiki bash-helpers — v0.3.40 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
+# paperwiki bash-helpers — v0.3.41 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
 #
 # This file is meant to be `source`d by SKILL bash blocks, NOT executed
 # directly. There is no shebang because POSIX sourcing ignores the
@@ -172,16 +172,20 @@ paperwiki_diag() {
     #   paperwiki_diag --file <path>          Atomic-write the full dump to <path>
     #                                         (creating parent dirs as needed) and
     #                                         echo "wrote diag to <path>" to stdout.
+    # v0.3.41 D-9.41.3: ``--file`` without a path arg defaults to a
+    # timestamped file under ``$HOME`` (universally writable). The
+    # ``--*`` guard ensures ``--file --some-other-flag`` doesn't
+    # consume the second flag as a path. Explicit-path mode unchanged.
     local output_path=""
     case "${1:-}" in
         --file)
             shift
-            if [ -z "${1:-}" ]; then
-                echo "paperwiki_diag: --file requires a path" >&2
-                return 1
+            if [ -z "${1:-}" ] || [[ "$1" == --* ]]; then
+                output_path="$HOME/paper-wiki-diag-$(date -u +%Y%m%dT%H%M%SZ).txt"
+            else
+                output_path="$1"
+                shift
             fi
-            output_path="$1"
-            shift
             ;;
     esac
 

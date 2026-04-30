@@ -545,17 +545,48 @@ def test_diag_file_flag_creates_parent_dirs(tmp_path: Path) -> None:
     assert "=== paperwiki_diag — install state ===" in out_file.read_text(encoding="utf-8")
 
 
-def test_diag_file_flag_without_arg_fails_loudly(tmp_path: Path) -> None:
-    """``--file`` without a path arg → non-zero exit + actionable error message."""
+def test_diag_file_flag_without_arg_uses_default_path(tmp_path: Path) -> None:
+    """v0.3.41 D-9.41.3: ``--file`` without a path defaults to ``$HOME/paper-wiki-diag-<ts>.txt``.
+
+    Replaces v0.3.40's "fail loudly" semantics — see plan §18.3 task
+    9.126. The default location lives in ``$HOME`` (universally
+    writable across macOS / Linux); the filename includes a UTC
+    timestamp so each invocation produces a unique file (no
+    overwrite surprises).
+    """
     proc = _run_bash(
         f"source {_HELPER_PATH}; paperwiki_diag --file",
         env_overrides={"HOME": str(tmp_path)},
     )
-    assert proc.returncode != 0, (
-        f"expected non-zero exit when --file has no arg; got 0:\n"
-        f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    # Default-path mode succeeds (no error exit).
+    assert proc.returncode == 0, (
+        f"--file without arg must succeed using default path; got "
+        f"exit {proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
     )
-    # Error mentions --file and "path" (actionable).
-    combined = proc.stdout + proc.stderr
-    assert "--file" in combined
-    assert "path" in combined.lower()
+    # Confirmation echoed to stdout.
+    assert "wrote diag to" in proc.stdout
+    # A file matching the default-path pattern was written.
+    candidates = list(tmp_path.glob("paper-wiki-diag-*.txt"))
+    assert len(candidates) == 1, (
+        f"expected exactly one default-path file in $HOME; got {candidates}"
+    )
+    # File contains the full diag dump.
+    content = candidates[0].read_text(encoding="utf-8")
+    assert "=== paperwiki_diag — install state ===" in content
+
+
+def test_diag_file_flag_default_path_is_timestamped(tmp_path: Path) -> None:
+    """Default filename matches ``paper-wiki-diag-<YYYYMMDDTHHMMSSZ>.txt``."""
+    import re as _re
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag --file",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    candidates = list(tmp_path.glob("paper-wiki-diag-*.txt"))
+    assert len(candidates) == 1, candidates
+    # ``date +%Y%m%dT%H%M%SZ`` shape: 8 digits, T, 6 digits, Z.
+    assert _re.match(r"^paper-wiki-diag-\d{8}T\d{6}Z\.txt$", candidates[0].name), (
+        f"default filename must be timestamped; got {candidates[0].name!r}"
+    )

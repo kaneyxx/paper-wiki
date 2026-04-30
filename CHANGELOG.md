@@ -9,6 +9,117 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.41] - 2026-04-29
+
+Post-v0.3.40 polish release. Three small UX fixes that emerged from
+release-gate verification: `paperwiki update` now warns about the
+`.bak` directory's lifecycle (Claude Code's `/plugin install` wipes
+the cache subdir, so `.bak.*` never survives a real upgrade);
+`paperwiki status --strict` opt-in flag for CI pipelines that want
+helper-state issues to be exit-1 errors instead of warnings;
+`paperwiki_diag --file` (no path arg) now defaults to a timestamped
+file under `$HOME` instead of failing loudly. No behavior changes,
+no version-pin shifts beyond the 0.3.40 → 0.3.41 bump itself.
+
+### Added
+
+- **`paperwiki status --strict` opt-in CI flag** (D-9.41.2). Adds a
+  `--strict` boolean option to the status command. Default behavior
+  (no flag) is unchanged — exit-0 in every healthy/unhealthy
+  combination, preserving the v0.3.40 D-9.40.1 "warn-not-error"
+  contract for interactive use. With `--strict`, the command exits
+  1 if any of the four install-health rows is unhealthy. This
+  resolves the v0.3.40 deferred decision: `--strict` is opt-in
+  (CI-friendly) rather than the default (which would have broken
+  existing automation pipes through `paperwiki status`).
+
+- **`paperwiki_diag --file` (no path arg) defaults to timestamped
+  `$HOME` file** (D-9.41.3). v0.3.40's `paperwiki_diag --file`
+  required an explicit path; calling `--file` without a path
+  exited 1 with an actionable error. v0.3.41 keeps the explicit-
+  path mode unchanged but adds a no-arg default: when invoked as
+  `paperwiki_diag --file` (or `paperwiki_diag --file --some-other-
+  flag`), the function writes to
+  `$HOME/paper-wiki-diag-<UTC-timestamp>.txt` and echoes
+  `wrote diag to <path>`. The `$HOME` default is universally
+  writable; the timestamp prevents collisions across multiple
+  diag invocations. Makes "share the diag" trivially easy:
+  `paperwiki_diag --file` then send the printed path.
+
+### Changed
+
+- **`paperwiki update` output now warns about `.bak` directory
+  lifecycle** (D-9.41.1). v0.3.40's release-gate verification
+  surfaced that Claude Code's `/plugin install` wipes the entire
+  `cache/paper-wiki/paper-wiki/` subdirectory before re-extracting
+  the new version — including any `.bak.*` directories
+  `paperwiki update` left behind. Result: the v0.3.39 D-9.39.1
+  rollback story ("`.bak.*` directories preserve the previous
+  cache for manual rollback") is functionally void in the
+  upgrade path because `/plugin install` wipes them moments
+  later. v0.3.41 adds an inline `Note:` line to `paperwiki update`
+  output between the "cache backed up" message and the "Next:"
+  block, telling users that `.bak` directories are cleared by
+  `/plugin install` and they should back up manually for long-
+  term rollback access. Messaging-only fix; the runner behavior
+  is unchanged. A deeper fix (move `.bak` outside the cache subdir)
+  is deferred — it would require changing the rename target,
+  which has wider blast radius.
+
+### Decisions ratified
+
+- **D-9.41.1** `paperwiki update` adds a `Note:` line about `.bak`
+  lifecycle vs `/plugin install`; messaging-only, no runner
+  behavior change. Deeper fix (move `.bak` outside cache subdir)
+  deferred.
+- **D-9.41.2** `paperwiki status --strict` flag is opt-in
+  (default behavior unchanged); resolves the v0.3.40 deferred
+  decision in favor of CI-friendly opt-in over default-strict.
+- **D-9.41.3** `paperwiki_diag --file` without a path arg
+  defaults to `$HOME/paper-wiki-diag-<UTC-timestamp>.txt`;
+  explicit-path mode unchanged. Replaces v0.3.40's "fail loudly"
+  semantics with a sensible default.
+
+### Lessons learned
+
+The v0.3.40 release-gate verification surfaced that the v0.3.39
+`.bak` rollback story is structurally fragile in the upgrade path
+because Claude Code's `/plugin install` controls the cache subdir
+and wipes its contents. The v0.3.41 messaging fix (D-9.41.1) is a
+short-term mitigation; a deeper architectural fix (rename target
+outside the wipe-zone) is deferred to a future release. Lesson:
+when a feature depends on directories Claude Code's plugin manager
+treats as ephemeral, document the lifecycle constraint loudly at
+the user-visible layer — the underlying contract is not paperwiki's
+to control.
+
+The `paperwiki status --strict` decision (D-9.41.2) followed a
+common pattern: a "should we make this strict?" question deferred
+during the v0.3.40 build was answered the right way once we had
+real-usage data. The v0.3.40 default-warn behavior turned out to
+be exactly right for interactive use; CI users who want strict
+errors are a smaller and more sophisticated audience that benefits
+from an explicit opt-in.
+
+### Tests
+
+- 1 new test in `tests/unit/cli/test_update_self_heal.py`
+  (`test_bak_lifecycle_note_appears_before_next_block`) verifies
+  the `Note:` line about `.bak` lifecycle appears before the
+  `Next:` block in `paperwiki update` output.
+- 3 new tests in `tests/unit/cli/test_status_health.py`
+  (`TestStatusStrictFlag` class) cover the `--strict` flag:
+  exit-0 on healthy install with `--strict`, exit-1 on
+  unhealthy install with `--strict`, and default mode
+  preserves exit-0 even when unhealthy.
+- 2 replacement tests in `tests/unit/test_bash_helpers.py`
+  (`test_diag_file_flag_without_arg_uses_default_path` +
+  `test_diag_file_flag_default_path_is_timestamped`) replace
+  the v0.3.40 `test_diag_file_flag_without_arg_fails_loudly`
+  test (now obsolete per D-9.41.3).
+- 983 → 988 total tests (+5 net). pytest -q green;
+  mypy --strict clean; ruff check + format clean.
+
 ## [0.3.40] - 2026-04-29
 
 ### Added

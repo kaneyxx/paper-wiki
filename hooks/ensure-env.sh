@@ -39,13 +39,13 @@ PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 # ---------------------------------------------------------------------------
 SHIM_DIR="$HOME/.local/bin"
 SHIM_PATH="$SHIM_DIR/paperwiki"
-EXPECTED_TAG="# paperwiki shim — v0.3.40 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+EXPECTED_TAG="# paperwiki shim — v0.3.41 (shared venv + self-bootstrap + PYTHONPATH fallback)."
 
 mkdir -p "$SHIM_DIR"
 if ! [ -f "$SHIM_PATH" ] || ! grep -qF "$EXPECTED_TAG" "$SHIM_PATH" 2>/dev/null; then
   cat > "$SHIM_PATH" <<'SHIM_EOF'
 #!/usr/bin/env bash
-# paperwiki shim — v0.3.40 (shared venv + self-bootstrap + PYTHONPATH fallback).
+# paperwiki shim — v0.3.41 (shared venv + self-bootstrap + PYTHONPATH fallback).
 set -euo pipefail
 CACHE_ROOT="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
 PAPERWIKI_HOME_RESOLVED="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
@@ -95,7 +95,7 @@ esac
 # ---------------------------------------------------------------------------
 HELPER_DIR="$HOME/.local/lib/paperwiki"
 HELPER_PATH="$HELPER_DIR/bash-helpers.sh"
-EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v0.3.40 (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
+EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v0.3.41 (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
 
 if ! mkdir -p "$HELPER_DIR" 2>/dev/null; then
   echo "paperwiki: warning: $HELPER_DIR is not writable; bash-helpers not installed." >&2

@@ -301,6 +301,55 @@ class TestUpdateNextMessage:
             f"{result.output.count('/exit')}:\n{result.output}"
         )
 
+    def test_bak_lifecycle_note_appears_before_next_block(
+        self, update_env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """v0.3.41 D-9.41.1: warn that ``.bak`` is cleared by ``/plugin install``.
+
+        The release-gate verification of v0.3.40 confirmed that
+        Claude Code's ``/plugin install`` step (necessary to register
+        the plugin) wipes the cache subdir including ``.bak`` dirs
+        created by ``paperwiki update``. Users relying on ``.bak``
+        for rollback need to know this — hence the NOTE.
+
+        Acceptance criteria:
+        (a) The NOTE substring contains "/plugin install" (so users
+            can search/grep for it).
+        (b) The NOTE appears BEFORE the "Next:" block (so users see
+            the rollback caveat before the restart instructions).
+        """
+        marketplace = update_env["marketplace_dir"]
+        cache_base = update_env["cache_base"]
+        _seed_marketplace(marketplace, "0.3.41")
+        old_cache = cache_base / "0.3.40"
+        old_cache.mkdir(parents=True)
+        _seed_installed_plugins_json(update_env["installed_plugins"], "0.3.40")
+        monkeypatch.setattr(cli_module, "_uninstall_stale_editable_paperwiki", lambda: None)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["update", "--marketplace-dir", str(update_env["marketplace_dir"])],
+        )
+
+        assert result.exit_code == 0, result.output
+        # (a) NOTE substring contains "/plugin install".
+        assert "/plugin install" in result.output
+        # The NOTE specifically mentions .bak + the "back up" or "rollback" cue.
+        note_keywords_present = any(kw in result.output for kw in ("back up manually", "rollback"))
+        assert note_keywords_present, (
+            f"NOTE must mention 'back up manually' or 'rollback':\n{result.output}"
+        )
+        # (b) The NOTE appears BEFORE the "Next:" block.
+        note_pos = result.output.find("Note:")
+        next_pos = result.output.find("\nNext:")
+        assert note_pos != -1, f"missing 'Note:' line:\n{result.output}"
+        assert next_pos != -1, f"missing 'Next:' block:\n{result.output}"
+        assert note_pos < next_pos, (
+            f"Note: must appear before Next: block; "
+            f"note_pos={note_pos}, next_pos={next_pos}\n{result.output}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # v0.3.40 D-9.40.4: marketplace git pull is best-effort
