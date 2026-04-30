@@ -606,6 +606,17 @@ def update(
             "complete."
         )
 
+    # v0.3.44 D-9.44.1: migrate any legacy in-cache .bak directories
+    # BEFORE the no-op-return gate. v0.3.43 only ran this inside the
+    # upgrade branch (when versions differed), so users who upgraded
+    # via the v0.3.42 binary (which wrote .bak in-cache) had no
+    # automatic migration path — the in-cache .bak stayed forever or
+    # got eaten by the next /plugin install. Now migration runs
+    # unconditionally as a one-time housekeeping pass; idempotent
+    # when there's nothing to migrate.
+    bak_root = resolve_paperwiki_bak_dir()
+    _migrate_legacy_bak(_CACHE_BASE, bak_root)
+
     if cache_ver == marketplace_ver:
         typer.echo(f"paper-wiki is already at {marketplace_ver}")
         # v0.3.43 D-9.43.4: rc-edit note appears AFTER the result line.
@@ -625,12 +636,6 @@ def update(
     # permissions), continue with rename — the shim's PYTHONPATH
     # fallback (v0.3.31-A) covers the runtime gap.
     _uninstall_stale_editable_paperwiki()
-
-    # v0.3.43 D-9.43.2: migrate any legacy in-cache .bak directories
-    # before we lay down a new one. Idempotent — second run finds
-    # nothing to migrate.
-    bak_root = resolve_paperwiki_bak_dir()
-    _migrate_legacy_bak(_CACHE_BASE, bak_root)
 
     old_cache_dir = _find_cache_dir(cache_ver) if cache_ver else None
     bak_suffix = ""

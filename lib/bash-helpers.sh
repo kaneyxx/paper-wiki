@@ -1,4 +1,4 @@
-# paperwiki bash-helpers — v0.3.43 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
+# paperwiki bash-helpers — v0.3.44 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
 #
 # This file is meant to be `source`d by SKILL bash blocks, NOT executed
 # directly. There is no shebang because POSIX sourcing ignores the
@@ -24,7 +24,7 @@ _PAPERWIKI_HELPER_PATH="${BASH_SOURCE[0]:-$0}"
 # terminal (or re-source). The constant is a string of digits + dots
 # (no leading "v") for direct comparison against the regex-extracted
 # tag from the on-disk header.
-_PAPERWIKI_HELPER_VERSION="0.3.43"
+_PAPERWIKI_HELPER_VERSION="0.3.44"
 #
 # Install location: ensure-env.sh installs this file at every
 # SessionStart to ``$HOME/.local/lib/paperwiki/bash-helpers.sh``.
@@ -106,29 +106,20 @@ _paperwiki_diag_render() {
     # body. Underscore-prefix marks this as private API; downstream
     # callers must use ``paperwiki_diag``.
     #
-    # v0.3.42 D-9.42.4: when the paperwiki shim is installed and
-    # executable, delegate to ``paperwiki diag`` (the Typer subcommand
-    # added by D-9.42.1) and use its output. Single source of truth in
-    # Python avoids drift between the bash and CLI dumps. Fallback to
-    # the inline implementation preserves the v0.3.39 D-9.39.3 contract
-    # that ``paperwiki_diag`` works in degraded states (e.g., the shim
-    # was uninstalled but the helper is still sourced from a previous
-    # session).
-    local shim_path="$HOME/.local/bin/paperwiki"
-    if [ -x "$shim_path" ]; then
-        "$shim_path" diag
-        return $?
-    fi
+    # v0.3.43 D-9.43.6 + v0.3.44 D-9.44.2: stale-version warning runs
+    # FIRST so it appears regardless of which downstream path runs (the
+    # CLI delegation OR the inline fallback). v0.3.43's original
+    # placement put the check AFTER the shim-delegation gate, which
+    # meant healthy installs (where the shim is +x) bypassed the
+    # warning entirely — defeating the feature. v0.3.44 fixes that
+    # by hoisting the check to the top of this function.
     #
-    # v0.3.43 D-9.43.6: stale-version warning. When the on-disk helper at
-    # the canonical install path declares a version tag DIFFERENT from
-    # ``$_PAPERWIKI_HELPER_VERSION`` (the in-memory constant set when
-    # this shell sourced the helper), the user is running an out-of-date
-    # function — typically because ``paperwiki update`` rewrote the
-    # on-disk file but they haven't opened a new terminal. We prepend a
-    # short ⚠ warning to the diag output so the staleness is visible.
-    # Defensive: missing on-disk file or unparseable header → silent
-    # skip (treat as "no info to compare").
+    # The check compares the in-memory ``_PAPERWIKI_HELPER_VERSION``
+    # constant (captured when this shell sourced the helper) against
+    # the on-disk helper's first-line tag. Mismatch means
+    # ``paperwiki update`` rewrote the file after the shell session
+    # started. Defensive: missing on-disk file or unparseable header
+    # → silent skip (treat as "no info to compare").
     local on_disk_helper="$HOME/.local/lib/paperwiki/bash-helpers.sh"
     if [ -f "$on_disk_helper" ]; then
         local on_disk_tag
@@ -141,6 +132,20 @@ _paperwiki_diag_render() {
             echo "  Open a new terminal (or 'source $on_disk_helper') to refresh."
             echo
         fi
+    fi
+    #
+    # v0.3.42 D-9.42.4: when the paperwiki shim is installed and
+    # executable, delegate to ``paperwiki diag`` (the Typer subcommand
+    # added by D-9.42.1) and use its output. Single source of truth in
+    # Python avoids drift between the bash and CLI dumps. Fallback to
+    # the inline implementation preserves the v0.3.39 D-9.39.3 contract
+    # that ``paperwiki_diag`` works in degraded states (e.g., the shim
+    # was uninstalled but the helper is still sourced from a previous
+    # session).
+    local shim_path="$HOME/.local/bin/paperwiki"
+    if [ -x "$shim_path" ]; then
+        "$shim_path" diag
+        return $?
     fi
     #
     # v0.3.42 D-9.42.3 + 9.134: read the source-time-captured

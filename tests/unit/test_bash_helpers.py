@@ -828,12 +828,25 @@ def test_paperwiki_diag_no_warning_when_versions_match(tmp_path: Path) -> None:
     memory) and seed a canonical on-disk helper whose first-line tag
     declares the SAME version. The stale-detection logic should
     short-circuit; no warning is emitted.
+
+    v0.3.44 D-9.44.2: reads the current ``_PAPERWIKI_HELPER_VERSION``
+    from the worktree helper at test time so this test stays correct
+    across version bumps without manual updates.
     """
+    helper_text = _HELPER_PATH.read_text(encoding="utf-8")
+    current_version: str | None = None
+    for line in helper_text.splitlines():
+        if line.startswith("_PAPERWIKI_HELPER_VERSION="):
+            current_version = line.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+    assert current_version is not None, (
+        "could not extract _PAPERWIKI_HELPER_VERSION from helper file"
+    )
+
     canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
     canonical_dir.mkdir(parents=True)
-    # Match the worktree's _PAPERWIKI_HELPER_VERSION (currently 0.3.43).
     (canonical_dir / "bash-helpers.sh").write_text(
-        "# paperwiki bash-helpers — v0.3.43 (matching test stub)\n",
+        f"# paperwiki bash-helpers — v{current_version} (matching test stub)\n",
         encoding="utf-8",
     )
     proc = _run_bash(
@@ -897,3 +910,116 @@ def test_paperwiki_diag_no_warning_when_helper_missing(tmp_path: Path) -> None:
     assert "in-memory function" not in out
     # Diag still ran.
     assert "=== paperwiki_diag — install state ===" in out
+
+
+# ---------------------------------------------------------------------------
+# v0.3.44 D-9.44.2 — stale warning must run BEFORE shim delegation
+# ---------------------------------------------------------------------------
+
+
+def test_paperwiki_diag_stale_warning_fires_even_when_shim_delegates(
+    tmp_path: Path,
+) -> None:
+    """v0.3.44 D-9.44.2: stale warning runs before the shim delegation check.
+
+    v0.3.43's stale-detection lived AFTER the ``if [ -x $shim_path ]``
+    delegation gate, so on a healthy install (where the shim is +x and
+    the bash function shells out to ``paperwiki diag``) the warning
+    never fired — defeating the purpose. v0.3.44 moves the check to
+    the top of ``_paperwiki_diag_render`` so the ⚠ prepends regardless
+    of which path runs.
+
+    Setup: seed an on-disk helper with a DIFFERENT version + a +x shim
+    that prints a CLI-delegation sentinel. Both should appear in
+    output, with the ⚠ warning before the sentinel.
+    """
+    # On-disk helper with a different version than the in-memory constant.
+    canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
+    canonical_dir.mkdir(parents=True)
+    (canonical_dir / "bash-helpers.sh").write_text(
+        "# paperwiki bash-helpers — v0.3.99 (newer than in-memory)\n",
+        encoding="utf-8",
+    )
+    # +x shim that prints a sentinel (proves delegation actually fired).
+    shim_dir = tmp_path / ".local" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "paperwiki"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "# paperwiki shim — mock for delegation test\n"
+        'echo "DELEGATED_TO_CLI_v0.3.44_SENTINEL"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+
+    # Both signals must appear:
+    assert "DELEGATED_TO_CLI_v0.3.44_SENTINEL" in out, (
+        f"shim delegation must still happen on healthy install:\n{out}"
+    )
+    assert "⚠" in out, f"⚠ warning must fire even with shim delegation:\n{out}"
+    assert "in-memory function" in out
+    assert "v0.3.99" in out
+
+    # Ordering: ⚠ comes BEFORE the CLI sentinel (warning is prepended).
+    warning_pos = out.find("⚠")
+    sentinel_pos = out.find("DELEGATED_TO_CLI_v0.3.44_SENTINEL")
+    assert warning_pos < sentinel_pos, (
+        f"warning must be prepended before delegated output; "
+        f"warning_pos={warning_pos}, sentinel_pos={sentinel_pos}\n{out}"
+    )
+
+
+def test_paperwiki_diag_no_warning_with_shim_when_versions_match(
+    tmp_path: Path,
+) -> None:
+    """v0.3.44 D-9.44.2 negative case: matching versions + +x shim → no ⚠.
+
+    The fix must NOT introduce false-positive warnings when on-disk
+    helper version matches the in-memory constant. Shim delegation
+    still works; output is just the CLI sentinel.
+
+    Reads the current ``_PAPERWIKI_HELPER_VERSION`` from the worktree
+    helper at test time so this test stays correct across version
+    bumps without manual updates.
+    """
+    helper_text = _HELPER_PATH.read_text(encoding="utf-8")
+    current_version: str | None = None
+    for line in helper_text.splitlines():
+        if line.startswith("_PAPERWIKI_HELPER_VERSION="):
+            current_version = line.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+    assert current_version is not None, (
+        "could not extract _PAPERWIKI_HELPER_VERSION from helper file"
+    )
+
+    canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
+    canonical_dir.mkdir(parents=True)
+    (canonical_dir / "bash-helpers.sh").write_text(
+        f"# paperwiki bash-helpers — v{current_version} (matching in-memory)\n",
+        encoding="utf-8",
+    )
+    shim_dir = tmp_path / ".local" / "bin"
+    shim_dir.mkdir(parents=True)
+    shim = shim_dir / "paperwiki"
+    shim.write_text(
+        '#!/usr/bin/env bash\necho "MATCHING_VERSIONS_NO_WARNING_SENTINEL"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "MATCHING_VERSIONS_NO_WARNING_SENTINEL" in out
+    assert "⚠" not in out, f"matching versions must not emit ⚠ warning:\n{out}"
+    assert "in-memory function" not in out
