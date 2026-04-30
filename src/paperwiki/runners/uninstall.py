@@ -22,6 +22,7 @@ a no-op (each helper checks existence before acting).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -491,6 +492,82 @@ def apply(targets: list[Target], opts: UninstallOpts) -> int:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# v0.3.42 D-9.42.2 / 9.140 — shell-rc auto-source block removal
+# ---------------------------------------------------------------------------
+
+_RC_BEGIN_MARKER = "# >>> paperwiki helpers >>>"
+_RC_END_MARKER = "# <<< paperwiki helpers <<<"
+
+
+def _pick_rc_file(home: Path, shell: str | None) -> Path | None:
+    """Mirror ``hooks/rc-integration.sh::_pick_rc_file`` in pure Python.
+
+    Returns the rc-file path for the current shell, or ``None`` for
+    unsupported shells (fish, csh, …) and unset $SHELL. Kept in sync
+    with the bash version — both files share the same shell-detection
+    rules so the install (bash, SessionStart) and uninstall (Python,
+    runner) paths can never disagree.
+    """
+    if not shell:
+        return None
+    basename = shell.rsplit("/", 1)[-1]
+    if basename == "zsh":
+        return home / ".zshrc"
+    if basename == "bash":
+        bash_profile = home / ".bash_profile"
+        return bash_profile if bash_profile.is_file() else home / ".bashrc"
+    return None
+
+
+def _strip_rc_block(content: str) -> str:
+    """Remove the marker-delimited block from rc content.
+
+    Mirrors the awk filter in ``paperwiki_rc_uninstall``: skip lines
+    starting with ``_RC_BEGIN_MARKER`` (inclusive) until and including
+    the matching ``_RC_END_MARKER``. Lines outside the block pass
+    through unchanged.
+
+    A defensive ``startswith`` check (vs. equality) tolerates the
+    parenthetical metadata after ``>>>`` that the install function
+    appends ("(managed by paperwiki — do not edit between markers)").
+    """
+    out_lines: list[str] = []
+    in_block = False
+    for line in content.splitlines(keepends=True):
+        stripped = line.rstrip("\n")
+        if not in_block and stripped.startswith(_RC_BEGIN_MARKER):
+            in_block = True
+            continue
+        if in_block and stripped.startswith(_RC_END_MARKER):
+            in_block = False
+            continue
+        if not in_block:
+            out_lines.append(line)
+    return "".join(out_lines)
+
+
+def _remove_rc_block(opts: UninstallOpts) -> bool:
+    """Strip paperwiki marker block from the user's shell rc.
+
+    Returns True when the rc was modified, False on no-op (rc absent,
+    block absent, unsupported shell). Never raises — the function is
+    advisory and a failure here must not abort the uninstall flow.
+    """
+    home = _home(opts)
+    rc = _pick_rc_file(home, os.environ.get("SHELL"))
+    if rc is None or not rc.is_file():
+        return False
+    content = rc.read_text(encoding="utf-8")
+    if _RC_BEGIN_MARKER not in content:
+        return False
+    new_content = _strip_rc_block(content)
+    if new_content == content:
+        return False
+    rc.write_text(new_content, encoding="utf-8")
+    return True
+
+
 def uninstall(opts: UninstallOpts) -> int:
     """Drive the full uninstall flow.
 
@@ -532,6 +609,16 @@ def uninstall(opts: UninstallOpts) -> int:
             raise typer.Exit(1)
 
     count = apply(targets, opts)
+
+    # v0.3.42 D-9.42.2 / 9.140: ``--everything`` strips the rc-auto-source
+    # block written by ensure-env.sh on SessionStart. Done after ``apply``
+    # so that if the rc-removal fails it doesn't abort the rest of the
+    # uninstall flow. Side-effecting only when --everything; otherwise
+    # the block is preserved (mirrors the conservative "shim survives a
+    # plain uninstall" pattern).
+    if opts.everything and _remove_rc_block(opts):
+        count += 1
+        _log_removed("paperwiki shell-rc auto-source block")
 
     # Summary line — always shown, terse by default.
     typer.echo(f"paperwiki uninstall: {count} target(s) removed.")

@@ -1,8 +1,20 @@
-# paperwiki bash-helpers — v0.3.41 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
+# paperwiki bash-helpers — v0.3.42 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
 #
 # This file is meant to be `source`d by SKILL bash blocks, NOT executed
 # directly. There is no shebang because POSIX sourcing ignores the
 # interpreter header — the active shell processes the file.
+#
+# v0.3.42 D-9.42.3: capture the helper's own path at source time using
+# a shell-agnostic expansion. bash exposes the file path via
+# ``${BASH_SOURCE[0]}``; zsh leaves ``BASH_SOURCE`` unset but sets ``$0``
+# to the sourced file path under default options. The combined form
+# ``${BASH_SOURCE[0]:-$0}`` works in both shells without zsh-specific
+# syntax that would break bash's parser. ``_paperwiki_diag_render``
+# reads this variable instead of ``BASH_SOURCE[0]`` at function-call
+# time — by then BASH_SOURCE in zsh is empty even if it was set during
+# sourcing, producing the v0.3.41 release-gate "(helper self-path not
+# resolvable: )" bug.
+_PAPERWIKI_HELPER_PATH="${BASH_SOURCE[0]:-$0}"
 #
 # Install location: ensure-env.sh installs this file at every
 # SessionStart to ``$HOME/.local/lib/paperwiki/bash-helpers.sh``.
@@ -83,8 +95,31 @@ _paperwiki_diag_render() {
     # redirect to a file via ``--file <path>`` without duplicating the
     # body. Underscore-prefix marks this as private API; downstream
     # callers must use ``paperwiki_diag``.
-    local helper_self="${BASH_SOURCE[0]}"
+    #
+    # v0.3.42 D-9.42.4: when the paperwiki shim is installed and
+    # executable, delegate to ``paperwiki diag`` (the Typer subcommand
+    # added by D-9.42.1) and use its output. Single source of truth in
+    # Python avoids drift between the bash and CLI dumps. Fallback to
+    # the inline implementation preserves the v0.3.39 D-9.39.3 contract
+    # that ``paperwiki_diag`` works in degraded states (e.g., the shim
+    # was uninstalled but the helper is still sourced from a previous
+    # session).
     local shim_path="$HOME/.local/bin/paperwiki"
+    if [ -x "$shim_path" ]; then
+        "$shim_path" diag
+        return $?
+    fi
+    #
+    # v0.3.42 D-9.42.3 + 9.134: read the source-time-captured
+    # ``_PAPERWIKI_HELPER_PATH`` (set at the top of this file) instead
+    # of ``BASH_SOURCE[0]`` at function-call time. The canonical install
+    # path is the defensive fallback when the source-time capture
+    # produced an empty value (corrupt source, exotic shell) — printing
+    # a real path beats the broken "(self-path not resolvable: )" line.
+    local helper_self="${_PAPERWIKI_HELPER_PATH:-$HOME/.local/lib/paperwiki/bash-helpers.sh}"
+    # ``shim_path`` already declared at the top of this function for
+    # the D-9.42.4 delegation check; re-using here without a fresh
+    # ``local`` prevents bash 5.x from warning about shadowed locals.
     local cache_root="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
     local installed_plugins="$HOME/.claude/plugins/installed_plugins.json"
     local recipes_dir="$HOME/.config/paper-wiki/recipes"

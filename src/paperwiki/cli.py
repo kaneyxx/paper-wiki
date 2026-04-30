@@ -14,6 +14,7 @@ with the runners.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -29,6 +30,7 @@ from loguru import logger
 from paperwiki import __version__ as _PAPERWIKI_VERSION  # noqa: N812 — module constant alias
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki._internal.paths import resolve_paperwiki_venv_dir
+from paperwiki.runners.diag import render_diag as _render_diag
 from paperwiki.runners.diagnostics import main as _diagnostics_main
 from paperwiki.runners.digest import main as _digest_main
 from paperwiki.runners.extract_paper_images import main as _extract_images_main
@@ -332,6 +334,106 @@ def _self_heal_from_marketplace(
 # ---------------------------------------------------------------------------
 
 
+def _consume_rc_just_added_stamp() -> None:
+    """Surface the first-run rc-edit message and delete the stamp.
+
+    v0.3.42 9.141 / D-9.42.2. ``hooks/ensure-env.sh`` writes
+    ``$HELPER_DIR/.rc-just-added`` containing the rc-file path the
+    first time it adds the auto-source block. ``paperwiki update``
+    reads + deletes the stamp so the user sees exactly one note about
+    the edit. Defensive: missing / unreadable stamp = silent no-op.
+
+    The stamp path is computed lazily via ``Path.home()`` so tests can
+    monkeypatch HOME before invoking ``paperwiki update`` and have
+    their fixture stamps picked up.
+    """
+    stamp = Path.home() / ".local" / "lib" / "paperwiki" / ".rc-just-added"
+    if not stamp.is_file():
+        return
+    try:
+        rc_path = stamp.read_text(encoding="utf-8").strip()
+    except OSError:
+        rc_path = ""
+    # Best-effort delete; the message has already been computed.
+    with contextlib.suppress(OSError):
+        stamp.unlink(missing_ok=True)
+    if rc_path:
+        typer.echo(
+            f"Added auto-source line to {rc_path} — open a new terminal "
+            "or run `source <rc-file>` to use paperwiki_diag now."
+        )
+
+
+def _print_update_check_plan(
+    *,
+    marketplace_ver: str,
+    cache_ver: str | None,
+    cache_empty: bool,
+    mid_upgrade: bool,
+) -> None:
+    """Print the ``paperwiki update --check`` preview output.
+
+    v0.3.42 9.142 / D-9.42.5. Pure-print helper, no side effects.
+    Output shape:
+
+      plan: <state-summary>
+        → <action 1 (always emitted via "would")>
+        → <action 2>
+      Note: ...
+      nothing applied — re-run without --check to apply.
+    """
+    if mid_upgrade:
+        # 9.143 hint takes priority — user is mid-upgrade, they should
+        # finish that first before inspecting drift.
+        typer.echo(
+            "plan: paper-wiki appears to be mid-upgrade — restart "
+            "Claude Code and run /plugin install paper-wiki@paper-wiki "
+            "to complete."
+        )
+        typer.echo("nothing applied — re-run without --check to apply.")
+        return
+
+    if cache_empty:
+        typer.echo(f"plan: cache is empty — would self-heal from marketplace at v{marketplace_ver}")
+        typer.echo("nothing applied — re-run without --check to apply.")
+        return
+
+    if cache_ver == marketplace_ver:
+        typer.echo(f"plan: paper-wiki is already at {marketplace_ver} — no action needed")
+        return
+
+    old_display = cache_ver if cache_ver else "not installed"
+    typer.echo(
+        f"plan: would upgrade {old_display} → {marketplace_ver}\n"
+        f"  → would rename cache dir {old_display} to "
+        f"{old_display}.bak.<UTC-timestamp>\n"
+        "  → would drop paper-wiki entry from installed_plugins.json\n"
+        "  → would drop paper-wiki from settings.json enabledPlugins\n"
+        "Note: .bak directories are cleared by /plugin install — "
+        "back up manually if you need long-term rollback access.\n"
+        "nothing applied — re-run without --check to apply."
+    )
+
+
+def _cache_in_mid_upgrade_state(cache_base: Path, recorded_ver: str | None) -> bool:
+    """Return True when installed_plugins.json points at a vX whose cache
+    dir is gone but ``vX.bak.*`` directories remain.
+
+    v0.3.42 9.143 / D-9.42.5 helper. Used by ``paperwiki update`` (both
+    apply mode and ``--check`` mode) to surface a "you appear to be
+    mid-upgrade" hint to users who ran ``paperwiki update`` but forgot
+    to follow the TWO-restart guidance.
+    """
+    if not recorded_ver:
+        return False
+    if not cache_base.is_dir():
+        return False
+    if (cache_base / recorded_ver).is_dir():
+        return False  # vX still present — not mid-upgrade
+    bak_pattern = f"{recorded_ver}.bak."
+    return any(p.name.startswith(bak_pattern) for p in cache_base.iterdir() if p.is_dir())
+
+
 @app.command()
 def update(
     marketplace_dir: Annotated[
@@ -345,9 +447,27 @@ def update(
         bool,
         typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
     ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Dry run: print planned actions without applying any "
+                "filesystem mutations. Useful for previewing upgrades "
+                "before committing."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Refresh marketplace clone and upgrade plugin cache when version drifts."""
     configure_runner_logging(verbose=verbose)
+
+    # v0.3.42 9.141 / D-9.42.2: consume the ``.rc-just-added`` stamp
+    # dropped by ``ensure-env.sh`` on first-run rc integration. Surface
+    # a one-line note pointing the user at the rc file (so they know an
+    # edit happened) and delete the stamp (consume-once semantics —
+    # subsequent updates are silent on this front).
+    _consume_rc_just_added_stamp()
 
     if not marketplace_dir.is_dir():
         typer.echo(
@@ -358,8 +478,11 @@ def update(
         )
         raise typer.Exit(2)
 
-    # Pull latest
-    _git_pull(marketplace_dir)
+    # Pull latest. v0.3.42 D-9.42.5: skip in --check mode so the dry
+    # run doesn't perform any network I/O (matches the user's
+    # expectation that --check is a pure preview).
+    if not check:
+        _git_pull(marketplace_dir)
 
     marketplace_ver = _marketplace_version(marketplace_dir)
     if not marketplace_ver:
@@ -368,6 +491,20 @@ def update(
             err=True,
         )
         raise typer.Exit(1)
+
+    # v0.3.42 D-9.42.5: --check exits here after printing the preview.
+    # The remainder of this function is the apply-mode body.
+    if check:
+        cache_ver_for_check = _cache_version()
+        cache_empty = not _cache_has_any_version(_CACHE_BASE)
+        mid_upgrade = _cache_in_mid_upgrade_state(_CACHE_BASE, cache_ver_for_check)
+        _print_update_check_plan(
+            marketplace_ver=marketplace_ver,
+            cache_ver=cache_ver_for_check,
+            cache_empty=cache_empty,
+            mid_upgrade=mid_upgrade,
+        )
+        return
 
     # v0.3.39 D-9.39.1 self-heal: when the plugin cache contains no
     # version subdirs (empty dir, or ``.bak.*``-only), bootstrap from
@@ -383,6 +520,16 @@ def update(
         )
 
     cache_ver = _cache_version()
+
+    # v0.3.42 9.143 / D-9.42.5: surface a "between steps" hint when the
+    # apply path detects the user ran update but didn't finish the
+    # upgrade flow (cache contains only .bak.<ts> for the recorded ver).
+    if _cache_in_mid_upgrade_state(_CACHE_BASE, cache_ver):
+        typer.echo(
+            "paper-wiki: you appear to be mid-upgrade — restart Claude "
+            "Code and run /plugin install paper-wiki@paper-wiki to "
+            "complete."
+        )
 
     if cache_ver == marketplace_ver:
         typer.echo(f"paper-wiki is already at {marketplace_ver}")
@@ -740,6 +887,85 @@ def uninstall(
         verbose=verbose,
     )
     _uninstall_run(opts)
+
+
+# ---------------------------------------------------------------------------
+# diag — v0.3.42 D-9.42.1
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def diag(
+    file: Annotated[
+        bool,
+        typer.Option(
+            "--file",
+            help=(
+                "Write diag to a file instead of stdout. Pair with a "
+                "positional PATH for an explicit destination, or pass "
+                "--file alone to use $HOME/paper-wiki-diag-<UTC-ts>.txt."
+            ),
+        ),
+    ] = False,
+    path: Annotated[
+        Path | None,
+        typer.Argument(
+            help=(
+                "Output file path (with --file). Omit to write to "
+                "$HOME/paper-wiki-diag-<UTC-timestamp>.txt."
+            ),
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
+) -> None:
+    """Print install-state diagnostic dump.
+
+    v0.3.42 D-9.42.1: CLI parity with the ``paperwiki_diag`` bash
+    function defined in ``lib/bash-helpers.sh``. The bash form requires
+    sourcing the helper first; the CLI form works in any fresh shell
+    via ``$HOME/.local/bin/paperwiki``.
+
+    Modes:
+
+    - ``paperwiki diag``                — print to stdout (default)
+    - ``paperwiki diag --file``        — write to ``$HOME/paper-wiki-diag-<UTC-ts>.txt``
+    - ``paperwiki diag --file PATH``   — write to PATH (parent dirs created)
+
+    Output is **safe to share**: prints PATH, helper version tag, shim
+    first lines, ``ls -1`` of cache + recipes, and the paper-wiki entry
+    from ``installed_plugins.json``. Never prints secrets.env content.
+    """
+    configure_runner_logging(verbose=verbose)
+
+    home = Path.home()
+    claude_home = home / ".claude"
+    dump = _render_diag(
+        home=home,
+        claude_home=claude_home,
+        path_env=os.environ.get("PATH"),
+        plugin_root=os.environ.get("CLAUDE_PLUGIN_ROOT"),
+    )
+
+    # Mode resolution: explicit path > --file alone (default path) > stdout.
+    output_path: Path | None
+    if path is not None:
+        output_path = path
+    elif file:
+        ts = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+        output_path = home / f"paper-wiki-diag-{ts}.txt"
+    else:
+        output_path = None
+
+    if output_path is None:
+        typer.echo(dump, nl=False)
+        return
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(dump, encoding="utf-8")
+    typer.echo(f"wrote diag to {output_path}")
 
 
 # ---------------------------------------------------------------------------

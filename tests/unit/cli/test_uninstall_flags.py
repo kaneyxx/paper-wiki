@@ -430,3 +430,78 @@ def test_uninstall_preserves_unrelated_settings_keys(fake_home: Path) -> None:
     # installed_plugins.json: omc preserved.
     installed = json.loads(plugin["installed"].read_text())
     assert "oh-my-claudecode@omc" in installed.get("plugins", {})
+
+
+# ---------------------------------------------------------------------------
+# v0.3.42 D-9.42.2 / 9.140 — `paperwiki uninstall --everything` removes the
+# auto-source block from the user's shell rc file.
+# ---------------------------------------------------------------------------
+
+
+def _write_rc_with_block(rc: Path, *, user_content: str = "") -> None:
+    """Seed an rc file with the v0.3.42 paperwiki marker block."""
+    rc.write_text(
+        f"{user_content}"
+        "\n# >>> paperwiki helpers >>> "
+        "(managed by paperwiki — do not edit between markers)\n"
+        '[ -f "$HOME/.local/lib/paperwiki/bash-helpers.sh" ] \\\n'
+        '    && . "$HOME/.local/lib/paperwiki/bash-helpers.sh"\n'
+        "# <<< paperwiki helpers <<<\n",
+        encoding="utf-8",
+    )
+
+
+def test_uninstall_everything_removes_zshrc_paperwiki_block(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--everything`` strips the rc auto-source block (zsh path)."""
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    rc = fake_home / ".zshrc"
+    _write_rc_with_block(rc, user_content="alias ll='ls -la'\n")
+    _seed_plugin_layer(fake_home)
+
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = runner.invoke(app, ["uninstall", "--everything", "--yes"])
+    assert result.exit_code == 0, result.output
+
+    new_content = rc.read_text(encoding="utf-8")
+    assert "# >>> paperwiki helpers >>>" not in new_content, (
+        f"begin marker should be gone:\n{new_content}"
+    )
+    assert "# <<< paperwiki helpers <<<" not in new_content, (
+        f"end marker should be gone:\n{new_content}"
+    )
+    # User content is preserved.
+    assert "alias ll='ls -la'" in new_content
+
+
+def test_uninstall_everything_no_op_when_block_absent(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--everything`` is a silent no-op when rc has no paperwiki block."""
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    rc = fake_home / ".zshrc"
+    rc.write_text("# user content only\nalias ll='ls -la'\n", encoding="utf-8")
+    _seed_plugin_layer(fake_home)
+
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = runner.invoke(app, ["uninstall", "--everything", "--yes"])
+    assert result.exit_code == 0, result.output
+
+    # rc file is byte-identical (no spurious newlines, no truncation).
+    assert rc.read_text(encoding="utf-8") == "# user content only\nalias ll='ls -la'\n"
+
+
+def test_uninstall_everything_no_op_when_rc_absent(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--everything`` does NOT create an rc file when none exists."""
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    _seed_plugin_layer(fake_home)
+    rc = fake_home / ".zshrc"
+    assert not rc.exists()
+
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = runner.invoke(app, ["uninstall", "--everything", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert not rc.exists(), "uninstall must not synthesize an rc file"

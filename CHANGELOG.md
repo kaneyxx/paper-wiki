@@ -9,6 +9,194 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.42] - 2026-04-30
+
+Smooth one-touch install/upgrade release. Closes the v0.3.41 release-
+gate UX gaps surfaced on the user's real machine: `paperwiki diag`
+(with a space) now works as a CLI subcommand; the `paperwiki_diag`
+bash function is auto-sourced into fresh terminals via a marker-
+delimited block in the user's shell rc; the zsh `BASH_SOURCE` bug
+is fixed; and `paperwiki update --check` previews planned actions
+without applying them. New users see the helper functions on first
+shell session; upgrades preserve the same UX without requiring users
+to learn about `source ~/.local/lib/paperwiki/...`.
+
+### Added
+
+- **`paperwiki diag` CLI subcommand** (D-9.42.1). Adds CLI parity with
+  the `paperwiki_diag` bash function. The natural typo
+  `paperwiki diag --file` (with a space) — which previously returned
+  `No such command 'diag'` — now produces the same multi-section
+  install-state dump as the bash function. Three modes:
+
+  ```
+  paperwiki diag                # print to stdout
+  paperwiki diag --file         # write to $HOME/paper-wiki-diag-<UTC-ts>.txt
+  paperwiki diag --file PATH    # write to explicit PATH (parents created)
+  ```
+
+  Backed by the new `paperwiki.runners.diag.render_diag` pure
+  function (D-9.42.4) — single source of truth for both the CLI and
+  the bash function (which delegates when the shim is executable,
+  falls back to inline when not).
+
+- **Shell-rc auto-source integration** (D-9.42.2). `hooks/ensure-env.sh`
+  now writes a marker-delimited block to the user's shell rc on first
+  SessionStart so `paperwiki_diag` and other helper functions are
+  available in fresh terminals — no manual
+  `source ~/.local/lib/paperwiki/bash-helpers.sh` step. Block shape:
+
+  ```bash
+  # >>> paperwiki helpers >>> (managed by paperwiki — do not edit between markers)
+  [ -f "$HOME/.local/lib/paperwiki/bash-helpers.sh" ] \
+      && . "$HOME/.local/lib/paperwiki/bash-helpers.sh"
+  # <<< paperwiki helpers <<<
+  ```
+
+  Industry-standard pattern (nvm, rvm, conda, miniforge use this
+  same approach). Idempotent — re-running ensure-env.sh detects the
+  begin marker and skips. User-edited content between markers is
+  preserved (warn-only). Opt-out via `PAPERWIKI_NO_RC_INTEGRATION=1`
+  for users with strict rc-management (chezmoi, dotfiles repos).
+  Shell detection: `$SHELL` ending in `/zsh` → `~/.zshrc`; `/bash` →
+  `~/.bash_profile` if exists else `~/.bashrc`; other shells → no-op.
+  Removed by `paperwiki uninstall --everything`.
+
+- **`paperwiki update --check` dry-run flag** (D-9.42.5). Previews
+  what `paperwiki update` would do without applying any filesystem
+  mutations:
+
+  ```
+  $ paperwiki update --check
+  plan: would upgrade 0.3.41 → 0.3.42
+    → would rename cache dir 0.3.41 to 0.3.41.bak.<UTC-timestamp>
+    → would drop paper-wiki entry from installed_plugins.json
+    → would drop paper-wiki from settings.json enabledPlugins
+  Note: .bak directories are cleared by /plugin install — back up
+  manually if you need long-term rollback access.
+  nothing applied — re-run without --check to apply.
+  ```
+
+  Skips the marketplace `git pull` so dry runs are pure-local
+  (matches user expectations for a preview command). Always exits 0.
+
+- **Mid-upgrade "between steps" detection** (D-9.42.5 follow-up). When
+  `installed_plugins.json` records vX but the cache contains only
+  `vX.bak.<ts>` (the half-installed state users reach by skipping the
+  TWO-restart guidance), `paperwiki update` and
+  `paperwiki update --check` print:
+
+  ```
+  paper-wiki: you appear to be mid-upgrade — restart Claude Code and
+  run /plugin install paper-wiki@paper-wiki to complete.
+  ```
+
+  Helps users recover from the half-finished upgrade flow without
+  having to figure out the right next step from logs.
+
+### Fixed
+
+- **`(helper self-path not resolvable: )` bug under zsh** (D-9.42.3).
+  v0.3.41 release-gate verification surfaced that
+  `_paperwiki_diag_render` rendered an empty path in the
+  `--- helper ---` section when the helper was sourced under zsh
+  (the default macOS shell). Root cause: the function read
+  `${BASH_SOURCE[0]}` at function-call time, but zsh leaves
+  `BASH_SOURCE` unset by default. The fix captures the path at
+  source time using `${BASH_SOURCE[0]:-$0}` — bash sets
+  `BASH_SOURCE[0]` to the file path; zsh sets `$0` to the same
+  thing under default options. Single line, no shell-specific
+  syntax that would break either parser. Defensive fallback to
+  the canonical install path string when both are empty (corrupt
+  source, exotic shell).
+
+### Changed
+
+- **`paperwiki_diag` bash function delegates to the CLI when
+  available** (D-9.42.4). When `$HOME/.local/bin/paperwiki` exists
+  and is executable, the bash function shells out to
+  `paperwiki diag` and uses its output directly. Single source of
+  truth in Python prevents drift between bash and CLI dumps.
+  Fallback to the inline implementation preserves the v0.3.39
+  D-9.39.3 contract that `paperwiki_diag` works in degraded states
+  (e.g., the shim was uninstalled but the helper is still sourced
+  from a previous session).
+
+- **`paperwiki update` first-run UX message** (D-9.42.2 follow-up).
+  When `ensure-env.sh` writes the rc auto-source block for the
+  first time, it drops a `~/.local/lib/paperwiki/.rc-just-added`
+  stamp containing the rc-file path. The next `paperwiki update`
+  invocation reads + deletes the stamp and surfaces a one-line
+  note to the user:
+
+  ```
+  Added auto-source line to ~/.zshrc — open a new terminal or run
+  `source <rc-file>` to use paperwiki_diag now.
+  ```
+
+  Consume-once semantics — subsequent updates are silent on this
+  front. Closes the "the user doesn't know we touched their rc"
+  feedback loop.
+
+### Decisions ratified
+
+- **D-9.42.1** `paperwiki diag` is a CLI subcommand with `--file [PATH]`
+  semantics matching the bash function.
+- **D-9.42.2** ensure-env.sh writes a marker-delimited auto-source
+  block to the user shell-rc; opt-out via `PAPERWIKI_NO_RC_INTEGRATION=1`.
+- **D-9.42.3** Helper self-path captured at source time using
+  `${BASH_SOURCE[0]:-$0}` — works in bash + zsh without shell-specific
+  syntax.
+- **D-9.42.4** Diag rendering centralized in `src/paperwiki/runners/diag.py`;
+  bash function delegates to CLI when shim is executable.
+- **D-9.42.5** `paperwiki update --check` dry run + mid-upgrade
+  state detection with actionable hints.
+
+### Lessons learned
+
+The v0.3.41 release-gate verification cycle revealed that the
+"helper exists but isn't accessible" failure mode applied to all
+three v0.3.41 features: `paperwiki diag --file` (because no CLI
+subcommand existed), `paperwiki_diag` (because no shell-rc
+integration auto-sourced the helper), and the diag's own
+`--- helper ---` section (because zsh `BASH_SOURCE` is empty).
+v0.3.42's three architectural decisions (CLI subcommand,
+shell-rc integration, source-time path capture) all close the
+same root-cause gap from different angles.
+
+The **one-touch install/upgrade** goal isn't a feature — it's a
+property of the install boundary. v0.3.39–v0.3.41 added powerful
+helper functions but left the discoverability + accessibility
+boundary untouched, so users had to know about `source` and the
+helper's path. v0.3.42 fixes the boundary so the existing
+helpers become invisible infrastructure, exactly as SPEC §1
+mandates ("End users never see this — it runs silently on first
+session").
+
+### Tests
+
+- 4 new tests in `tests/unit/test_bash_helpers.py` for D-9.42.3
+  helper-path capture (zsh + bash + canonical fallback) + 3 for
+  D-9.42.4 CLI delegation (executable shim / no shim / non-+x shim).
+- 8 new tests in `tests/unit/runners/test_diag.py` cover the new
+  Python `render_diag` function (sections / fallbacks / domain
+  boundary / read-only / no-secrets).
+- 6 new tests in `tests/unit/cli/test_diag_cli.py` for the
+  `paperwiki diag` CLI subcommand (stdout / file-explicit /
+  file-default-path / parent-dir creation / no-secrets / help).
+- 15 new tests in `tests/unit/test_rc_integration.py` for the
+  shell-rc auto-source helper (`_pick_rc_file` + `paperwiki_rc_install` +
+  `paperwiki_rc_uninstall` × shell detection / idempotency / opt-out /
+  preservation / removal).
+- 3 new tests in `tests/unit/cli/test_uninstall_flags.py` for
+  `paperwiki uninstall --everything` rc-block removal (zsh path /
+  block-absent / rc-absent).
+- 5 new tests in `tests/unit/cli/test_update_self_heal.py` for
+  rc-just-added stamp consumption (2) + `--check` mode (3) +
+  mid-upgrade detection (3 — apply mode + check mode + healthy state).
+- 988 → 1035+ total tests. pytest -q green; mypy --strict clean;
+  ruff check + format clean.
+
 ## [0.3.41] - 2026-04-29
 
 Post-v0.3.40 polish release. Three small UX fixes that emerged from
