@@ -14,12 +14,15 @@ from pydantic import ValidationError
 
 from paperwiki.core.models import (
     Author,
+    Concept,
     Edge,
     EdgeType,
     Paper,
+    Person,
     Recommendation,
     RunContext,
     ScoreBreakdown,
+    Topic,
 )
 
 # ---------------------------------------------------------------------------
@@ -312,3 +315,151 @@ class TestEdge:
         )
         rebuilt = Edge.model_validate(edge.model_dump(mode="json"))
         assert rebuilt == edge
+
+
+# ---------------------------------------------------------------------------
+# Concept (v0.4.x typed entity — task 9.156, D-A + D-I)
+# ---------------------------------------------------------------------------
+
+
+class TestConcept:
+    def test_minimal_concept_constructs(self) -> None:
+        concept = Concept(
+            name="Transformer",
+            definition="Attention-based neural architecture introduced by Vaswani et al.",
+        )
+        assert concept.name == "Transformer"
+        assert concept.aliases == []
+        assert concept.tags == []
+        assert concept.papers == []
+
+    def test_concept_full_construct(self) -> None:
+        concept = Concept(
+            name="Vision-language pretraining",
+            aliases=["VLP", "vision language pretraining"],
+            definition="Joint training of vision and language encoders on paired data.",
+            tags=["multimodal", "pretraining"],
+            papers=["arxiv:2103.00020", "arxiv:2104.00330"],
+        )
+        assert "VLP" in concept.aliases
+        assert "multimodal" in concept.tags
+        assert len(concept.papers) == 2
+
+    def test_concept_name_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Concept(name="   ", definition="placeholder")
+
+    def test_concept_definition_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Concept(name="Transformer", definition="")
+
+    def test_concept_strips_whitespace_in_name(self) -> None:
+        concept = Concept(name="  Transformer  ", definition="placeholder")
+        assert concept.name == "Transformer"
+
+    def test_concept_round_trip(self) -> None:
+        concept = Concept(
+            name="Attention",
+            aliases=["self-attention", "scaled-dot-product"],
+            definition="Mechanism for weighted aggregation across sequence positions.",
+            tags=["transformer", "neural-net"],
+            papers=["arxiv:1706.03762"],
+        )
+        rebuilt = Concept.model_validate(concept.model_dump(mode="json"))
+        assert rebuilt == concept
+
+
+# ---------------------------------------------------------------------------
+# Topic (v0.4.x typed entity — task 9.156, D-A + D-I)
+# ---------------------------------------------------------------------------
+
+
+class TestTopic:
+    def test_minimal_topic_constructs(self) -> None:
+        topic = Topic(
+            name="Vision-Language Models",
+            description="Multimodal foundation models for vision and language.",
+        )
+        assert topic.name == "Vision-Language Models"
+        assert topic.papers == []
+        assert topic.concepts == []
+        assert topic.sota == []
+
+    def test_topic_with_sota_recommendations(self) -> None:
+        rec = Recommendation(
+            paper=_sample_paper(),
+            score=ScoreBreakdown(relevance=0.9, composite=0.85),
+            matched_topics=["vision-language"],
+        )
+        topic = Topic(
+            name="Vision-Language",
+            description="VLMs.",
+            papers=["arxiv:2506.13063"],
+            concepts=["vision-language-pretraining"],
+            sota=[rec],
+        )
+        assert len(topic.sota) == 1
+        assert topic.sota[0].score.composite == 0.85
+
+    def test_topic_name_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Topic(name="", description="VLMs")
+
+    def test_topic_description_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Topic(name="VLMs", description="   ")
+
+    def test_topic_round_trip(self) -> None:
+        topic = Topic(
+            name="Pathology Foundation Models",
+            description="Vision-language FMs trained on histopathology.",
+            papers=["arxiv:2506.13063"],
+            concepts=["vision-language-pretraining", "pathology"],
+        )
+        rebuilt = Topic.model_validate(topic.model_dump(mode="json"))
+        assert rebuilt == topic
+
+
+# ---------------------------------------------------------------------------
+# Person (v0.4.x typed entity — task 9.156, D-A + D-I)
+# ---------------------------------------------------------------------------
+
+
+class TestPerson:
+    def test_minimal_person_constructs(self) -> None:
+        person = Person(name="Yann LeCun")
+        assert person.name == "Yann LeCun"
+        assert person.aliases == []
+        assert person.affiliation is None
+        assert person.papers == []
+        assert person.collaborators == []
+
+    def test_person_full_construct(self) -> None:
+        person = Person(
+            name="Yann LeCun",
+            aliases=["Y. LeCun", "Yann Le Cun"],
+            affiliation="Meta AI / NYU",
+            papers=["arxiv:1102.0183", "arxiv:1611.07004"],
+            collaborators=["geoffrey-hinton", "yoshua-bengio"],
+        )
+        assert person.affiliation == "Meta AI / NYU"
+        assert "geoffrey-hinton" in person.collaborators
+
+    def test_person_name_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Person(name="")
+
+    def test_person_strips_whitespace_in_name(self) -> None:
+        person = Person(name="  Geoffrey Hinton  ")
+        assert person.name == "Geoffrey Hinton"
+
+    def test_person_round_trip(self) -> None:
+        person = Person(
+            name="Yoshua Bengio",
+            aliases=["Y. Bengio"],
+            affiliation="Mila / U. Montreal",
+            papers=["arxiv:1409.0473"],
+            collaborators=["yann-lecun"],
+        )
+        rebuilt = Person.model_validate(person.model_dump(mode="json"))
+        assert rebuilt == person

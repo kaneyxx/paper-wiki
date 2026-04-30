@@ -191,6 +191,104 @@ class RunContext(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# v0.4.x typed wiki entities (task 9.156, decisions D-A + D-I).
+#
+# Concept / Topic / Person are the three first-class wiki entities shipped
+# in v0.4.x alongside the existing :class:`Paper`. They live under typed
+# subdirs in the user's vault: ``Wiki/concepts/``, ``Wiki/topics/``,
+# ``Wiki/people/`` (per D-I). Idea / Experiment / Claim entity types are
+# explicitly deferred to v0.5+ (D-A).
+#
+# These models are deliberately minimal at the contract layer — slug
+# resolution, file-path mapping, and frontmatter rendering belong to the
+# runner layer (task 9.157 wiki_compile_graph + 9.161 Properties API
+# templates). Cross-entity references (``papers``, ``concepts``,
+# ``collaborators``) are plain string lists; their wikilink-target shape
+# is enforced one layer up.
+# ---------------------------------------------------------------------------
+
+
+class Concept(BaseModel):
+    """A cross-paper technical concept.
+
+    Concepts capture ideas that span multiple papers (e.g. "Transformer",
+    "vision-language pretraining"). Each concept lists the papers that
+    discuss it; the wiki-graph then surfaces "papers using concept X" via
+    :class:`Edge` rows of type :attr:`EdgeType.BUILDS_ON` /
+    :attr:`EdgeType.IMPROVES_ON`.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=False)
+
+    name: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    definition: str = Field(min_length=1)
+    tags: list[str] = Field(default_factory=list)
+    papers: list[str] = Field(default_factory=list)
+
+    @field_validator("name", "definition")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            msg = "value must not be blank"
+            raise ValueError(msg)
+        return value
+
+
+class Topic(BaseModel):
+    """A research direction or sub-field.
+
+    Topics group papers + concepts under a coherent research umbrella
+    (e.g. "vision-language models", "pathology foundation models"). The
+    optional ``sota`` field records the user's curated state-of-the-art
+    list, scored via the existing :class:`Recommendation` shape.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=False)
+
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    papers: list[str] = Field(default_factory=list)
+    concepts: list[str] = Field(default_factory=list)
+    sota: list[Recommendation] = Field(default_factory=list)
+
+    @field_validator("name", "description")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            msg = "value must not be blank"
+            raise ValueError(msg)
+        return value
+
+
+class Person(BaseModel):
+    """A researcher or author profile.
+
+    Persons aggregate the user's view of an author across papers and
+    collaborations. Distinct from :class:`Author` (which is per-paper
+    metadata): a Person carries vault-level state (aliases the user
+    chose to associate, follow-on collaborators of interest) that has
+    no place on a single paper record.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=False)
+
+    name: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    affiliation: str | None = None
+    papers: list[str] = Field(default_factory=list)
+    collaborators: list[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            msg = "value must not be blank"
+            raise ValueError(msg)
+        return value
+
+
+# ---------------------------------------------------------------------------
 # v0.4.x knowledge graph layer (task 9.156, decision D-L).
 #
 # ``EdgeType`` is a closed enum at write-time: ``wiki_compile_graph`` (task
@@ -281,10 +379,13 @@ class Edge(BaseModel):
 __all__ = [
     "DEFAULT_SCORE_WEIGHTS",
     "Author",
+    "Concept",
     "Edge",
     "EdgeType",
     "Paper",
+    "Person",
     "Recommendation",
     "RunContext",
     "ScoreBreakdown",
+    "Topic",
 ]
