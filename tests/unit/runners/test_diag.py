@@ -58,24 +58,52 @@ def _seed_installed_plugins(
     *,
     version: str = "0.3.42",
     extra: bool = False,
+    extra_scopes: bool = False,
 ) -> Path:
-    """Place a stub ``installed_plugins.json`` with the paper-wiki entry."""
+    """Place a stub ``installed_plugins.json`` with the paper-wiki entry.
+
+    Real Claude Code data stores per-plugin entries as a **list of dicts**
+    (one dict per scope), not a single dict — see
+    ``cli.py:_cache_version`` which iterates ``entries: list``. v0.3.43
+    D-9.43.1 fixes a bug where ``runners/diag.py`` double-wrapped this
+    list. The fixture now writes the real shape so the regression test
+    can pin the correct (single-list) output.
+
+    Pass ``extra_scopes=True`` to seed a second scope entry — exercises
+    the multi-scope path that real Claude Code emits when the plugin is
+    installed both at user scope and project scope.
+    """
     path = claude_home / "plugins" / "installed_plugins.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    plugins: dict[str, dict[str, object]] = {
-        "paper-wiki@paper-wiki": {
+    paper_wiki_entries: list[dict[str, object]] = [
+        {
             "scope": "user",
             "version": version,
             "installPath": str(
                 claude_home / "plugins" / "cache" / "paper-wiki" / "paper-wiki" / version
             ),
         }
+    ]
+    if extra_scopes:
+        paper_wiki_entries.append(
+            {
+                "scope": "project",
+                "version": version,
+                "installPath": str(
+                    claude_home / "plugins" / "cache" / "paper-wiki" / "paper-wiki" / version
+                ),
+            }
+        )
+    plugins: dict[str, object] = {
+        "paper-wiki@paper-wiki": paper_wiki_entries,
     }
     if extra:
-        plugins["other-plugin@other-marketplace"] = {
-            "version": "1.2.3",
-            "scope": "user",
-        }
+        plugins["other-plugin@other-marketplace"] = [
+            {
+                "version": "1.2.3",
+                "scope": "user",
+            }
+        ]
     path.write_text(json.dumps({"plugins": plugins}), encoding="utf-8")
     return path
 
@@ -254,3 +282,104 @@ def test_render_does_not_create_or_modify_files(tmp_path: Path) -> None:
     after = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
 
     assert before == after, "render_diag must not mutate the filesystem"
+
+
+# ---------------------------------------------------------------------------
+# v0.3.43 D-9.43.1 — installed_plugins entry shape regression
+# ---------------------------------------------------------------------------
+
+
+def test_render_does_not_double_wrap_installed_plugins_list(tmp_path: Path) -> None:
+    """Regression for v0.3.43 D-9.43.1: single-list, never double-wrapped.
+
+    Real Claude Code stores ``installed_plugins.json`` entries as a list
+    of per-scope dicts. v0.3.42's ``_read_paper_wiki_entry`` wrapped that
+    list in another list, producing ``[[{...}]]`` in the diag output.
+    This test pins the correct shape — exactly one open bracket before
+    the dict — so future refactors can't reintroduce the wrap silently.
+    """
+    home = tmp_path / "home"
+    claude_home = home / ".claude"
+    home.mkdir()
+    _seed_installed_plugins(claude_home, version="0.3.43")
+
+    out = render_diag(home=home, claude_home=claude_home)
+
+    # Locate the section header and the JSON that follows.
+    marker = "--- installed_plugins.json (paper-wiki entry) ---\n"
+    assert marker in out
+    body = out.split(marker, 1)[1]
+    # The body up to the next "--- " section header is our JSON dump.
+    json_chunk = body.split("\n--- ", 1)[0].rstrip("\n")
+
+    # Must start with a single open bracket + a dict (no nested list).
+    assert json_chunk.startswith("[\n  {\n"), (
+        f"installed_plugins entry must be a single list of dicts, got:\n{json_chunk!r}"
+    )
+    # And explicitly NOT the double-wrapped form.
+    assert not json_chunk.startswith("[\n  [\n"), (
+        f"installed_plugins entry must NOT be a list-of-lists, got:\n{json_chunk!r}"
+    )
+
+
+def test_render_handles_multi_scope_installed_plugins_entry(tmp_path: Path) -> None:
+    """v0.3.43 D-9.43.1: multi-scope entries (user + project) render
+    as a single list with two dicts, not a list-of-lists.
+    """
+    home = tmp_path / "home"
+    claude_home = home / ".claude"
+    home.mkdir()
+    _seed_installed_plugins(claude_home, version="0.3.43", extra_scopes=True)
+
+    out = render_diag(home=home, claude_home=claude_home)
+    marker = "--- installed_plugins.json (paper-wiki entry) ---\n"
+    json_chunk = out.split(marker, 1)[1].split("\n--- ", 1)[0].rstrip("\n")
+
+    # Two scope entries → JSON list with exactly two dicts.
+    assert json_chunk.count('"scope": "user"') == 1
+    assert json_chunk.count('"scope": "project"') == 1
+    assert json_chunk.startswith("[\n  {\n")
+    # Sanity: parsing back gives a list of 2.
+    parsed = json.loads(json_chunk)
+    assert isinstance(parsed, list)
+    assert len(parsed) == 2
+
+
+def test_render_coerces_legacy_dict_shape_for_back_compat(tmp_path: Path) -> None:
+    """v0.3.43 D-9.43.1 defensive coercion: a legacy dict-shaped entry
+    (hand-edited fixture or ancient Claude Code data) is wrapped to
+    ``[entry]`` so the JSON output stays a list — never crashes.
+
+    This guards against a hypothetical future shape change in Claude
+    Code's installed_plugins.json. If they revert to a dict shape, our
+    diag still emits a parseable list and the tests still pass.
+    """
+    home = tmp_path / "home"
+    claude_home = home / ".claude"
+    home.mkdir()
+    legacy_path = claude_home / "plugins" / "installed_plugins.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    # Legacy/hand-edited shape: dict, not list.
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    "paper-wiki@paper-wiki": {
+                        "scope": "user",
+                        "version": "0.3.43",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out = render_diag(home=home, claude_home=claude_home)
+    marker = "--- installed_plugins.json (paper-wiki entry) ---\n"
+    json_chunk = out.split(marker, 1)[1].split("\n--- ", 1)[0].rstrip("\n")
+
+    # Coerced to a single-element list.
+    parsed = json.loads(json_chunk)
+    assert isinstance(parsed, list)
+    assert len(parsed) == 1
+    assert parsed[0]["scope"] == "user"

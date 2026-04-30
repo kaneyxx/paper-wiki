@@ -118,9 +118,18 @@ def _read_paper_wiki_entry(installed_plugins: Path) -> str:
     """Domain-bounded read of installed_plugins.json (D-9.40.3 invariant).
 
     Returns:
-        - JSON-formatted paper-wiki entry (indent=2) when present
+        - JSON-formatted paper-wiki entry (indent=2) when present —
+          always a JSON list (one dict per scope, the real Claude Code
+          shape).
         - ``(not registered)`` when file missing or entry absent
         - ``(read failed: <msg>)`` when JSON malformed or unreadable
+
+    v0.3.43 D-9.43.1: real Claude Code data stores per-plugin entries
+    as a list-of-dicts (one entry per scope). v0.3.42 wrapped that
+    list in another list, producing ``[[{...}]]`` in the diag output.
+    The fix passes the list through unchanged. A defensive coercion
+    handles a hypothetical legacy/hand-edited dict shape so the output
+    stays a list and the function never crashes.
     """
     if not installed_plugins.is_file():
         return "(not registered)"
@@ -132,10 +141,14 @@ def _read_paper_wiki_entry(installed_plugins: Path) -> str:
     entry = plugins.get("paper-wiki@paper-wiki")
     if entry is None:
         return "(not registered)"
-    # Domain boundary: serialize ONLY the paper-wiki entry. The wrapping
-    # in a single-element list mirrors the existing bash output format
-    # so users / docs / SKILL captures don't have to change.
-    return json.dumps([entry], indent=2)
+    # Domain boundary: serialize ONLY the paper-wiki entry.
+    # v0.3.43 D-9.43.1: real shape is a list — pass through directly.
+    # Defensive: if a legacy/hand-edited fixture stored a dict, coerce
+    # to a single-element list so the output stays a list (parseable,
+    # matches the bash form's expected shape).
+    if not isinstance(entry, list):
+        entry = [entry]
+    return json.dumps(entry, indent=2)
 
 
 def _list_recipes(recipes_dir: Path) -> str:
