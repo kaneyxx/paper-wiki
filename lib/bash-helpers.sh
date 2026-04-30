@@ -1,4 +1,4 @@
-# paperwiki bash-helpers — v0.3.42 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
+# paperwiki bash-helpers — v0.3.43 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
 #
 # This file is meant to be `source`d by SKILL bash blocks, NOT executed
 # directly. There is no shebang because POSIX sourcing ignores the
@@ -15,6 +15,16 @@
 # sourcing, producing the v0.3.41 release-gate "(helper self-path not
 # resolvable: )" bug.
 _PAPERWIKI_HELPER_PATH="${BASH_SOURCE[0]:-$0}"
+
+# v0.3.43 D-9.43.6: in-memory version constant. ``_paperwiki_diag_render``
+# compares this to the on-disk helper's first-line tag at the canonical
+# install path; mismatch means the user sourced an older helper version
+# in this shell session and ``paperwiki update`` has since rewritten the
+# on-disk file. Emit a ⚠ warning prompting the user to open a new
+# terminal (or re-source). The constant is a string of digits + dots
+# (no leading "v") for direct comparison against the regex-extracted
+# tag from the on-disk header.
+_PAPERWIKI_HELPER_VERSION="0.3.43"
 #
 # Install location: ensure-env.sh installs this file at every
 # SessionStart to ``$HOME/.local/lib/paperwiki/bash-helpers.sh``.
@@ -108,6 +118,29 @@ _paperwiki_diag_render() {
     if [ -x "$shim_path" ]; then
         "$shim_path" diag
         return $?
+    fi
+    #
+    # v0.3.43 D-9.43.6: stale-version warning. When the on-disk helper at
+    # the canonical install path declares a version tag DIFFERENT from
+    # ``$_PAPERWIKI_HELPER_VERSION`` (the in-memory constant set when
+    # this shell sourced the helper), the user is running an out-of-date
+    # function — typically because ``paperwiki update`` rewrote the
+    # on-disk file but they haven't opened a new terminal. We prepend a
+    # short ⚠ warning to the diag output so the staleness is visible.
+    # Defensive: missing on-disk file or unparseable header → silent
+    # skip (treat as "no info to compare").
+    local on_disk_helper="$HOME/.local/lib/paperwiki/bash-helpers.sh"
+    if [ -f "$on_disk_helper" ]; then
+        local on_disk_tag
+        on_disk_tag=$(head -1 "$on_disk_helper" 2>/dev/null \
+            | sed -n 's/.*v\([0-9][0-9.]*[0-9]\).*/\1/p')
+        if [ -n "$on_disk_tag" ] \
+            && [ -n "${_PAPERWIKI_HELPER_VERSION:-}" ] \
+            && [ "$on_disk_tag" != "$_PAPERWIKI_HELPER_VERSION" ]; then
+            echo "⚠ paperwiki_diag: in-memory function is v$_PAPERWIKI_HELPER_VERSION, on-disk helper is v$on_disk_tag."
+            echo "  Open a new terminal (or 'source $on_disk_helper') to refresh."
+            echo
+        fi
     fi
     #
     # v0.3.42 D-9.42.3 + 9.134: read the source-time-captured

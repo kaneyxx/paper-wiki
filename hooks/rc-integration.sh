@@ -35,10 +35,11 @@ _pick_rc_file() {
     # unsupported shells. The caller (paperwiki_rc_install /
     # paperwiki_rc_uninstall) treats empty output as "no-op".
     #
-    # Shell selection per D-9.42.2:
+    # Shell selection per D-9.42.2 + v0.3.43 D-9.43.5 (fish):
     #   /zsh           → $HOME/.zshrc
     #   /bash on macOS → $HOME/.bash_profile if exists, else .bashrc
     #   /bash on Linux → $HOME/.bashrc
+    #   /fish          → $HOME/.config/fish/config.fish (v0.3.43+)
     #   anything else  → empty (warn-only, never fail)
     local shell_basename="${SHELL##*/}"
     case "$shell_basename" in
@@ -56,8 +57,17 @@ _pick_rc_file() {
                 echo "$HOME/.bashrc"
             fi
             ;;
+        fish)
+            # v0.3.43 D-9.43.5: fish shell support. Fish can't source
+            # bash-helpers.sh (different syntax), so the block we
+            # write is fish-syntax — adds ~/.local/bin to
+            # $fish_user_paths and notes that paperwiki_diag (bash
+            # form) requires bash/zsh; paperwiki diag (CLI) works
+            # in fish via the shim.
+            echo "$HOME/.config/fish/config.fish"
+            ;;
         *)
-            # Unsupported shells (fish, csh, tcsh, ksh, dash, …) — emit
+            # Unsupported shells (csh, tcsh, ksh, dash, …) — emit
             # nothing. Caller treats empty as no-op + warn.
             echo ""
             ;;
@@ -65,10 +75,24 @@ _pick_rc_file() {
 }
 
 _paperwiki_rc_block() {
-    # Print the canonical marker-delimited block content (without
-    # surrounding blank lines — those are inserted by the install
-    # function so we can detect a missing block via marker presence
-    # alone).
+    # Print the canonical marker-delimited block content for the rc file
+    # at $1 (or, if missing, fall back to bash/zsh block).
+    #
+    # v0.3.43 D-9.43.5: fish gets a different block (fish-syntax,
+    # PATH-only — no `source` of bash). Detection is by filename suffix
+    # (.fish) so the function stays shell-agnostic at call time.
+    local rc_file="${1:-}"
+    if [[ "$rc_file" == *.fish ]]; then
+        cat <<'BLOCK_EOF'
+# >>> paperwiki helpers >>> (managed by paperwiki — do not edit between markers)
+if test -d "$HOME/.local/bin"
+    fish_add_path -aP "$HOME/.local/bin"
+end
+# Note: paperwiki_diag (bash form) requires bash/zsh; use `paperwiki diag` (CLI) in fish.
+# <<< paperwiki helpers <<<
+BLOCK_EOF
+        return 0
+    fi
     cat <<'BLOCK_EOF'
 # >>> paperwiki helpers >>> (managed by paperwiki — do not edit between markers)
 [ -f "$HOME/.local/lib/paperwiki/bash-helpers.sh" ] \
@@ -91,9 +115,14 @@ paperwiki_rc_install() {
     rc=$(_pick_rc_file)
     if [ -z "$rc" ]; then
         # Unsupported shell — silent no-op. Future task may add an
-        # ensure-env.sh-side warn for first-time users on fish/csh.
+        # ensure-env.sh-side warn for first-time users on csh/tcsh.
         return 0
     fi
+    # v0.3.43 D-9.43.5: fish's config.fish lives under ~/.config/fish/,
+    # which may not exist on a fresh install. Create the parent dir
+    # before testing for file presence; for bash/zsh the parent is
+    # always $HOME so this mkdir is cheap.
+    mkdir -p "$(dirname "$rc")" 2>/dev/null || true
     # Idempotent: skip if begin marker already present.
     if [ -f "$rc" ] && grep -qF "$_PAPERWIKI_RC_BEGIN" "$rc" 2>/dev/null; then
         return 0
@@ -105,7 +134,7 @@ paperwiki_rc_install() {
     fi
     {
         echo
-        _paperwiki_rc_block
+        _paperwiki_rc_block "$rc"
         echo
     } >> "$rc"
 }

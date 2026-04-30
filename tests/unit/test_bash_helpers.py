@@ -814,3 +814,86 @@ def test_diag_helper_path_falls_back_to_canonical_when_var_empty(
     # The fallback's first line must appear (proves head -1 ran on the
     # canonical stub).
     assert "canonical-fallback-stub" in out, f"expected canonical fallback content; output:\n{out}"
+
+
+# ---------------------------------------------------------------------------
+# v0.3.43 D-9.43.6 — paperwiki_diag stale-version warning
+# ---------------------------------------------------------------------------
+
+
+def test_paperwiki_diag_no_warning_when_versions_match(tmp_path: Path) -> None:
+    """v0.3.43 D-9.43.6: matching on-disk + in-memory version → no ⚠.
+
+    Source the worktree's helper (sets ``_PAPERWIKI_HELPER_VERSION`` in
+    memory) and seed a canonical on-disk helper whose first-line tag
+    declares the SAME version. The stale-detection logic should
+    short-circuit; no warning is emitted.
+    """
+    canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
+    canonical_dir.mkdir(parents=True)
+    # Match the worktree's _PAPERWIKI_HELPER_VERSION (currently 0.3.43).
+    (canonical_dir / "bash-helpers.sh").write_text(
+        "# paperwiki bash-helpers — v0.3.43 (matching test stub)\n",
+        encoding="utf-8",
+    )
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "⚠" not in proc.stdout, (
+        f"matching versions must not emit ⚠ stale warning:\n{proc.stdout}"
+    )
+    # The "in-memory function" phrase belongs to the warning; verify it's
+    # absent specifically (not just the ⚠ glyph).
+    assert "in-memory function" not in proc.stdout
+
+
+def test_paperwiki_diag_warns_on_stale_in_memory_function(tmp_path: Path) -> None:
+    """v0.3.43 D-9.43.6: mismatch between on-disk + in-memory version → ⚠.
+
+    Simulates the post-update scenario: ``paperwiki update`` rewrote the
+    on-disk helper to a newer version, but the user's existing shell
+    still has the old function in memory. The warning prepended to the
+    diag dump tells them to open a new terminal.
+    """
+    canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
+    canonical_dir.mkdir(parents=True)
+    # On-disk reports v0.3.99 — different from the in-memory 0.3.43.
+    (canonical_dir / "bash-helpers.sh").write_text(
+        "# paperwiki bash-helpers — v0.3.99 (newer than in-memory function)\n",
+        encoding="utf-8",
+    )
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "⚠" in out, f"mismatching versions must emit ⚠ stale warning:\n{out}"
+    assert "in-memory function" in out, f"warning text must mention in-memory function:\n{out}"
+    assert "v0.3.99" in out, f"warning must surface the on-disk version:\n{out}"
+    # Diag still runs to completion — the warning is a prepended note,
+    # not an abort.
+    assert "=== paperwiki_diag — install state ===" in out
+    assert "=== end paperwiki_diag ===" in out
+
+
+def test_paperwiki_diag_no_warning_when_helper_missing(tmp_path: Path) -> None:
+    """v0.3.43 D-9.43.6: no on-disk helper → no warning, no crash.
+
+    Defensive: the stale-detection short-circuits when there's nothing
+    on disk to compare against. The diag dump still runs to completion
+    (uses the worktree-source fallback for the helper line).
+    """
+    # Don't create the canonical dir at all.
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "⚠" not in out, f"missing helper must not emit ⚠ warning:\n{out}"
+    assert "in-memory function" not in out
+    # Diag still ran.
+    assert "=== paperwiki_diag — install state ===" in out

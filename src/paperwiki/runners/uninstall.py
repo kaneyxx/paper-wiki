@@ -504,10 +504,16 @@ def _pick_rc_file(home: Path, shell: str | None) -> Path | None:
     """Mirror ``hooks/rc-integration.sh::_pick_rc_file`` in pure Python.
 
     Returns the rc-file path for the current shell, or ``None`` for
-    unsupported shells (fish, csh, …) and unset $SHELL. Kept in sync
-    with the bash version — both files share the same shell-detection
-    rules so the install (bash, SessionStart) and uninstall (Python,
-    runner) paths can never disagree.
+    unsupported shells (csh, tcsh, …) and unset ``$SHELL``. Kept in
+    sync with the bash version — both files share the same shell-
+    detection rules so the install (bash, SessionStart) and
+    uninstall (Python, runner) paths can never disagree.
+
+    v0.3.43 D-9.43.5: fish shell support added. Fish's
+    ``~/.config/fish/config.fish`` is treated parallel to
+    ``~/.zshrc`` / ``~/.bashrc``. ``_strip_rc_block`` is
+    marker-pattern-driven so the same fish block (with its different
+    ``fish_add_path`` body) is removed by exactly the same code path.
     """
     if not shell:
         return None
@@ -517,6 +523,8 @@ def _pick_rc_file(home: Path, shell: str | None) -> Path | None:
     if basename == "bash":
         bash_profile = home / ".bash_profile"
         return bash_profile if bash_profile.is_file() else home / ".bashrc"
+    if basename == "fish":
+        return home / ".config" / "fish" / "config.fish"
     return None
 
 

@@ -76,8 +76,41 @@ def resolve_paperwiki_recipes_dir() -> Path:
     return resolve_paperwiki_home() / "recipes"
 
 
+def resolve_paperwiki_bak_dir() -> Path:
+    """Return the directory where ``paperwiki update`` backs up old caches.
+
+    v0.3.43 D-9.43.2: relocates ``.bak`` directories outside the plugin
+    cache subdir so they survive ``/plugin install`` (Claude Code's plugin
+    manager wipes ``~/.claude/plugins/cache/paper-wiki/paper-wiki/``
+    before re-populating, which destroyed v0.3.42's in-cache rollback
+    targets).
+
+    Precedence chain (highest to lowest):
+
+        PAPERWIKI_BAK_DIR        # explicit override
+        XDG_DATA_HOME/paperwiki/bak  # XDG-style location
+        $HOME/.local/share/paperwiki/bak  # default
+
+    Empty strings are treated as unset (matches the rest of this
+    module's env-handling). The directory may not exist yet — callers
+    create it on demand.
+
+    The chosen location is parallel to ``~/.local/lib/paperwiki/`` (helper
+    dir, D-9.39.2) and ``~/.local/bin/paperwiki`` (shim) — all paperwiki
+    state outside Claude Code's domain lives under ``~/.local/<role>/``.
+    """
+    explicit = _env_path("PAPERWIKI_BAK_DIR")
+    if explicit is not None:
+        return explicit
+    xdg = _env_path("XDG_DATA_HOME")
+    if xdg is not None:
+        return xdg / "paperwiki" / "bak"
+    return Path.home() / ".local" / "share" / "paperwiki" / "bak"
+
+
 __all__ = [
     "DEFAULT_HOME",
+    "resolve_paperwiki_bak_dir",
     "resolve_paperwiki_home",
     "resolve_paperwiki_recipes_dir",
     "resolve_paperwiki_venv_dir",

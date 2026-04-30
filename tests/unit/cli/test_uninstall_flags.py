@@ -505,3 +505,38 @@ def test_uninstall_everything_no_op_when_rc_absent(
     result = runner.invoke(app, ["uninstall", "--everything", "--yes"])
     assert result.exit_code == 0, result.output
     assert not rc.exists(), "uninstall must not synthesize an rc file"
+
+
+# ---------------------------------------------------------------------------
+# v0.3.43 D-9.43.5 — fish shell parity
+# ---------------------------------------------------------------------------
+
+
+def test_uninstall_everything_strips_fish_block(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--everything`` strips the fish-syntax paperwiki block, preserves rest."""
+    monkeypatch.setenv("SHELL", "/usr/local/bin/fish")
+    config_dir = fake_home / ".config" / "fish"
+    config_dir.mkdir(parents=True)
+    config_fish = config_dir / "config.fish"
+    config_fish.write_text(
+        "set -gx FOO bar\n"
+        "\n# >>> paperwiki helpers >>> (managed by paperwiki)\n"
+        'if test -d "$HOME/.local/bin"\n'
+        '    fish_add_path -aP "$HOME/.local/bin"\n'
+        "end\n"
+        "# <<< paperwiki helpers <<<\n",
+        encoding="utf-8",
+    )
+    _seed_plugin_layer(fake_home)
+
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = runner.invoke(app, ["uninstall", "--everything", "--yes"])
+    assert result.exit_code == 0, result.output
+
+    new_content = config_fish.read_text(encoding="utf-8")
+    assert "# >>> paperwiki helpers >>>" not in new_content
+    assert "# <<< paperwiki helpers <<<" not in new_content
+    # User content preserved.
+    assert "set -gx FOO bar" in new_content

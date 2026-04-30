@@ -94,10 +94,17 @@ class TestCliUpdate:
     def test_stale_cache_upgrades_and_prunes_json(
         self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Stale cache: installed=0.3.19, marketplace=0.3.20 → backup + prune."""
+        """Stale cache: installed=0.3.19, marketplace=0.3.20 → backup + prune.
+
+        v0.3.43 D-9.43.2: ``.bak`` is written to ``$PAPERWIKI_BAK_DIR``
+        (set per-test to a tmp location) instead of the in-cache subdir.
+        """
         import paperwiki.cli as cli_mod
 
         paths = _patch_cli_paths(claude_home)
+        # v0.3.43 D-9.43.2: redirect bak to a known tmp location.
+        bak_root = claude_home.parent / "paperwiki-bak"
+        monkeypatch.setenv("PAPERWIKI_BAK_DIR", str(bak_root))
 
         # Wire paths into cli module constants.
         monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
@@ -138,10 +145,17 @@ class TestCliUpdate:
         settings = json.loads(paths["settings"].read_text())
         assert "paper-wiki@paper-wiki" not in settings.get("enabledPlugins", {})
 
-        # Cache dir backed up (renamed, not deleted).
-        children = list(paths["cache_base"].iterdir())
-        assert any(".bak." in c.name for c in children), "stale cache must be backed up"
+        # Cache dir backed up at the new location (outside cache subdir).
+        bak_entries = list(bak_root.glob("0.3.19.bak.*"))
+        assert len(bak_entries) == 1, (
+            f"stale cache must be backed up to {bak_root}, found {bak_entries}"
+        )
         assert not old_cache.exists(), "original 0.3.19 dir must be gone"
+        # And NOT in the cache subdir (v0.3.42 location).
+        in_cache_baks = list(paths["cache_base"].glob("0.3.19.bak.*"))
+        assert not in_cache_baks, (
+            f".bak must NOT live in cache subdir anymore; found {in_cache_baks}"
+        )
 
     def test_up_to_date_is_noop(self, claude_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When cache == marketplace, nothing changes, exit 0."""
@@ -325,9 +339,15 @@ class TestCliUpdateUninstallsStaleEditableInstall:
     def test_uninstall_called_before_rename(
         self, claude_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        """v0.3.43 D-9.43.2: cache relocation now uses ``shutil.move`` (cross-fs)
+        instead of ``Path.rename``. Update the wrapper to log shutil.move calls.
+        """
         import paperwiki.cli as cli_mod
 
         paths = _patch_cli_paths(claude_home)
+        # v0.3.43 D-9.43.2: redirect bak to a tmp location.
+        monkeypatch.setenv("PAPERWIKI_BAK_DIR", str(tmp_path / "bak"))
+
         marketplace_dir = paths["default_marketplace"]
         _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
         _make_installed_plugins("0.3.29", paths["installed_plugins"])
@@ -343,7 +363,7 @@ class TestCliUpdateUninstallsStaleEditableInstall:
         (fake_venv / "bin" / "python").chmod(0o755)
         monkeypatch.setattr(cli_mod, "resolve_paperwiki_venv_dir", lambda: fake_venv)
 
-        # Capture order: uninstall subprocess call BEFORE cache rename.
+        # Capture order: uninstall subprocess call BEFORE cache rename/move.
         call_log: list[str] = []
         original_subprocess_run = cli_mod.subprocess.run
 
@@ -355,14 +375,16 @@ class TestCliUpdateUninstallsStaleEditableInstall:
 
         monkeypatch.setattr(cli_mod.subprocess, "run", _logged_run)
 
-        # Wrap rename to also log.
-        original_rename = type(cache_dir).rename
+        # v0.3.43: wrap shutil.move to log the cache relocation step.
+        original_move = cli_mod.shutil.move
 
-        def _logged_rename(self_path: Path, target: Path) -> Path:  # type: ignore[no-redef]
-            call_log.append("rename")
-            return original_rename(self_path, target)
+        def _logged_move(src: str, dst: str, *args: object, **kwargs: object) -> object:
+            # Only log the cache-rename move (skip the migration helper's moves).
+            if str(cache_dir) in str(src):
+                call_log.append("rename")
+            return original_move(src, dst, *args, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(type(cache_dir), "rename", _logged_rename)
+        monkeypatch.setattr(cli_mod.shutil, "move", _logged_move)
 
         monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
         monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])
@@ -378,9 +400,9 @@ class TestCliUpdateUninstallsStaleEditableInstall:
         assert result.exit_code == 0, result.output
         # Both happened, in the right order.
         assert "uninstall" in call_log, "expected pip uninstall to be called"
-        assert "rename" in call_log, "expected cache rename to be called"
+        assert "rename" in call_log, "expected cache move to be called"
         assert call_log.index("uninstall") < call_log.index("rename"), (
-            f"uninstall must precede rename; actual order: {call_log}"
+            f"uninstall must precede cache move; actual order: {call_log}"
         )
 
     def test_uninstall_is_noop_when_venv_missing(
@@ -420,9 +442,17 @@ class TestCliUpdateAutoPruneBak:
     def test_keeps_recent_n_when_paperwiki_bak_keep_set(
         self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """v0.3.43 D-9.43.2: prune scans the new bak root, not cache subdir.
+
+        Historic baks pre-staged in cache_base get migrated to the bak root
+        before pruning. Net flow: 5 historic + 1 new bak from this update,
+        prune to 2 (PAPERWIKI_BAK_KEEP=2).
+        """
         import paperwiki.cli as cli_mod
 
         paths = _patch_cli_paths(claude_home)
+        bak_root = claude_home.parent / "paperwiki-bak"
+        monkeypatch.setenv("PAPERWIKI_BAK_DIR", str(bak_root))
         marketplace_dir = paths["default_marketplace"]
         _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
         _make_installed_plugins("0.3.29", paths["installed_plugins"])
@@ -430,7 +460,8 @@ class TestCliUpdateAutoPruneBak:
         cache_dir = paths["cache_base"] / "0.3.29"
         cache_dir.mkdir(parents=True)
 
-        # Seed 5 historic .bak directories.
+        # Seed 5 historic .bak directories (legacy v0.3.42 location — these
+        # will be migrated by the update flow before pruning).
         for i in range(5):
             _make_bak_dir(paths["cache_base"], f"0.3.{20 + i}.bak.2026010{i + 1}T000000Z")
 
@@ -448,19 +479,27 @@ class TestCliUpdateAutoPruneBak:
         )
         assert result.exit_code == 0, result.output
         # The cache rename creates a new bak (0.3.29.bak.<ts>); after prune
-        # we should keep the newest 2 (one of which is the new bak).
-        remaining = sorted(p.name for p in paths["cache_base"].iterdir() if p.is_dir())
-        bak_dirs = [n for n in remaining if ".bak." in n]
+        # we should keep the newest 2 (one of which is the new bak). Count
+        # at the new bak root (post-relocation).
+        bak_dirs = sorted(p.name for p in bak_root.iterdir() if p.is_dir() and ".bak." in p.name)
         assert len(bak_dirs) == 2, (
-            f"expected 2 bak dirs after prune (PAPERWIKI_BAK_KEEP=2); got {bak_dirs}"
+            f"expected 2 bak dirs at {bak_root} after prune (PAPERWIKI_BAK_KEEP=2); got {bak_dirs}"
         )
 
     def test_paperwiki_bak_keep_zero_skips_prune(
         self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """v0.3.43 D-9.43.2: prune scans the new bak root.
+
+        With ``PAPERWIKI_BAK_KEEP=0``, prune is skipped. Historic baks
+        get migrated to the new location and survive alongside the new
+        bak.
+        """
         import paperwiki.cli as cli_mod
 
         paths = _patch_cli_paths(claude_home)
+        bak_root = claude_home.parent / "paperwiki-bak"
+        monkeypatch.setenv("PAPERWIKI_BAK_DIR", str(bak_root))
         marketplace_dir = paths["default_marketplace"]
         _make_plugin_json("0.3.30", marketplace_dir / ".claude-plugin")
         _make_installed_plugins("0.3.29", paths["installed_plugins"])
@@ -484,12 +523,12 @@ class TestCliUpdateAutoPruneBak:
             cli_mod.app, ["update", "--marketplace-dir", str(marketplace_dir)]
         )
         assert result.exit_code == 0, result.output
-        # All 3 historic baks + the new bak from this update preserved.
-        bak_dirs = [
-            p.name for p in paths["cache_base"].iterdir() if p.is_dir() and ".bak." in p.name
-        ]
+        # All 3 historic baks + the new bak from this update preserved at
+        # the new bak root.
+        bak_dirs = [p.name for p in bak_root.iterdir() if p.is_dir() and ".bak." in p.name]
         assert len(bak_dirs) >= 3, (
-            f"PAPERWIKI_BAK_KEEP=0 must skip prune; expected >= 3 bak dirs, got {bak_dirs}"
+            f"PAPERWIKI_BAK_KEEP=0 must skip prune; expected >= 3 bak dirs at "
+            f"{bak_root}, got {bak_dirs}"
         )
 
 
@@ -499,9 +538,12 @@ class TestCliStatusBakLine:
     def test_no_bak_shows_no_backups(
         self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """v0.3.43 D-9.43.2: status reads from the new bak root."""
         import paperwiki.cli as cli_mod
 
         paths = _patch_cli_paths(claude_home)
+        bak_root = claude_home.parent / "paperwiki-bak"
+        monkeypatch.setenv("PAPERWIKI_BAK_DIR", str(bak_root))
         marketplace_dir = paths["default_marketplace"]
         _make_plugin_json("0.3.29", marketplace_dir / ".claude-plugin")
         _make_installed_plugins("0.3.29", paths["installed_plugins"])
@@ -521,20 +563,26 @@ class TestCliStatusBakLine:
         assert result.exit_code == 0, result.output
         assert "bak directories" in result.output
         assert "no backups" in result.output
+        # v0.3.43 D-9.43.2: location annotation added.
+        assert str(bak_root) in result.output
 
     def test_bak_count_and_oldest_date(
         self, claude_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """v0.3.43 D-9.43.2: status reads bak count from the new bak root."""
         import paperwiki.cli as cli_mod
 
         paths = _patch_cli_paths(claude_home)
+        bak_root = claude_home.parent / "paperwiki-bak"
+        monkeypatch.setenv("PAPERWIKI_BAK_DIR", str(bak_root))
         marketplace_dir = paths["default_marketplace"]
         _make_plugin_json("0.3.29", marketplace_dir / ".claude-plugin")
         _make_installed_plugins("0.3.29", paths["installed_plugins"])
         _make_settings(paths["settings"], enabled=True)
 
-        _make_bak_dir(paths["cache_base"], "0.3.27.bak.20260101T000000Z")
-        _make_bak_dir(paths["cache_base"], "0.3.28.bak.20260301T120000Z")
+        # v0.3.43 D-9.43.2: seed at the new bak root.
+        _make_bak_dir(bak_root, "0.3.27.bak.20260101T000000Z")
+        _make_bak_dir(bak_root, "0.3.28.bak.20260301T120000Z")
 
         monkeypatch.setattr(cli_mod, "_INSTALLED_PLUGINS_JSON", paths["installed_plugins"])
         monkeypatch.setattr(cli_mod, "_CACHE_BASE", paths["cache_base"])

@@ -112,10 +112,10 @@ def test_pick_rc_bash_without_bash_profile(tmp_path: Path) -> None:
 
 
 def test_pick_rc_unsupported_shell_returns_empty(tmp_path: Path) -> None:
-    """``SHELL=/usr/bin/fish`` → empty stdout (caller no-ops on empty)."""
+    """``SHELL=/bin/csh`` → empty stdout (caller no-ops on empty)."""
     proc = _run(
         f"source {_RC_INTEGRATION}; _pick_rc_file",
-        env_overrides={"SHELL": "/usr/local/bin/fish", "HOME": str(tmp_path)},
+        env_overrides={"SHELL": "/bin/csh", "HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == ""
@@ -208,7 +208,7 @@ def test_rc_install_no_op_when_shell_unsupported(tmp_path: Path) -> None:
     proc = _run(
         f"source {_RC_INTEGRATION}; paperwiki_rc_install",
         env_overrides={
-            "SHELL": "/usr/local/bin/fish",
+            "SHELL": "/bin/csh",
             "HOME": str(tmp_path),
         },
     )
@@ -216,6 +216,87 @@ def test_rc_install_no_op_when_shell_unsupported(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == [], (
         f"unsupported shell must leave $HOME untouched; saw: {list(tmp_path.iterdir())}"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.3.43 D-9.43.5 — fish shell support
+# ---------------------------------------------------------------------------
+
+
+def test_pick_rc_fish_returns_config_fish(tmp_path: Path) -> None:
+    """``SHELL=/usr/local/bin/fish`` → ``$HOME/.config/fish/config.fish``."""
+    proc = _run(
+        f"source {_RC_INTEGRATION}; _pick_rc_file",
+        env_overrides={"SHELL": "/usr/local/bin/fish", "HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    expected = tmp_path / ".config" / "fish" / "config.fish"
+    assert proc.stdout.strip() == str(expected), proc.stdout
+
+
+def test_rc_install_writes_fish_block(tmp_path: Path) -> None:
+    """``paperwiki_rc_install`` on fish writes a fish-syntax block.
+
+    The fish block adds ``~/.local/bin`` to ``$fish_user_paths`` and
+    notes that ``paperwiki_diag`` (bash form) requires bash/zsh — but
+    ``paperwiki diag`` (CLI) works fine in fish.
+    """
+    proc = _run(
+        f"source {_RC_INTEGRATION}; paperwiki_rc_install",
+        env_overrides={"SHELL": "/usr/local/bin/fish", "HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    config_fish = tmp_path / ".config" / "fish" / "config.fish"
+    assert config_fish.is_file(), "fish config.fish must be created"
+    content = config_fish.read_text(encoding="utf-8")
+    # Marker block present.
+    assert _BEGIN_MARKER in content
+    assert _END_MARKER in content
+    # Fish-specific syntax.
+    assert "fish_add_path" in content, f"fish block must use fish_add_path syntax, got:\n{content}"
+    # Honest advisory about the bash function.
+    assert "paperwiki_diag" in content
+    assert "paperwiki diag" in content
+
+
+def test_rc_install_idempotent_on_fish(tmp_path: Path) -> None:
+    """Second invocation on fish does NOT double-write the block."""
+    for _ in range(2):
+        proc = _run(
+            f"source {_RC_INTEGRATION}; paperwiki_rc_install",
+            env_overrides={"SHELL": "/usr/local/bin/fish", "HOME": str(tmp_path)},
+        )
+        assert proc.returncode == 0, proc.stderr
+    config_fish = tmp_path / ".config" / "fish" / "config.fish"
+    content = config_fish.read_text(encoding="utf-8")
+    assert content.count(_BEGIN_MARKER) == 1, (
+        f"marker should appear exactly once after two installs:\n{content}"
+    )
+
+
+def test_rc_uninstall_strips_fish_block(tmp_path: Path) -> None:
+    """``paperwiki_rc_uninstall`` removes the fish block, preserving rest."""
+    config_dir = tmp_path / ".config" / "fish"
+    config_dir.mkdir(parents=True)
+    config_fish = config_dir / "config.fish"
+    # User content + paperwiki block (install first).
+    config_fish.write_text("# user fish content\nset -gx FOO bar\n", encoding="utf-8")
+    proc1 = _run(
+        f"source {_RC_INTEGRATION}; paperwiki_rc_install",
+        env_overrides={"SHELL": "/usr/local/bin/fish", "HOME": str(tmp_path)},
+    )
+    assert proc1.returncode == 0, proc1.stderr
+    assert _BEGIN_MARKER in config_fish.read_text(encoding="utf-8")
+    proc2 = _run(
+        f"source {_RC_INTEGRATION}; paperwiki_rc_uninstall",
+        env_overrides={"SHELL": "/usr/local/bin/fish", "HOME": str(tmp_path)},
+    )
+    assert proc2.returncode == 0, proc2.stderr
+    content = config_fish.read_text(encoding="utf-8")
+    assert _BEGIN_MARKER not in content
+    assert _END_MARKER not in content
+    # User content preserved.
+    assert "set -gx FOO bar" in content
 
 
 # ---------------------------------------------------------------------------
