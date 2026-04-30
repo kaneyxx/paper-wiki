@@ -24,8 +24,10 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Default weights for :meth:`ScoreBreakdown.compute_composite`. Defined at
@@ -188,9 +190,99 @@ class RunContext(BaseModel):
         self.counters[key] = self.counters.get(key, 0) + by
 
 
+# ---------------------------------------------------------------------------
+# v0.4.x knowledge graph layer (task 9.156, decision D-L).
+#
+# ``EdgeType`` is a closed enum at write-time: ``wiki_compile_graph`` (task
+# 9.157) only emits canonical values. At read-time the :class:`Edge` model
+# accepts unknown string values verbatim and logs a single ``loguru.warning``
+# so future on-disk graph data with new edge classes (e.g. shipped by a
+# v0.5+ patch, or hand-edited by a power user) round-trips cleanly without
+# data loss. ``EdgeType.EXTENSION`` plus the optional ``Edge.subtype``
+# field is the forward-compat hook reserved for adding new edge classes
+# without enum churn (consensus plan iter-2 R12 / Scenario 7).
+# ---------------------------------------------------------------------------
+
+
+class EdgeType(StrEnum):
+    """Canonical wiki-graph edge type (closed enum at write-time).
+
+    Readers preserve unknown values verbatim; only Python emitters are
+    constrained to these. Extending the enum in a future paperwiki version
+    must keep existing values stable so on-disk graph data stays valid.
+    """
+
+    BUILDS_ON = "builds_on"
+    IMPROVES_ON = "improves_on"
+    SAME_PROBLEM_AS = "same_problem_as"
+    CITES = "cites"
+    CONTRADICTS = "contradicts"
+    # Reserved forward-compat hook: pair with :attr:`Edge.subtype` to add
+    # new edge classes in a future minor version without enum churn.
+    EXTENSION = "extension"
+
+
+class Edge(BaseModel):
+    """A typed directed edge in the wiki knowledge graph.
+
+    The ``src`` and ``dst`` fields are wikilink targets (slug-like strings,
+    e.g. ``"arxiv:2401.00001"`` or ``"concepts/transformer"``); resolving
+    them to specific files is the responsibility of
+    ``paperwiki.runners.wiki_compile_graph`` (task 9.157).
+
+    Edges are read with a tolerant ``EdgeType | str`` union: the type field
+    coerces known canonical strings to the enum and preserves unknown
+    strings verbatim (with a one-shot ``loguru.warning``) so on-disk
+    ``edges.jsonl`` from a future paperwiki version round-trips without
+    data loss.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=False)
+
+    src: str = Field(min_length=1)
+    dst: str = Field(min_length=1)
+    type: EdgeType | str
+    weight: float = Field(default=1.0, ge=0.0, le=1.0)
+    evidence: str | None = None
+    # Required when ``type == EdgeType.EXTENSION``; carries the user-defined
+    # subtype string. Reserved for v0.5+ migration path.
+    subtype: str | None = None
+
+    @field_validator("src", "dst")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            msg = "value must not be blank"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _coerce_or_preserve_type(cls, value: Any) -> EdgeType | str:
+        # Already an EdgeType instance — passthrough.
+        if isinstance(value, EdgeType):
+            return value
+        # String input: try to coerce to the canonical enum; if it fails,
+        # preserve verbatim so future on-disk values round-trip cleanly.
+        if isinstance(value, str):
+            try:
+                return EdgeType(value)
+            except ValueError:
+                logger.warning(
+                    "edge.type.unknown",
+                    value=value,
+                    note="preserved verbatim; expected canonical EdgeType",
+                )
+                return value
+        msg = f"type must be EdgeType or str, got {type(value).__name__}"
+        raise ValueError(msg)
+
+
 __all__ = [
     "DEFAULT_SCORE_WEIGHTS",
     "Author",
+    "Edge",
+    "EdgeType",
     "Paper",
     "Recommendation",
     "RunContext",

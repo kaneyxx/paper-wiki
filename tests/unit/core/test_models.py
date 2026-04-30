@@ -14,6 +14,8 @@ from pydantic import ValidationError
 
 from paperwiki.core.models import (
     Author,
+    Edge,
+    EdgeType,
     Paper,
     Recommendation,
     RunContext,
@@ -190,3 +192,123 @@ class TestRunContext:
     def test_run_context_target_date_must_be_timezone_aware(self) -> None:
         with pytest.raises(ValidationError):
             RunContext(target_date=datetime(2026, 4, 25), config_snapshot={})  # noqa: DTZ001
+
+
+# ---------------------------------------------------------------------------
+# EdgeType (v0.4.x knowledge graph — task 9.156, D-L)
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeType:
+    def test_canonical_values(self) -> None:
+        # Closed enum used at write-time. Writers may only emit these values.
+        assert EdgeType.BUILDS_ON.value == "builds_on"
+        assert EdgeType.IMPROVES_ON.value == "improves_on"
+        assert EdgeType.SAME_PROBLEM_AS.value == "same_problem_as"
+        assert EdgeType.CITES.value == "cites"
+        assert EdgeType.CONTRADICTS.value == "contradicts"
+
+    def test_extension_reserved_for_forward_compat(self) -> None:
+        # Reserved per consensus plan iter-2 R12 forward-compat strategy:
+        # v0.5+ patches add new edge classes via EdgeType.EXTENSION + subtype
+        # field on Edge, without invalidating existing on-disk edges.
+        assert EdgeType.EXTENSION.value == "extension"
+
+    def test_str_enum_membership(self) -> None:
+        # EdgeType is a str-enum so YAML/JSON serialization is natural.
+        assert isinstance(EdgeType.BUILDS_ON, str)
+        assert EdgeType("builds_on") is EdgeType.BUILDS_ON
+
+
+# ---------------------------------------------------------------------------
+# Edge (v0.4.x knowledge graph — task 9.156)
+# ---------------------------------------------------------------------------
+
+
+class TestEdge:
+    def test_minimal_edge_constructs(self) -> None:
+        edge = Edge(
+            src="arxiv:2401.00001",
+            dst="arxiv:2401.00002",
+            type=EdgeType.BUILDS_ON,
+        )
+        assert edge.type is EdgeType.BUILDS_ON
+        assert edge.weight == 1.0
+        assert edge.evidence is None
+        assert edge.subtype is None
+
+    def test_edge_accepts_canonical_string_for_known_type(self) -> None:
+        # Pydantic should coerce "builds_on" to EdgeType.BUILDS_ON when the
+        # input is a known canonical value.
+        edge = Edge(src="arxiv:a", dst="arxiv:b", type="builds_on")
+        assert edge.type is EdgeType.BUILDS_ON
+
+    def test_edge_preserves_unknown_type_verbatim(self) -> None:
+        # Forward-compat (consensus plan iter-2 MS4 / Scenario 7):
+        # readers must preserve unknown edge-type strings verbatim, not
+        # raise. Idempotent re-emit writes them back unchanged. Writer-side
+        # (this constructor) tolerates them as a str when no enum match.
+        edge = Edge(src="arxiv:a", dst="arxiv:b", type="evaluates_on")
+        assert edge.type == "evaluates_on"
+        assert not isinstance(edge.type, EdgeType)
+
+    def test_edge_unknown_type_round_trip_preserves_value(self) -> None:
+        # `model_dump` must emit the unknown string verbatim so the on-disk
+        # edges.jsonl can be byte-identical across rebuilds.
+        edge = Edge(src="arxiv:a", dst="arxiv:b", type="evaluates_on")
+        dumped = edge.model_dump(mode="json")
+        assert dumped["type"] == "evaluates_on"
+        rebuilt = Edge.model_validate(dumped)
+        assert rebuilt.type == "evaluates_on"
+
+    def test_edge_weight_bounds(self) -> None:
+        # weight is constrained to [0.0, 1.0] mirroring ScoreBreakdown axes.
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="arxiv:b", type=EdgeType.BUILDS_ON, weight=1.5)
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="arxiv:b", type=EdgeType.BUILDS_ON, weight=-0.1)
+
+    def test_edge_extension_carries_subtype(self) -> None:
+        # EXTENSION is the forward-compat hook: the user (or a future
+        # paperwiki version) sets `subtype` to disambiguate without enum
+        # churn. v0.4.0 Python emits the canonical enum members only.
+        edge = Edge(
+            src="arxiv:a",
+            dst="arxiv:b",
+            type=EdgeType.EXTENSION,
+            subtype="evaluates_on",
+        )
+        assert edge.type is EdgeType.EXTENSION
+        assert edge.subtype == "evaluates_on"
+
+    def test_edge_src_must_be_non_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            Edge(src="", dst="arxiv:b", type=EdgeType.BUILDS_ON)
+        with pytest.raises(ValidationError):
+            Edge(src="   ", dst="arxiv:b", type=EdgeType.BUILDS_ON)
+
+    def test_edge_dst_must_be_non_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="", type=EdgeType.BUILDS_ON)
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="  ", type=EdgeType.BUILDS_ON)
+
+    def test_edge_evidence_is_optional_string(self) -> None:
+        edge = Edge(
+            src="arxiv:a",
+            dst="arxiv:b",
+            type=EdgeType.CITES,
+            evidence="cited in §3.2 of arxiv:a",
+        )
+        assert edge.evidence == "cited in §3.2 of arxiv:a"
+
+    def test_edge_serializable_round_trip_canonical(self) -> None:
+        edge = Edge(
+            src="arxiv:2401.00001",
+            dst="concepts/transformer",
+            type=EdgeType.BUILDS_ON,
+            weight=0.8,
+            evidence="builds attention layer on §3 of arxiv:transformer",
+        )
+        rebuilt = Edge.model_validate(edge.model_dump(mode="json"))
+        assert rebuilt == edge
