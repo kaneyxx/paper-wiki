@@ -297,3 +297,81 @@ class TestStatusHealthSectionOutput:
         assert "bak directories" in result.output
         # New line.
         assert "install health" in result.output
+
+
+# ---------------------------------------------------------------------------
+# v0.3.41 D-9.41.2: paperwiki status --strict flag
+# ---------------------------------------------------------------------------
+
+
+def _run_status_with_flags(
+    marketplace: Path,
+    *,
+    path_env: str,
+    extra_args: list[str] | None = None,
+):
+    """Variant of ``_run_status`` that passes additional CLI flags."""
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "PATH": path_env})
+    args = ["status", "--marketplace-dir", str(marketplace)]
+    if extra_args:
+        args.extend(extra_args)
+    return runner.invoke(app, args)
+
+
+class TestStatusStrictFlag:
+    """Plan §18.3 task 9.125 / D-9.41.2.
+
+    The default ``paperwiki status`` exits 0 in all healthy/unhealthy
+    combinations (D-9.40.1 warn-not-error). v0.3.41 adds an opt-in
+    ``--strict`` flag that flips behaviour to exit 1 on any ✗ row,
+    enabling CI/automation to gate on install-health.
+
+    Acceptance criteria:
+    (a) ``paperwiki status --strict`` on a healthy install → exit 0.
+    (b) ``paperwiki status --strict`` on an unhealthy install → exit 1.
+    (c) Default ``paperwiki status`` (no flag) on an unhealthy
+        install → exit 0 (D-9.40.1 contract preserved).
+    """
+
+    def test_strict_on_healthy_install_exits_zero(self, health_env: dict[str, Path]) -> None:
+        _seed_helper(health_env["helper_path"], version=_PAPERWIKI_VERSION)
+        _seed_shim(health_env["shim_path"], version=_PAPERWIKI_VERSION)
+
+        result = _run_status_with_flags(
+            health_env["marketplace"],
+            path_env=f"{health_env['local_bin']}:/usr/bin:/bin",
+            extra_args=["--strict"],
+        )
+        assert result.exit_code == 0, result.output
+        # Output content is identical to default mode (only exit code differs).
+        assert "4/4 healthy" in result.output
+
+    def test_strict_on_unhealthy_install_exits_one(self, health_env: dict[str, Path]) -> None:
+        # Don't seed helper or shim. PATH ok.
+        result = _run_status_with_flags(
+            health_env["marketplace"],
+            path_env=f"{health_env['local_bin']}:/usr/bin:/bin",
+            extra_args=["--strict"],
+        )
+        # Strict mode → non-zero exit.
+        assert result.exit_code == 1, (
+            f"--strict on unhealthy install must exit 1; got {result.exit_code}:\n{result.output}"
+        )
+        # Output still shows the health rows (so user sees what failed).
+        assert "1/4 healthy" in result.output
+        assert "✗" in result.output
+
+    def test_default_mode_on_unhealthy_install_still_exits_zero(
+        self, health_env: dict[str, Path]
+    ) -> None:
+        """D-9.40.1 contract preserved when --strict is NOT passed."""
+        # Don't seed helper or shim. PATH ok.
+        result = _run_status_with_flags(
+            health_env["marketplace"],
+            path_env=f"{health_env['local_bin']}:/usr/bin:/bin",
+            extra_args=[],  # NO --strict
+        )
+        assert result.exit_code == 0, (
+            f"Default mode (no --strict) must exit 0 even when unhealthy; "
+            f"got {result.exit_code}:\n{result.output}"
+        )

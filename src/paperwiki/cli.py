@@ -445,10 +445,21 @@ def update(
     #   restart 1 → /plugin install registers the plugin
     #   restart 2 → SessionStart fires ensure-env.sh which rewrites
     #               the shim and helper to the new version
+    #
+    # v0.3.41 D-9.41.1: prepend a one-line ``Note:`` warning that the
+    # ``.bak`` directories created by this update are cleared by
+    # ``/plugin install`` (release-gate verification of v0.3.40
+    # confirmed Claude Code's plugin manager wipes the cache subdir
+    # before re-populating). Users relying on ``.bak`` for rollback
+    # need to know — without this NOTE the rollback path silently
+    # disappears between steps 3 and 5 of the upgrade flow.
     typer.echo(
         f"paper-wiki: {old_display} → {marketplace_ver}"
         + bak_suffix
         + bak_summary
+        + "\n"
+        + "\nNote: .bak directories are cleared by /plugin install — "
+        + "back up manually if you need long-term rollback access."
         + "\n"
         + "\nNext:"
         + "\n  1. Exit any running session: /exit (or Ctrl-D)"
@@ -478,6 +489,14 @@ def status(
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+    ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Exit 1 if any install-health row is unhealthy "
+            "(opt-in; default exits 0 regardless).",
+        ),
     ] = False,
 ) -> None:
     """Print a 3-line state report (cache / marketplace / enabledPlugins)."""
@@ -525,6 +544,13 @@ def status(
             typer.echo(f"  ✓ {label}")
         else:
             typer.echo(f"  ✗ {label}  (action: {hint})")
+
+    # v0.3.41 D-9.41.2: opt-in strict mode flips exit code to 1 when any
+    # health row is ✗. Default (no --strict) preserves the v0.3.40 D-9.40.1
+    # warn-not-error contract — automation that pipes status output without
+    # the flag is unaffected.
+    if strict and healthy < len(health_rows):
+        raise typer.Exit(1)
 
 
 _VERSION_TAG_RE = re.compile(r"v(\d+\.\d+\.\d+)")
