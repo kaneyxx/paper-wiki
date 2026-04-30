@@ -70,6 +70,7 @@ from paperwiki.runners.uninstall import (
 )
 from paperwiki.runners.where import main as _where_main
 from paperwiki.runners.wiki_compile import main as _wiki_compile_main
+from paperwiki.runners.wiki_graph_query import main as _wiki_graph_query_main
 from paperwiki.runners.wiki_ingest_plan import main as _wiki_ingest_main
 from paperwiki.runners.wiki_lint import main as _wiki_lint_main
 from paperwiki.runners.wiki_query import main as _wiki_query_main
@@ -112,6 +113,7 @@ app.command(name="wiki-ingest")(_wiki_ingest_main)
 app.command(name="wiki-lint")(_wiki_lint_main)
 app.command(name="wiki-compile")(_wiki_compile_main)
 app.command(name="wiki-query")(_wiki_query_main)
+app.command(name="wiki-graph")(_wiki_graph_query_main)
 app.command(name="extract-images")(_extract_images_main)
 app.command(name="migrate-sources")(_migrate_sources_main)
 app.command(name="gc-archive")(_gc_archive_main)
