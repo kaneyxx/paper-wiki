@@ -828,12 +828,25 @@ def test_paperwiki_diag_no_warning_when_versions_match(tmp_path: Path) -> None:
     memory) and seed a canonical on-disk helper whose first-line tag
     declares the SAME version. The stale-detection logic should
     short-circuit; no warning is emitted.
+
+    v0.3.44 D-9.44.2: reads the current ``_PAPERWIKI_HELPER_VERSION``
+    from the worktree helper at test time so this test stays correct
+    across version bumps without manual updates.
     """
+    helper_text = _HELPER_PATH.read_text(encoding="utf-8")
+    current_version: str | None = None
+    for line in helper_text.splitlines():
+        if line.startswith("_PAPERWIKI_HELPER_VERSION="):
+            current_version = line.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+    assert current_version is not None, (
+        "could not extract _PAPERWIKI_HELPER_VERSION from helper file"
+    )
+
     canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
     canonical_dir.mkdir(parents=True)
-    # Match the worktree's _PAPERWIKI_HELPER_VERSION (currently 0.3.43).
     (canonical_dir / "bash-helpers.sh").write_text(
-        "# paperwiki bash-helpers — v0.3.43 (matching test stub)\n",
+        f"# paperwiki bash-helpers — v{current_version} (matching test stub)\n",
         encoding="utf-8",
     )
     proc = _run_bash(

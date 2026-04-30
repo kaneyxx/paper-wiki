@@ -9,6 +9,80 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.3.44] - 2026-04-30
+
+Patch release fixing two bugs surfaced by v0.3.43 release-gate
+verification on the user's real machine. Both are small surface-
+level fixes with significant ergonomic impact:
+
+### Fixed
+
+- **`_migrate_legacy_bak` now runs on no-op `paperwiki update`**
+  (D-9.44.1). v0.3.43 only ran the legacy-bak migration inside the
+  upgrade branch (`if cache_ver != marketplace_ver`). When a user
+  upgraded via the v0.3.42 binary (which wrote `.bak` to the old
+  in-cache location), then completed the TWO-restart and ran
+  `paperwiki update` again, the v0.3.43 binary saw "already at
+  0.3.43" and exited BEFORE migration. Result: the in-cache `.bak`
+  stayed there forever — until the next `/plugin install` ate it.
+  v0.3.44 hoists the migration call BEFORE the no-op-return gate
+  so it runs unconditionally as a one-time housekeeping pass on
+  every `paperwiki update`. Idempotent — second run finds nothing
+  to migrate.
+
+- **`paperwiki_diag` stale-version warning fires regardless of shim
+  delegation** (D-9.44.2). v0.3.43 D-9.43.6 added a ⚠ warning when
+  the on-disk helper version differs from the in-memory
+  `_PAPERWIKI_HELPER_VERSION` constant (typical post-`paperwiki
+  update` state until the user opens a new terminal). But the
+  warning lived in the inline-fallback branch of
+  `_paperwiki_diag_render`, AFTER the shim delegation gate. On a
+  healthy install (where the shim is +x and the function shells out
+  to `paperwiki diag`), the inline branch never ran — so the
+  warning never fired. The 9.155 unit tests passed because the test
+  setup didn't seed a +x shim; on real installs, the feature was
+  silently dead. v0.3.44 hoists the stale-detection check to the
+  TOP of `_paperwiki_diag_render` so it runs regardless of which
+  downstream path takes over (CLI delegation OR inline fallback).
+  Two new regression tests pin the fix: one with +x shim asserts
+  the warning DOES appear before the CLI sentinel; one with
+  matching versions asserts no false-positive.
+
+### Decisions ratified
+
+- D-9.44.1 — `_migrate_legacy_bak` runs unconditionally
+- D-9.44.2 — stale warning runs before shim delegation
+
+### Lessons learned
+
+- **Test setup must mirror production conditions.** v0.3.43's stale-
+  warning unit test seeded a fixture without a +x shim, so the
+  inline path ran by accident — the test passed but the feature
+  was dead in production. v0.3.44 adds a "shim is +x" test variant
+  that pins the actual user-facing path. **Lesson**: when a feature
+  has a fast-path/slow-path branch, every test should explicitly
+  pin which path it's exercising.
+
+- **Migration logic should be an unconditional housekeeping step.**
+  v0.3.43 gated migration on the upgrade event because the
+  migration was conceptually tied to "we're doing an upgrade right
+  now". But the migration's actual job — moving legacy state to
+  the new location — has nothing to do with version drift. It's a
+  lifecycle hygiene pass that should run any time `paperwiki
+  update` is invoked, regardless of whether a version change
+  follows.
+
+### Tests
+
+- 1069 tests passing (+4 vs v0.3.43 baseline of 1065).
+- 2 new regression tests for D-9.44.1 (no-op migration + clean
+  no-op silence).
+- 2 new regression tests for D-9.44.2 (shim+mismatch warning,
+  shim+match no-warning).
+- The matching-version test reads `_PAPERWIKI_HELPER_VERSION` from
+  the worktree helper at test time so it stays correct across
+  future version bumps without manual updates.
+
 ## [0.3.43] - 2026-04-30
 
 Bug fix + architectural cleanup release. Fixes the v0.3.42 release-gate

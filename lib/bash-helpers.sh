@@ -1,4 +1,4 @@
-# paperwiki bash-helpers — v0.3.43 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
+# paperwiki bash-helpers — v0.3.44 (PATH guard + CLAUDE_PLUGIN_ROOT resolver).
 #
 # This file is meant to be `source`d by SKILL bash blocks, NOT executed
 # directly. There is no shebang because POSIX sourcing ignores the
@@ -24,7 +24,7 @@ _PAPERWIKI_HELPER_PATH="${BASH_SOURCE[0]:-$0}"
 # terminal (or re-source). The constant is a string of digits + dots
 # (no leading "v") for direct comparison against the regex-extracted
 # tag from the on-disk header.
-_PAPERWIKI_HELPER_VERSION="0.3.43"
+_PAPERWIKI_HELPER_VERSION="0.3.44"
 #
 # Install location: ensure-env.sh installs this file at every
 # SessionStart to ``$HOME/.local/lib/paperwiki/bash-helpers.sh``.
