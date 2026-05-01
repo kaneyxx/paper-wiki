@@ -9,6 +9,61 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-01
+
+Hot-fix for a v0.4.0 release-gate regression caught on first
+real-machine upgrade. Single bug, single architectural cause.
+
+### Fixed
+
+- **`hooks/ensure-env.sh` and `lib/bash-helpers.sh` no longer hardcode
+  the version string** (D-9.45.1). v0.4.0 shipped with `v0.3.44`
+  literal embedded in three places in `ensure-env.sh` (the shim
+  `EXPECTED_TAG`, the shim heredoc body, and the helper
+  `EXPECTED_HELPER_TAG`) plus two places in `lib/bash-helpers.sh`
+  (line-1 tag comment, `_PAPERWIKI_HELPER_VERSION` constant). The
+  hook's idempotency check is `grep -qF "$EXPECTED_TAG" "$SHIM_PATH"`
+  — when the literal `v0.3.44` matched the existing v0.3.44 shim,
+  the rewrite was skipped and the user stayed pinned to v0.3.44
+  forever even after `/plugin install paper-wiki@paper-wiki` and a
+  full TWO-restart cycle.
+
+### Changed
+
+- **Single source of truth: `paperwiki.__version__`** flows to every
+  shell artifact via two derivation patterns:
+  - `hooks/ensure-env.sh` reads `$PLUGIN_VERSION` (already grep'd
+    from `src/paperwiki/__init__.py` at script start) and
+    interpolates into `EXPECTED_TAG`, `EXPECTED_HELPER_TAG`, and the
+    sed-substitution that writes the shim/helper files.
+  - `lib/bash-helpers.sh` is now a TEMPLATE — the line-1 tag and
+    `_PAPERWIKI_HELPER_VERSION` use `@PAPERWIKI_VERSION@`
+    placeholders. `ensure-env.sh` runs
+    `sed "s|@PAPERWIKI_VERSION@|${PLUGIN_VERSION}|g"` as it copies
+    the file to `~/.local/lib/paperwiki/bash-helpers.sh`. The
+    placeholder is invariant under version bumps — only
+    `__version__` ever changes.
+
+### Added
+
+- **Regression test** (`tests/test_smoke.py::test_shell_artifacts_use_version_placeholder`)
+  pins the structural lines in both files: any future literal
+  `v\d+\.\d+\.\d+` in the tag/version-bearing lines fails CI rather
+  than slipping into a release. The eight-place version mirror is
+  reduced to one canonical source plus pinning tests for the four
+  static mirrors (`__init__.py`, `pyproject.toml`, `plugin.json`,
+  and the two shell artifacts).
+
+### Verification gates
+
+- `pytest -q`                           — passing
+- `mypy --strict src`                   — clean
+- `ruff check src tests`                — clean
+- `ruff format --check src tests`       — clean
+- `claude plugin validate .`            — passed
+- `bash -n hooks/ensure-env.sh`         — syntax OK
+- `bash -n lib/bash-helpers.sh`         — syntax OK
+
 ## [0.4.0] - 2026-05-01
 
 Minor release shipping the full v0.4.x roadmap as one monolithic
