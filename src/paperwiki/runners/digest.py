@@ -33,6 +33,10 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 from loguru import logger
 
+from paperwiki._internal.dedup_ledger import (
+    DedupLedgerEntry,
+    append_dedup_entry,
+)
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki._internal.run_status import RunStatusEntry, append_run_status
 from paperwiki.config.recipe import (
@@ -41,7 +45,7 @@ from paperwiki.config.recipe import (
     load_recipe,
 )
 from paperwiki.core.errors import PaperWikiError
-from paperwiki.core.models import RunContext
+from paperwiki.core.models import Recommendation, RunContext
 
 if TYPE_CHECKING:
     from paperwiki.core.pipeline import PipelineResult
@@ -102,6 +106,43 @@ def _extract_filter_drops(counters: dict[str, int]) -> dict[str, int]:
             name = key[len("filter.") : -len(".dropped")]
             result[name] = value
     return result
+
+
+def _record_dedup_surfaced(
+    *,
+    vault_path: Path | None,
+    recipe_name: str,
+    recommendations: list[Recommendation],
+    when: datetime,
+) -> None:
+    """Append a ``surfaced`` row to the dedup ledger for every emitted paper.
+
+    Per **D-F**, the ledger is the source of truth for "the user has
+    seen this paper" — without this hook, the dedup filter would
+    re-recommend the same paper on every digest run that has zero
+    interaction with the vault's existing ``Wiki/sources/`` files.
+
+    Failures (disk full, permissions) are logged and swallowed so
+    ledger I/O never masks the underlying digest result.
+    """
+    if vault_path is None or not recommendations:
+        return
+    try:
+        for rec in recommendations:
+            entry = DedupLedgerEntry(
+                timestamp=when,
+                canonical_id=rec.paper.canonical_id,
+                title=rec.paper.title,
+                recipe=recipe_name,
+                action="surfaced",
+            )
+            append_dedup_entry(vault_path, entry)
+    except OSError as exc:
+        logger.warning(
+            "dedup_ledger.append.failed",
+            vault=str(vault_path),
+            error=str(exc),
+        )
 
 
 def _record_run_status(
@@ -195,6 +236,16 @@ async def run_digest(
         final_count=len(result.recommendations),
         elapsed_ms=elapsed_ms,
         error=None,
+    )
+    # Task 9.168 / **D-F**: append ``surfaced`` rows so the next run's
+    # dedup filter sees these papers and silently drops them. Recipes
+    # without an obsidian vault (and therefore no ``vault_path``) skip
+    # this hook — the ledger is vault-bound by design.
+    _record_dedup_surfaced(
+        vault_path=vault_path,
+        recipe_name=recipe.name,
+        recommendations=result.recommendations,
+        when=datetime.now(UTC),
     )
 
     logger.info(

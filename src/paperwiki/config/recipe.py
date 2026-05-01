@@ -28,7 +28,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from paperwiki.core.errors import UserError
 from paperwiki.core.pipeline import Pipeline
-from paperwiki.plugins.filters.dedup import DedupFilter, MarkdownVaultKeyLoader
+from paperwiki.plugins.filters.dedup import (
+    DedupFilter,
+    DedupLedgerKeyLoader,
+    MarkdownVaultKeyLoader,
+)
 from paperwiki.plugins.filters.recency import RecencyFilter
 from paperwiki.plugins.filters.relevance import RelevanceFilter, Topic
 from paperwiki.plugins.reporters.markdown import MarkdownReporter
@@ -184,6 +188,22 @@ def load_recipe(path: Path) -> RecipeSchema:
         raise UserError(msg) from exc
 
 
+def _resolve_obsidian_vault(recipe: RecipeSchema) -> Path | None:
+    """Pull the obsidian reporter's ``vault_path`` (if any) for vault-bound state.
+
+    Used by both the run-status ledger (task 9.167) and the dedup
+    ledger (task 9.168) per **D-O** + **D-M** to anchor vault-global
+    state in one place. Recipes without an obsidian reporter return
+    ``None``; downstream wiring no-ops the vault-bound features.
+    """
+    for spec in recipe.reporters:
+        if spec.name == "obsidian":
+            value = spec.config.get("vault_path")
+            if isinstance(value, str | Path):
+                return Path(value).expanduser()
+    return None
+
+
 def instantiate_pipeline(recipe: RecipeSchema) -> Pipeline:
     """Build a fully-wired :class:`Pipeline` from a recipe.
 
@@ -191,9 +211,15 @@ def instantiate_pipeline(recipe: RecipeSchema) -> Pipeline:
     are plumbed through to the reporter builders so a recipe-level
     ``obsidian.callouts: false`` propagates to every reporter that
     cares (currently :class:`ObsidianReporter`).
+
+    The obsidian reporter's ``vault_path`` is pulled out at this layer
+    and threaded into :func:`_build_filter` so the dedup filter can
+    auto-engage the persistent dedup ledger (task 9.168 / **D-F** +
+    **D-M**) without recipe authors having to wire it twice.
     """
+    vault_path = _resolve_obsidian_vault(recipe)
     sources = [_build_source(s) for s in recipe.sources]
-    filters = [_build_filter(f) for f in recipe.filters]
+    filters = [_build_filter(f, ledger_vault=vault_path) for f in recipe.filters]
     scorer = _build_scorer(recipe.scorer)
     reporters = [_build_reporter(r, obsidian_flags=recipe.obsidian) for r in recipe.reporters]
     return Pipeline(
@@ -275,16 +301,24 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def _build_filter(spec: PluginSpec) -> Filter:
+def _build_filter(spec: PluginSpec, *, ledger_vault: Path | None = None) -> Filter:
     if spec.name == "recency":
         return RecencyFilter(**spec.config)
     if spec.name == "relevance":
         topics = _topics_from_config(spec.config.get("topics", []))
         return RelevanceFilter(topics=topics)
     if spec.name == "dedup":
-        loaders = [
+        loaders: list[Any] = [
             MarkdownVaultKeyLoader(root=_expand(p)) for p in spec.config.get("vault_paths", [])
         ]
+        # Task 9.168 / **D-F** + **D-M**: auto-engage the persistent
+        # dedup ledger when an obsidian reporter exposes a vault_path.
+        # Opt-out via ``ledger: false`` keeps the door open for
+        # sources-only recipes that share a vault but want isolated
+        # dedup semantics.
+        ledger_enabled = bool(spec.config.get("ledger", True))
+        if ledger_enabled and ledger_vault is not None:
+            loaders.append(DedupLedgerKeyLoader(vault_path=ledger_vault))
         return DedupFilter(loaders=loaders)
     msg = f"unknown filter plugin: {spec.name!r}"
     raise UserError(msg)

@@ -231,9 +231,43 @@ def _parse_frontmatter(text: str) -> dict[str, object] | None:
     return data
 
 
+class DedupLedgerKeyLoader:
+    """Load dedup keys from the vault-bound JSONL dedup ledger (task 9.168).
+
+    Per **D-F** + **D-M**, the ledger at ``<vault>/.paperwiki/dedup-ledger.jsonl``
+    persists every paper the digest has surfaced + every paper the
+    user has explicitly dismissed. This loader reads both classes
+    into a single :class:`DedupKeys` so the dedup filter silently
+    drops papers that have appeared in any prior digest, regardless
+    of which recipe ran them.
+
+    Vault-global scope: one loader per vault is enough — the ledger
+    deliberately does not partition by recipe (D-M).
+
+    The import of :func:`paperwiki._internal.dedup_ledger.read_dedup_keys`
+    is deferred to :meth:`load` to avoid a circular import: the ledger
+    module imports :class:`DedupKeys` from this file.
+    """
+
+    def __init__(self, vault_path: Path) -> None:
+        self.vault_path = vault_path
+        self.name = f"dedup-ledger:{vault_path.name}"
+
+    async def load(self, ctx: RunContext) -> DedupKeys:
+        # Local import breaks the cycle (dedup_ledger imports DedupKeys
+        # from this module).
+        from paperwiki._internal.dedup_ledger import read_dedup_keys
+
+        if not self.vault_path.is_dir():
+            logger.debug("dedup_ledger.vault.missing", path=str(self.vault_path))
+            return DedupKeys.empty()
+        return read_dedup_keys(self.vault_path)
+
+
 __all__ = [
     "DedupFilter",
     "DedupKeys",
+    "DedupLedgerKeyLoader",
     "KeyLoader",
     "MarkdownVaultKeyLoader",
 ]

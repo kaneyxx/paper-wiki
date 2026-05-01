@@ -34,6 +34,8 @@ from paperwiki._internal.paths import (
     resolve_paperwiki_bak_dir,
     resolve_paperwiki_venv_dir,
 )
+from paperwiki.runners.dedup_dismiss import main as _dedup_dismiss_main
+from paperwiki.runners.dedup_list import main as _dedup_list_main
 from paperwiki.runners.diag import render_diag as _render_diag
 from paperwiki.runners.diagnostics import main as _diagnostics_main
 from paperwiki.runners.digest import main as _digest_main
@@ -59,6 +61,7 @@ from paperwiki.runners.gc_bak import (
 from paperwiki.runners.gc_bak import (
     main as _gc_bak_main,
 )
+from paperwiki.runners.gc_dedup_ledger import main as _gc_dedup_ledger_main
 from paperwiki.runners.gc_digest_archive import main as _gc_archive_main
 from paperwiki.runners.migrate_recipe import main as _migrate_recipe_main
 from paperwiki.runners.migrate_sources import main as _migrate_sources_main
@@ -118,6 +121,9 @@ app.command(name="extract-images")(_extract_images_main)
 app.command(name="migrate-sources")(_migrate_sources_main)
 app.command(name="gc-archive")(_gc_archive_main)
 app.command(name="gc-bak")(_gc_bak_main)
+app.command(name="gc-dedup-ledger")(_gc_dedup_ledger_main)
+app.command(name="dedup-list")(_dedup_list_main)
+app.command(name="dedup-dismiss")(_dedup_dismiss_main)
 app.command(name="where")(_where_main)
 # Task 9.59 (v0.3.34): expose `paperwiki diagnostics` so the setup and
 # bio-search SKILLs can use the shim consistently. The runner module
