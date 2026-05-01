@@ -97,6 +97,18 @@ class TestObsidianFlags:
         with pytest.raises(ValueError, match="bogus"):
             RecipeSchema.model_validate(recipe_data)
 
+    def test_templater_default_false(self) -> None:
+        """Per task 9.164 acceptance: Templater is opt-in (default off so
+        non-Templater users see plain values, not raw Templater syntax)."""
+        recipe = RecipeSchema.model_validate(_VALID_RECIPE)
+        assert recipe.obsidian.templater is False
+
+    def test_templater_can_be_enabled(self) -> None:
+        recipe_data = dict(_VALID_RECIPE)
+        recipe_data["obsidian"] = {"templater": True}
+        recipe = RecipeSchema.model_validate(recipe_data)
+        assert recipe.obsidian.templater is True
+
 
 class TestDefaultsResolution:
     """Per **D-N**: ``recipes/_defaults.yaml`` ships with the plugin and

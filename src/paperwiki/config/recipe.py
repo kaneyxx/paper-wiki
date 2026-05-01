@@ -67,6 +67,13 @@ class ObsidianFlags(BaseModel):
     # ``sources-only`` recipe ships with this off so plain-Markdown
     # consumers don't see Obsidian-only syntax).
     callouts: bool = True
+    # ``<%* ... %>`` Templater expressions in note bodies (task 9.164).
+    # Default off because non-Templater users would see the syntax as
+    # literal text. Recipes targeting power users with the Templater
+    # plugin installed flip this to true to get live "last edited"
+    # stamps and date helpers in the Notes section of every per-paper
+    # source stub.
+    templater: bool = False
 
 
 # Defaults file shipped with the plugin / co-located with user recipes.
@@ -302,9 +309,10 @@ def _build_reporter(spec: PluginSpec, *, obsidian_flags: ObsidianFlags) -> Repor
         config = dict(spec.config)
         if "vault_path" in config:
             config["vault_path"] = _expand(config["vault_path"])
-        # Vault-wide flag layered in unless the per-reporter spec
-        # already set it explicitly (per-reporter > vault-wide).
+        # Vault-wide flags layered in unless the per-reporter spec
+        # already set them explicitly (per-reporter > vault-wide).
         config.setdefault("callouts", obsidian_flags.callouts)
+        config.setdefault("templater", obsidian_flags.templater)
         return ObsidianReporter(**config)
     msg = f"unknown reporter plugin: {spec.name!r}"
     raise UserError(msg)

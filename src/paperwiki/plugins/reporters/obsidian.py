@@ -298,6 +298,7 @@ class ObsidianReporter:
         wiki_topic_strength_threshold: float = 0.3,
         topic_strength_threshold: float = 0.3,
         callouts: bool = True,
+        templater: bool = False,
     ) -> None:
         # ``topic_strength_threshold`` (Task 9.28 / D-9.28.1) gates the
         # digest callout's ``Matched topics`` wikilinks. Default 0.3
@@ -317,6 +318,7 @@ class ObsidianReporter:
         self.wiki_topic_strength_threshold = wiki_topic_strength_threshold
         self.topic_strength_threshold = topic_strength_threshold
         self.callouts = callouts
+        self.templater = templater
 
     async def emit(
         self,
@@ -355,6 +357,7 @@ class ObsidianReporter:
             backend = MarkdownWikiBackend(
                 vault_path=self.vault_path,
                 callouts=self.callouts,
+                templater=self.templater,
             )
             async with acquire_vault_lock(self.vault_path):
                 for rec in recs:

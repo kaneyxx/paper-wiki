@@ -496,6 +496,39 @@ class TestUpsertConcept:
         assert "## Abstract" in body
         assert "> [!abstract]" not in body
 
+    async def test_templater_default_off_means_no_templater_syntax(
+        self, tmp_path: Path
+    ) -> None:
+        """Per task 9.164: Templater is opt-in. Default-off output must not
+        contain raw ``<%`` or ``<%*`` substrings — non-Templater users would
+        see them as literal noise."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        assert "<%" not in body, "Templater syntax leaked into default output"
+        assert "<%*" not in body
+
+    async def test_templater_on_adds_template_block_in_notes(
+        self, tmp_path: Path
+    ) -> None:
+        """Per task 9.164 acceptance: when ``templater=True``, the Notes
+        section carries a Templater date/file variable wrapped in
+        ``<%* %>`` blocks."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path, templater=True)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Strip frontmatter so we look at the body proper.
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+        # Notes section carries a Templater expression — at minimum a date
+        # variable so the user gets a live "last edited" stamp.
+        assert "## Notes" in body
+        assert "<%" in body, "Templater flag must inject at least one <% ... %> block"
+        # ``tp.file.last_modified_date`` is the canonical Templater date helper.
+        assert "tp.file" in body or "tp.date" in body
+
     async def test_concept_carries_obsidian_properties_block(self, tmp_path: Path) -> None:
         """Per task 9.161 / **D-D**: synthesized concept articles also carry
         the canonical six-field Properties block."""

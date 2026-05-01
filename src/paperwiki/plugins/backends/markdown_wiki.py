@@ -155,10 +155,12 @@ class MarkdownWikiBackend:
         *,
         wiki_subdir: str = WIKI_SUBDIR,
         callouts: bool = True,
+        templater: bool = False,
     ) -> None:
         self.vault_path = vault_path
         self.wiki_root = vault_path / wiki_subdir
         self.callouts = callouts
+        self.templater = templater
 
     # ------------------------------------------------------------------
     # WikiBackend protocol methods
@@ -233,7 +235,11 @@ class MarkdownWikiBackend:
             "last_synthesized": now.strftime("%Y-%m-%d"),
         }
 
-        body = self._default_source_body(rec, callouts=self.callouts)
+        body = self._default_source_body(
+            rec,
+            callouts=self.callouts,
+            templater=self.templater,
+        )
         path = self._source_path(paper.canonical_id)
         await self._write_markdown(path, frontmatter, body)
         return path
@@ -384,7 +390,12 @@ class MarkdownWikiBackend:
         return self.wiki_root / _CONCEPTS_DIRNAME / f"{_concept_name_to_filename(name)}.md"
 
     @staticmethod
-    def _default_source_body(rec: Recommendation, *, callouts: bool = True) -> str:
+    def _default_source_body(
+        rec: Recommendation,
+        *,
+        callouts: bool = True,
+        templater: bool = False,
+    ) -> str:
         """Render the section-organized body for a fresh source stub.
 
         The five sections are stable so SKILLs (analyze, wiki-ingest,
@@ -396,6 +407,12 @@ class MarkdownWikiBackend:
         Abstract section uses an Obsidian ``> [!abstract] Abstract``
         callout; when ``False``, falls back to ``## Abstract`` for
         plain-Markdown export.
+
+        ``templater`` (task 9.164): when ``True``, the Notes section is
+        stamped with a Templater ``<%* tp.file.last_modified_date(...) %>``
+        block so the user gets a live "last edited" timestamp every time
+        Obsidian re-renders the file. Default-off because non-Templater
+        users would see ``<%* %>`` as literal text.
         """
         paper = rec.paper
         score = rec.score
@@ -415,6 +432,16 @@ class MarkdownWikiBackend:
             abstract_section = f"> [!abstract] Abstract\n{quoted}\n"
         else:
             abstract_section = f"## Abstract\n\n{abstract_text}\n"
+
+        # Per task 9.164: when ``templater=True``, prepend a Templater
+        # ``<%* %>`` block to the Notes section so the user gets a live
+        # "last edited" stamp via ``tp.file.last_modified_date``. Off by
+        # default — non-Templater users would see this as literal text.
+        notes_templater_stamp = (
+            ("\n_Last edit: <%* tR += tp.file.last_modified_date('YYYY-MM-DD HH:mm') %>_\n\n")
+            if templater
+            else ""
+        )
 
         return (
             f"# {paper.title}\n"
@@ -446,8 +473,7 @@ class MarkdownWikiBackend:
             f"{paper.canonical_id}` to download the arXiv source tarball "
             "and embed real paper figures here._\n"
             "\n"
-            "## Notes\n"
-            "\n"
+            "## Notes\n" + notes_templater_stamp + "\n"
             "_Your annotations and follow-up questions go here. Survives "
             "re-ingest because SKILLs only rewrite the sections above._\n"
         )
