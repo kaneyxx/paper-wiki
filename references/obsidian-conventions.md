@@ -151,6 +151,47 @@ ignore the sidecar entirely.
 
 ---
 
+## 4.5 `<vault>/.paperwiki/` private state (task 9.167 / **D-O**)
+
+paper-wiki keeps every piece of vault-bound mutable state under a
+single hidden namespace at `<vault>/.paperwiki/`:
+
+| Path                             | Owner                  | Purpose |
+|----------------------------------|------------------------|---------|
+| `run-status.jsonl`               | digest runner (9.167)  | Append-only ledger; one JSONL line per digest run with source counts, filter drops, final paper count, elapsed_ms, optional error class/message. |
+| `dedup-ledger.jsonl`             | dedup filter (9.168)   | Anti-repetition memory; vault-global per **D-M**. |
+| `properties-migration-backup/`   | migrate-properties     | SHA-256 manifest backup before frontmatter rewrites. |
+| `migration-backup/`              | migrate-v04            | SHA-256 manifest backup before typed-subdir migration. |
+
+The leading dot is the same trick the `.graph/` sidecar uses —
+Obsidian skips dotfiles during indexing, so the namespace is invisible
+in the note pane, search, graph view, and tag pane.
+
+### Why the vault, not `~/.config/paperwiki`?
+
+Per **D-O**, vault-bound state means cross-machine sync (Obsidian Sync,
+Syncthing, Git) carries the history with the vault. A user who opens
+their vault on a fresh machine still sees:
+
+- Their dedup history (no re-recommended papers).
+- Their run-status ledger (audit trail across the move).
+- Their migration backups (rollback path stays intact).
+
+Storing this in `~/` would strand history on whichever machine ran
+the digest.
+
+### Inspecting the run-status ledger
+
+```bash
+paperwiki status --vault ~/Documents/MyVault
+```
+
+prints the last 5 rows after the install-health section. The full
+JSONL is yours to grep / `jq` / pipe into Dataview if you want a
+custom view.
+
+---
+
 ## 5. Image embeds (task 9.165)
 
 `/paper-wiki:extract-images` pulls figures from arXiv source tarballs

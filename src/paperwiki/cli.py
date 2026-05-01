@@ -744,6 +744,17 @@ def status(
             "(opt-in; default exits 0 regardless).",
         ),
     ] = False,
+    vault: Annotated[
+        Path | None,
+        typer.Option(
+            "--vault",
+            help=(
+                "Path to an Obsidian vault. When given, surface the last 5 "
+                "rows of <vault>/.paperwiki/run-status.jsonl after the "
+                "install-health section (task 9.167 / D-O)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Print a 3-line state report (cache / marketplace / enabledPlugins)."""
     configure_runner_logging(verbose=verbose)
@@ -794,12 +805,46 @@ def status(
         else:
             typer.echo(f"  ✗ {label}  (action: {hint})")
 
+    # v0.4.x task 9.167 / D-O: opt-in run-status section. When the user
+    # passes --vault, surface the last 5 rows from
+    # ``<vault>/.paperwiki/run-status.jsonl`` so they can audit recent
+    # digest outcomes (success counts, source errors, schema failures)
+    # without grepping JSONL by hand. The flag is opt-in because most
+    # status invocations are about plugin install state, not vault state;
+    # automation that pipes status output without --vault is unaffected.
+    if vault is not None:
+        _emit_run_status_section(vault.expanduser())
+
     # v0.3.41 D-9.41.2: opt-in strict mode flips exit code to 1 when any
     # health row is ✗. Default (no --strict) preserves the v0.3.40 D-9.40.1
     # warn-not-error contract — automation that pipes status output without
     # the flag is unaffected.
     if strict and healthy < len(health_rows):
         raise typer.Exit(1)
+
+
+def _emit_run_status_section(vault_path: Path) -> None:
+    """Print the last 5 run-status ledger rows for ``vault_path``.
+
+    Friendly fallback when the ledger doesn't exist yet — fresh-install
+    vaults haven't run a digest, and that should not look like an error.
+    """
+    from paperwiki._internal.run_status import read_recent_run_status
+
+    typer.echo(f"recent runs      : {vault_path / '.paperwiki' / 'run-status.jsonl'}")
+    entries = read_recent_run_status(vault_path, limit=5)
+    if not entries:
+        typer.echo("  (no runs recorded yet)")
+        return
+    for entry in entries:
+        when = entry.timestamp.strftime("%Y-%m-%d %H:%M")
+        if entry.error_class is not None:
+            typer.echo(f"  ✗ {when}  {entry.recipe}  ({entry.error_class}: {entry.error_message})")
+        else:
+            typer.echo(
+                f"  ✓ {when}  {entry.recipe}  "
+                f"final={entry.final_count} elapsed={entry.elapsed_ms}ms"
+            )
 
 
 # v0.3.43 D-9.43.3: install-health logic moved to
