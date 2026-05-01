@@ -496,9 +496,7 @@ class TestUpsertConcept:
         assert "## Abstract" in body
         assert "> [!abstract]" not in body
 
-    async def test_templater_default_off_means_no_templater_syntax(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_templater_default_off_means_no_templater_syntax(self, tmp_path: Path) -> None:
         """Per task 9.164: Templater is opt-in. Default-off output must not
         contain raw ``<%`` or ``<%*`` substrings — non-Templater users would
         see them as literal noise."""
@@ -509,9 +507,7 @@ class TestUpsertConcept:
         assert "<%" not in body, "Templater syntax leaked into default output"
         assert "<%*" not in body
 
-    async def test_templater_on_adds_template_block_in_notes(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_templater_on_adds_template_block_in_notes(self, tmp_path: Path) -> None:
         """Per task 9.164 acceptance: when ``templater=True``, the Notes
         section carries a Templater date/file variable wrapped in
         ``<%* %>`` blocks."""
