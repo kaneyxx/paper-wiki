@@ -65,6 +65,7 @@ from paperwiki.runners.gc_dedup_ledger import main as _gc_dedup_ledger_main
 from paperwiki.runners.gc_digest_archive import main as _gc_archive_main
 from paperwiki.runners.migrate_recipe import main as _migrate_recipe_main
 from paperwiki.runners.migrate_sources import main as _migrate_sources_main
+from paperwiki.runners.recipe_validate import main as _recipe_validate_main
 from paperwiki.runners.uninstall import (
     UninstallOpts,
 )
@@ -111,6 +112,7 @@ app = typer.Typer(
 # Typer app for ``python -m paperwiki.runners.<name>`` invocation; this file
 # only re-uses the ``main`` callable as a parent-app command.
 app.command(name="migrate-recipe")(_migrate_recipe_main)
+app.command(name="recipe-validate")(_recipe_validate_main)
 app.command(name="digest")(_digest_main)
 app.command(name="wiki-ingest")(_wiki_ingest_main)
 app.command(name="wiki-lint")(_wiki_lint_main)

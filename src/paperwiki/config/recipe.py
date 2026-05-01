@@ -128,7 +128,14 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        msg = f"{path} is not valid YAML: {exc}"
+        # Task 9.170: surface line/column from yaml.MarkedYAMLError so
+        # editors can jump to the offending bracket / colon / indent.
+        location = ""
+        problem_mark = getattr(exc, "problem_mark", None)
+        if problem_mark is not None:
+            location = f" at line {problem_mark.line + 1}, column {problem_mark.column + 1}"
+        problem = getattr(exc, "problem", None) or str(exc)
+        msg = f"{path} is not valid YAML{location}: {problem}"
         raise UserError(msg) from exc
 
     if data is None:
@@ -137,6 +144,34 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
         msg = f"{path} must be a YAML mapping at top level"
         raise UserError(msg)
     return data
+
+
+def _format_validation_error(path: Path, exc: ValidationError) -> str:
+    """Render a Pydantic ValidationError into a recipe-author-friendly listing.
+
+    Each error becomes one line of the form
+    ``<dotted.field.path>: <reason> (got <repr>)`` so the user sees
+    exactly which field to fix. Nested list items use bracket notation
+    (``scorer.config.weights.relevance``, ``sources[0].config``).
+    """
+    lines: list[str] = [f"recipe {path} has invalid schema:"]
+    for error in exc.errors():
+        loc_parts: list[str] = []
+        for piece in error["loc"]:
+            if isinstance(piece, int):
+                loc_parts.append(f"[{piece}]")
+            elif loc_parts:
+                loc_parts.append(f".{piece}")
+            else:
+                loc_parts.append(str(piece))
+        loc = "".join(loc_parts) or "<root>"
+        message = error["msg"]
+        got = error.get("input")
+        suffix = ""
+        if got is not None and not isinstance(got, dict | list):
+            suffix = f" (got {got!r})"
+        lines.append(f"  - {loc}: {message}{suffix}")
+    return "\n".join(lines)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -184,7 +219,10 @@ def load_recipe(path: Path) -> RecipeSchema:
     try:
         return RecipeSchema.model_validate(merged)
     except ValidationError as exc:
-        msg = f"recipe {path} has invalid schema: {exc}"
+        # Task 9.170: render an actionable per-error listing so the
+        # recipe author sees exactly which field to fix instead of
+        # the opaque Pydantic dump.
+        msg = _format_validation_error(path, exc)
         raise UserError(msg) from exc
 
 
