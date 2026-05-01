@@ -39,13 +39,19 @@ PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 # ---------------------------------------------------------------------------
 SHIM_DIR="$HOME/.local/bin"
 SHIM_PATH="$SHIM_DIR/paperwiki"
-EXPECTED_TAG="# paperwiki shim — v0.3.44 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+# Version derives from $PLUGIN_VERSION (computed at line ~30 from
+# src/paperwiki/__init__.py). Single source of truth — no version
+# string is hardcoded in this file. The shim body uses
+# ``@PAPERWIKI_VERSION@`` as a template placeholder; sed substitutes
+# it as we write the file (the heredoc is quoted to preserve the
+# shim's literal $VENV_DIR / $LATEST shell vars otherwise).
+EXPECTED_TAG="# paperwiki shim — v${PLUGIN_VERSION} (shared venv + self-bootstrap + PYTHONPATH fallback)."
 
 mkdir -p "$SHIM_DIR"
 if ! [ -f "$SHIM_PATH" ] || ! grep -qF "$EXPECTED_TAG" "$SHIM_PATH" 2>/dev/null; then
-  cat > "$SHIM_PATH" <<'SHIM_EOF'
+  sed "s|@PAPERWIKI_VERSION@|${PLUGIN_VERSION}|g" > "$SHIM_PATH" <<'SHIM_EOF'
 #!/usr/bin/env bash
-# paperwiki shim — v0.3.44 (shared venv + self-bootstrap + PYTHONPATH fallback).
+# paperwiki shim — v@PAPERWIKI_VERSION@ (shared venv + self-bootstrap + PYTHONPATH fallback).
 set -euo pipefail
 CACHE_ROOT="$HOME/.claude/plugins/cache/paper-wiki/paper-wiki"
 PAPERWIKI_HOME_RESOLVED="${PAPERWIKI_HOME:-${PAPERWIKI_CONFIG_DIR:-$HOME/.config/paper-wiki}}"
@@ -95,13 +101,19 @@ esac
 # ---------------------------------------------------------------------------
 HELPER_DIR="$HOME/.local/lib/paperwiki"
 HELPER_PATH="$HELPER_DIR/bash-helpers.sh"
-EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v0.3.44 (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
+# Same template-substitution pattern as the shim above:
+# ``lib/bash-helpers.sh`` is shipped with ``@PAPERWIKI_VERSION@``
+# placeholders (line 1 tag + ``_PAPERWIKI_HELPER_VERSION``); we sed
+# them to ``$PLUGIN_VERSION`` as we copy the file out. The grep guard
+# below uses the substituted form so the v(N+1) ensure-env.sh
+# correctly invalidates a v(N) helper on disk.
+EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v${PLUGIN_VERSION} (PATH guard + CLAUDE_PLUGIN_ROOT resolver)."
 
 if ! mkdir -p "$HELPER_DIR" 2>/dev/null; then
   echo "paperwiki: warning: $HELPER_DIR is not writable; bash-helpers not installed." >&2
   echo "  SKILLs that source the helper will emit a restart-Claude-Code error." >&2
 elif ! [ -f "$HELPER_PATH" ] || ! grep -qF "$EXPECTED_HELPER_TAG" "$HELPER_PATH" 2>/dev/null; then
-  if cat "$PLUGIN_ROOT/lib/bash-helpers.sh" > "$HELPER_PATH" 2>/dev/null; then
+  if sed "s|@PAPERWIKI_VERSION@|${PLUGIN_VERSION}|g" "$PLUGIN_ROOT/lib/bash-helpers.sh" > "$HELPER_PATH" 2>/dev/null; then
     chmod 644 "$HELPER_PATH" 2>/dev/null || true
   else
     echo "paperwiki: warning: failed to write $HELPER_PATH" >&2

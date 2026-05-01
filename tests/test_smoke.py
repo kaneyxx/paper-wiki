@@ -70,6 +70,81 @@ def test_pyproject_version_matches_package() -> None:
     )
 
 
+def test_shell_artifacts_use_version_placeholder() -> None:
+    """Shell artifacts derive version from ``paperwiki.__version__`` — no hardcode.
+
+    v0.4.0 release-gate found that ``hooks/ensure-env.sh`` and
+    ``lib/bash-helpers.sh`` both pinned ``v0.3.44`` literally in
+    five structural places. The hook's idempotency check is
+    ``grep -qF "$EXPECTED_TAG" "$SHIM_PATH"`` — a literal v(N) tag
+    in v(N+1)'s ensure-env.sh matched the existing v(N) shim/helper,
+    silently skipped the rewrite, and pinned the user to v(N) forever.
+
+    This test pins the v0.4.1 fix:
+
+    * ``lib/bash-helpers.sh`` is a TEMPLATE — its tag comment and
+      ``_PAPERWIKI_HELPER_VERSION`` constant use ``@PAPERWIKI_VERSION@``
+      placeholder. ``ensure-env.sh`` substitutes at write time.
+    * ``hooks/ensure-env.sh`` derives every grep guard and heredoc
+      from ``$PLUGIN_VERSION`` (computed from ``__init__.py``).
+
+    A future regression that re-introduces a literal ``v0.3.44`` (or
+    any literal SemVer) in either structural location fails CI rather
+    than slipping into a release.
+    """
+    helper_template = (REPO_ROOT / "lib" / "bash-helpers.sh").read_text(encoding="utf-8")
+
+    # Helper file line 1 must be the placeholder template, never a literal version.
+    first_line = helper_template.splitlines()[0]
+    assert "@PAPERWIKI_VERSION@" in first_line, (
+        f"lib/bash-helpers.sh first line must use @PAPERWIKI_VERSION@ "
+        f"placeholder; got: {first_line!r}"
+    )
+    assert not re.search(r"v\d+\.\d+\.\d+", first_line), (
+        f"lib/bash-helpers.sh first line must not pin a literal SemVer; got: {first_line!r}"
+    )
+
+    # Helper version constant must use the placeholder.
+    assert '_PAPERWIKI_HELPER_VERSION="@PAPERWIKI_VERSION@"' in helper_template, (
+        "lib/bash-helpers.sh must declare "
+        '_PAPERWIKI_HELPER_VERSION="@PAPERWIKI_VERSION@" — sed substitution '
+        "is the only place a literal version is written."
+    )
+    assert not re.search(r'_PAPERWIKI_HELPER_VERSION="\d+\.\d+\.\d+"', helper_template), (
+        "lib/bash-helpers.sh must not hardcode a literal version in "
+        "_PAPERWIKI_HELPER_VERSION (use the placeholder instead)."
+    )
+
+    ensure_env = (REPO_ROOT / "hooks" / "ensure-env.sh").read_text(encoding="utf-8")
+
+    # ensure-env.sh tag-grep guards must derive from $PLUGIN_VERSION.
+    assert 'EXPECTED_TAG="# paperwiki shim — v${PLUGIN_VERSION}' in ensure_env, (
+        "hooks/ensure-env.sh EXPECTED_TAG must derive from $PLUGIN_VERSION "
+        "(otherwise grep -qF idempotency check pins forever)."
+    )
+    assert 'EXPECTED_HELPER_TAG="# paperwiki bash-helpers — v${PLUGIN_VERSION}' in ensure_env, (
+        "hooks/ensure-env.sh EXPECTED_HELPER_TAG must derive from "
+        "$PLUGIN_VERSION (otherwise helper rewrite is skipped on upgrade)."
+    )
+
+    # ensure-env.sh must NOT contain any literal `v0.X.Y` tag patterns
+    # outside of historical comment references. Scan the structural lines
+    # only — i.e., assignment lines and heredoc tag comments.
+    for line_no, line in enumerate(ensure_env.splitlines(), start=1):
+        is_tag_assignment = line.startswith("EXPECTED_TAG=") or line.startswith(
+            "EXPECTED_HELPER_TAG="
+        )
+        is_heredoc_tag = line.startswith("# paperwiki shim —") or line.startswith(
+            "# paperwiki bash-helpers —"
+        )
+        if is_tag_assignment or is_heredoc_tag:
+            assert not re.search(r"v\d+\.\d+\.\d+", line), (
+                f"hooks/ensure-env.sh line {line_no} must not pin a literal "
+                f"SemVer; use $PLUGIN_VERSION or @PAPERWIKI_VERSION@. "
+                f"Got: {line!r}"
+            )
+
+
 def test_marketplace_manifest_lists_paper_wiki() -> None:
     """``.claude-plugin/marketplace.json`` exposes paper-wiki as an installable plugin."""
     manifest = REPO_ROOT / ".claude-plugin" / "marketplace.json"
@@ -130,17 +205,20 @@ def test_ensure_env_script_is_executable() -> None:
 def test_bash_helpers_present_with_v0_3_38_tag() -> None:
     """v0.3.38 D-9.38.1: ``lib/bash-helpers.sh`` ships in the repo.
 
-    Pins the helper file's existence, the v0.3.44 tag line (so a release
-    that bumps version files but forgets the helper tag fails here),
-    and the three documented public function names. Behavioral tests
-    live in ``tests/unit/test_bash_helpers.py``.
+    Pins the helper file's existence, the placeholder tag line (the
+    v0.4.1 fix replaces the literal version with @PAPERWIKI_VERSION@
+    so ``ensure-env.sh`` can substitute at write time — see
+    ``test_shell_artifacts_use_version_placeholder``), and the four
+    documented public function names. Behavioral tests live in
+    ``tests/unit/test_bash_helpers.py``.
     """
     helper = REPO_ROOT / "lib" / "bash-helpers.sh"
     assert helper.is_file(), f"missing helper at {helper}"
 
     body = helper.read_text(encoding="utf-8")
-    assert "# paperwiki bash-helpers — v0.3.44" in body, (
-        "helper must carry the v0.3.44 version tag line"
+    assert "# paperwiki bash-helpers — v@PAPERWIKI_VERSION@" in body, (
+        "helper must carry the @PAPERWIKI_VERSION@ template tag line "
+        "(literal SemVer would break the ensure-env.sh idempotency check)"
     )
 
     for fn_name in (
@@ -1539,19 +1617,31 @@ def test_pyproject_declares_paperwiki_console_script() -> None:
 
 
 def test_ensure_env_contains_shim_tag() -> None:
-    """Static pin: hooks/ensure-env.sh must contain the shim tag line.
+    """Static pin: hooks/ensure-env.sh emits the shim tag — derived form.
 
     This check ensures that future edits cannot silently remove the shim
-    emission block from ensure-env.sh without a test failure.
+    emission block from ensure-env.sh without a test failure. Post-v0.4.1
+    the tag derives from $PLUGIN_VERSION; the heredoc body uses the
+    @PAPERWIKI_VERSION@ placeholder substituted by sed at write time.
     """
     script = REPO_ROOT / "hooks" / "ensure-env.sh"
     body = script.read_text(encoding="utf-8")
-    expected_tag = (
-        "# paperwiki shim — v0.3.44 (shared venv + self-bootstrap + PYTHONPATH fallback)."
+    # EXPECTED_TAG must derive from $PLUGIN_VERSION (grep guard side).
+    assert (
+        'EXPECTED_TAG="# paperwiki shim — v${PLUGIN_VERSION} '
+        "(shared venv + self-bootstrap + PYTHONPATH fallback)." in body
+    ), (
+        "hooks/ensure-env.sh must define EXPECTED_TAG using $PLUGIN_VERSION "
+        "so the grep -qF idempotency check correctly invalidates an older "
+        "shim on upgrade (v0.4.0 hot-fix lesson)."
     )
-    assert expected_tag in body, (
-        "hooks/ensure-env.sh must contain the v0.3.44 shim tag line so "
-        "old shims get overwritten on first SessionStart after upgrade"
+    # Heredoc body must carry the placeholder (substituted by sed at write time).
+    assert (
+        "# paperwiki shim — v@PAPERWIKI_VERSION@ "
+        "(shared venv + self-bootstrap + PYTHONPATH fallback)." in body
+    ), (
+        "hooks/ensure-env.sh shim heredoc must use @PAPERWIKI_VERSION@ "
+        "placeholder; literal SemVer would re-introduce the v0.4.0 bug."
     )
 
 
@@ -1713,9 +1803,18 @@ def test_ensure_env_shim_integration(tmp_path: Path) -> None:
     assert os.access(shim, os.X_OK), "shim must be executable"
 
     body = shim.read_text(encoding="utf-8")
+    # ``_setup_v0329_idempotent_state`` writes ``__version__ = "0.0.1"`` to
+    # the fake plugin_root. ensure-env.sh extracts that value into
+    # $PLUGIN_VERSION and sed-substitutes it into the heredoc, so the
+    # written shim must carry the substituted ``v0.0.1`` (proving the
+    # whole derivation pipeline works end to end — placeholder is gone).
     assert (
-        "paperwiki shim — v0.3.44 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
-    ), "shim must contain the v0.3.44 expected tag line"
+        "paperwiki shim — v0.0.1 (shared venv + self-bootstrap + PYTHONPATH fallback)." in body
+    ), "shim must carry the substituted v0.0.1 tag derived from $PLUGIN_VERSION"
+    assert "@PAPERWIKI_VERSION@" not in body, (
+        "shim must not still contain the @PAPERWIKI_VERSION@ placeholder "
+        "after sed substitution (v0.4.1 derivation pipeline broken)"
+    )
 
 
 def test_ensure_env_shim_is_idempotent(tmp_path: Path) -> None:
