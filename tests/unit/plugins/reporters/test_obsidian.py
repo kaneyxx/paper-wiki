@@ -193,6 +193,53 @@ class TestRenderObsidianDigest:
         )
 
 
+class TestObsidianDigestObsidianProperties:
+    """Task 9.161 / **D-D**: Obsidian digest frontmatter carries the
+    canonical six-field Properties block alongside the existing keys.
+    """
+
+    def _frontmatter(self, body: str) -> dict[str, object]:
+        import yaml
+
+        assert body.startswith("---\n")
+        end = body.index("\n---\n", 4)
+        parsed = yaml.safe_load(body[4:end])
+        assert isinstance(parsed, dict)
+        return parsed
+
+    def test_frontmatter_includes_all_six_properties_fields(self) -> None:
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        for key in ("tags", "aliases", "status", "cssclasses", "created", "updated"):
+            assert key in fm, f"missing Properties field: {key}"
+
+    def test_tags_normalized_and_includes_obsidian_marker(self) -> None:
+        """Properties tags are lowercased + nested-tag-friendly; obsidian
+        reporter still ships its own ``obsidian`` tag for graph-view filtering."""
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert isinstance(fm["tags"], list)
+        assert "obsidian" in fm["tags"]
+
+    def test_created_and_updated_are_iso8601_with_timezone(self) -> None:
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 30, 45, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert fm["created"] == "2026-05-01T12:30:45+00:00"
+        assert fm["updated"] == "2026-05-01T12:30:45+00:00"
+
+
 # ---------------------------------------------------------------------------
 # ObsidianReporter (file output)
 # ---------------------------------------------------------------------------

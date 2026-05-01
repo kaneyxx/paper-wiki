@@ -19,14 +19,16 @@ naturally.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import aiofiles
+import yaml
 
-from paperwiki import __version__
 from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki.config.layout import DAILY_SUBDIR
 from paperwiki.core.errors import UserError
+from paperwiki.plugins.reporters.markdown import _digest_frontmatter_payload
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,6 +62,7 @@ def render_obsidian_digest(
     *,
     vault_path: Path | None = None,
     topic_strength_threshold: float = 0.3,
+    now: datetime | None = None,
 ) -> str:
     """Render an Obsidian-flavored Markdown digest string.
 
@@ -78,11 +81,16 @@ def render_obsidian_digest(
     Backward-compatible: when ``topic_strengths`` is missing (legacy
     data, hand-built fixtures, non-composite scorers), all matched
     topics are retained.
+
+    ``now`` is the timestamp written to the v0.4.x Obsidian Properties
+    ``created`` / ``updated`` fields (task 9.161). Defaults to
+    ``datetime.now(UTC)``; tests pin it for byte-stable snapshots.
     """
     target_date = ctx.target_date.strftime("%Y-%m-%d")
+    when = now if now is not None else datetime.now(UTC)
 
     parts: list[str] = []
-    parts.append(_render_frontmatter(target_date, len(recommendations)))
+    parts.append(_render_frontmatter(target_date, len(recommendations), when=when))
     parts.append(f"# Paper Digest — {target_date}\n")
 
     if not recommendations:
@@ -112,18 +120,28 @@ def _render_overview_callout() -> str:
     return "> [!summary] Today's Overview\n> <!-- paper-wiki:overview-slot -->\n"
 
 
-def _render_frontmatter(target_date: str, count: int) -> str:
-    return (
-        "---\n"
-        f'date: "{target_date}"\n'
-        f'generated_by: "paper-wiki/{__version__}"\n'
-        f"recommendations: {count}\n"
-        "tags:\n"
-        "  - paper-digest\n"
-        "  - paper-wiki\n"
-        "  - obsidian\n"
-        "---\n"
+def _render_frontmatter(target_date: str, count: int, *, when: datetime) -> str:
+    """Build the Obsidian-flavored digest frontmatter.
+
+    Reuses the shared payload helper from
+    :mod:`paperwiki.plugins.reporters.markdown` so both reporters carry
+    the v0.4.x Obsidian Properties block (task 9.161 / **D-D**); the
+    Obsidian reporter additionally tags the digest with ``"obsidian"``
+    so users can filter generated digests in graph view.
+    """
+    payload = _digest_frontmatter_payload(
+        target_date,
+        count,
+        when=when,
+        extra_tags=("obsidian",),
     )
+    body = yaml.safe_dump(
+        payload,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+    return f"---\n{body}---\n"
 
 
 def _render_recommendation(

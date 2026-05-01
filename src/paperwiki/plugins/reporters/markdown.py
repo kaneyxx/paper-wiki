@@ -1,9 +1,11 @@
 """Markdown reporter — write a digest of recommendations to a file.
 
 The output is a single Markdown file with YAML frontmatter (date,
-generator metadata, count, tags) followed by one section per
-recommendation. The format is intentionally vault-agnostic: any tool
-that accepts standard Markdown will display it cleanly.
+generator metadata, count, tags + the v0.4.x **D-D** Obsidian
+Properties block) followed by one section per recommendation. The
+format is intentionally vault-agnostic: any tool that accepts standard
+Markdown will display it cleanly, while Obsidian's Properties pane
+parses the Properties fields as first-class.
 
 For Obsidian-flavored output (wikilinks, additional metadata),
 see :mod:`paperwiki.plugins.reporters.obsidian`.
@@ -11,12 +13,15 @@ see :mod:`paperwiki.plugins.reporters.obsidian`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import aiofiles
+import yaml
 
 from paperwiki import __version__
 from paperwiki.core.errors import UserError
+from paperwiki.core.properties import build_properties_block
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,16 +32,23 @@ if TYPE_CHECKING:
 def render_markdown_digest(
     recommendations: list[Recommendation],
     ctx: RunContext,
+    *,
+    now: datetime | None = None,
 ) -> str:
     """Render the list of recommendations as a Markdown digest string.
 
     Pure function — separates rendering from file I/O so tests can
     snapshot the body without touching disk.
+
+    ``now`` is the timestamp written to the Obsidian Properties
+    ``created`` / ``updated`` fields. Defaults to ``datetime.now(UTC)``;
+    tests inject a fixed value for byte-stable snapshots.
     """
     target_date = ctx.target_date.strftime("%Y-%m-%d")
+    when = now if now is not None else datetime.now(UTC)
 
     parts: list[str] = []
-    parts.append(_render_frontmatter(target_date, len(recommendations)))
+    parts.append(_render_frontmatter(target_date, len(recommendations), when=when))
     parts.append(f"# Paper Digest — {target_date}\n")
 
     if not recommendations:
@@ -53,17 +65,42 @@ def render_markdown_digest(
     return "\n".join(parts)
 
 
-def _render_frontmatter(target_date: str, count: int) -> str:
-    return (
-        "---\n"
-        f'date: "{target_date}"\n'
-        f'generated_by: "paper-wiki/{__version__}"\n'
-        f"recommendations: {count}\n"
-        "tags:\n"
-        "  - paper-digest\n"
-        "  - paper-wiki\n"
-        "---\n"
+def _digest_frontmatter_payload(
+    target_date: str,
+    count: int,
+    *,
+    when: datetime,
+    extra_tags: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Build the frontmatter dict shared by markdown + obsidian reporters.
+
+    Layers the Obsidian Properties block over the legacy digest keys
+    (``date`` / ``generated_by`` / ``recommendations``). Reporter-specific
+    tags layer in via ``extra_tags`` (the Obsidian reporter adds
+    ``"obsidian"`` so users can filter generated digests in graph view).
+    """
+    properties = build_properties_block(
+        when=when,
+        tags=["paper-digest", "paper-wiki", *extra_tags],
+        aliases=[],
     )
+    return {
+        "date": target_date,
+        "generated_by": f"paper-wiki/{__version__}",
+        "recommendations": count,
+        **properties,
+    }
+
+
+def _render_frontmatter(target_date: str, count: int, *, when: datetime) -> str:
+    payload = _digest_frontmatter_payload(target_date, count, when=when)
+    body = yaml.safe_dump(
+        payload,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+    return f"---\n{body}---\n"
 
 
 def _render_recommendation(index: int, rec: Recommendation) -> str:

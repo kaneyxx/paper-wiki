@@ -67,11 +67,16 @@ def _make_ctx() -> RunContext:
 
 class TestRenderMarkdownDigest:
     def test_includes_frontmatter(self) -> None:
+        import yaml
+
         body = render_markdown_digest([_make_recommendation()], _make_ctx())
         assert body.startswith("---\n")
-        assert 'date: "2026-04-25"' in body
-        assert "generated_by:" in body
-        assert "recommendations: 1" in body
+        end = body.index("\n---\n", 4)
+        fm = yaml.safe_load(body[4:end])
+        assert isinstance(fm, dict)
+        assert fm["date"] == "2026-04-25"
+        assert "paper-wiki/" in str(fm["generated_by"])
+        assert fm["recommendations"] == 1
 
     def test_includes_top_level_heading_with_target_date(self) -> None:
         body = render_markdown_digest([_make_recommendation()], _make_ctx())
@@ -127,6 +132,72 @@ class TestRenderMarkdownDigest:
         rec = _make_recommendation(citation_count=None)
         body = render_markdown_digest([rec], _make_ctx())
         assert "Citations" not in body or "—" in body  # gracefully degrade
+
+
+class TestMarkdownDigestObsidianProperties:
+    """Task 9.161 / **D-D**: digest frontmatter must carry the canonical
+    six-field Obsidian Properties block alongside the existing
+    ``date`` / ``generated_by`` / ``recommendations`` keys.
+    """
+
+    def _frontmatter(self, body: str) -> dict[str, object]:
+        import yaml
+
+        assert body.startswith("---\n")
+        end = body.index("\n---\n", 4)
+        parsed = yaml.safe_load(body[4:end])
+        assert isinstance(parsed, dict)
+        return parsed
+
+    def test_frontmatter_includes_all_six_properties_fields(self) -> None:
+        body = render_markdown_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert "tags" in fm
+        assert "aliases" in fm
+        assert "status" in fm
+        assert "cssclasses" in fm
+        assert "created" in fm
+        assert "updated" in fm
+
+    def test_property_field_yaml_types(self) -> None:
+        body = render_markdown_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert isinstance(fm["tags"], list)
+        assert isinstance(fm["aliases"], list)
+        assert isinstance(fm["status"], str)
+        assert isinstance(fm["cssclasses"], list)
+        assert isinstance(fm["created"], str)
+        assert isinstance(fm["updated"], str)
+
+    def test_created_and_updated_are_iso8601_with_timezone(self) -> None:
+        body = render_markdown_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 30, 45, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert fm["created"] == "2026-05-01T12:30:45+00:00"
+        assert fm["updated"] == "2026-05-01T12:30:45+00:00"
+
+    def test_existing_legacy_keys_preserved(self) -> None:
+        """No regression on ``date`` / ``generated_by`` / ``recommendations``."""
+        body = render_markdown_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert fm["date"] == "2026-04-25"
+        assert "paper-wiki/" in str(fm["generated_by"])
+        assert fm["recommendations"] == 1
 
 
 # ---------------------------------------------------------------------------
