@@ -51,6 +51,31 @@ class PluginSpec(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class ObsidianFlags(BaseModel):
+    """Vault-wide Obsidian rendering switches (task 9.162, decision **D-N**).
+
+    These flags are applied uniformly across all reporters and backends so
+    a vault stays internally consistent — turning off ``callouts`` for
+    one slot and leaving it on for another would create jarring style
+    drift in the user's vault.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ``> [!abstract]`` / ``> [!note]`` / ``> [!warning]`` callouts in
+    # digest + analyze output (per **D-N**, default-on; the
+    # ``sources-only`` recipe ships with this off so plain-Markdown
+    # consumers don't see Obsidian-only syntax).
+    callouts: bool = True
+
+
+# Defaults file shipped with the plugin / co-located with user recipes.
+# Per **D-N**, ``recipes/_defaults.yaml`` carries vault-wide overrides
+# that apply to every recipe in the same directory; per-recipe values
+# always win.
+DEFAULTS_FILENAME = "_defaults.yaml"
+
+
 class RecipeSchema(BaseModel):
     """Top-level recipe definition.
 
@@ -75,28 +100,78 @@ class RecipeSchema(BaseModel):
     # that would burn Claude time. The digest SKILL clamps to
     # ``min(auto_ingest_top, top_k)`` at runtime.
     auto_ingest_top: int = Field(default=0, ge=0, le=20)
+    # Vault-wide Obsidian rendering flags (task 9.162, **D-N**). Defaults
+    # come from ``recipes/_defaults.yaml`` (if present) and the
+    # :class:`ObsidianFlags` field defaults; per-recipe values override.
+    obsidian: ObsidianFlags = Field(default_factory=ObsidianFlags)
 
 
-def load_recipe(path: Path) -> RecipeSchema:
-    """Read and validate a YAML recipe file."""
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Read a YAML file and assert it's a mapping at the top level."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        msg = f"failed to read recipe {path}: {exc}"
+        msg = f"failed to read {path}: {exc}"
         raise UserError(msg) from exc
 
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        msg = f"recipe {path} is not valid YAML: {exc}"
+        msg = f"{path} is not valid YAML: {exc}"
         raise UserError(msg) from exc
 
+    if data is None:
+        return {}
     if not isinstance(data, dict):
-        msg = f"recipe {path} must be a YAML mapping at top level"
+        msg = f"{path} must be a YAML mapping at top level"
+        raise UserError(msg)
+    return data
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Return a new dict that's ``base`` with ``override`` layered on top.
+
+    Nested dicts merge recursively; non-dict values from ``override`` win
+    outright. Used for ``_defaults.yaml`` ⊕ per-recipe resolution.
+    """
+    out = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _load_defaults(recipe_dir: Path) -> dict[str, Any]:
+    """Load ``recipe_dir/_defaults.yaml`` (if any) into a plain dict."""
+    defaults_path = recipe_dir / DEFAULTS_FILENAME
+    if not defaults_path.is_file():
+        return {}
+    return _load_yaml_mapping(defaults_path)
+
+
+def load_recipe(path: Path) -> RecipeSchema:
+    """Read and validate a YAML recipe file.
+
+    Per **D-N**: layers ``<recipe_dir>/_defaults.yaml`` (if any) under
+    the per-recipe values before validating, so vault-wide flags like
+    ``obsidian.callouts`` can be set once for an entire recipe family.
+    Loading the defaults file directly is rejected because it lacks the
+    required ``name`` / ``sources`` / ``scorer`` / ``reporters`` keys.
+    """
+    if path.name == DEFAULTS_FILENAME:
+        msg = (
+            f"{path} is a defaults file, not a recipe; load a sibling recipe to inherit its values"
+        )
         raise UserError(msg)
 
+    data = _load_yaml_mapping(path)
+    defaults = _load_defaults(path.parent)
+    merged = _deep_merge(defaults, data)
+
     try:
-        return RecipeSchema.model_validate(data)
+        return RecipeSchema.model_validate(merged)
     except ValidationError as exc:
         msg = f"recipe {path} has invalid schema: {exc}"
         raise UserError(msg) from exc
@@ -246,6 +321,8 @@ def _expand(value: str | Path) -> Path:
 
 
 __all__ = [
+    "DEFAULTS_FILENAME",
+    "ObsidianFlags",
     "PluginSpec",
     "RecipeSchema",
     "instantiate_pipeline",

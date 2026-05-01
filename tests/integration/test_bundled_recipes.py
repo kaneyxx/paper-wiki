@@ -10,14 +10,16 @@ from pathlib import Path
 
 import pytest
 
-from paperwiki.config.recipe import instantiate_pipeline, load_recipe
+from paperwiki.config.recipe import DEFAULTS_FILENAME, instantiate_pipeline, load_recipe
 
 RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 
 
 @pytest.mark.parametrize(
     "recipe_path",
-    sorted(RECIPES_DIR.glob("*.yaml")),
+    # ``_defaults.yaml`` (task 9.162 / **D-N**) is a fall-through layer,
+    # not a standalone recipe — load_recipe rejects it by design.
+    sorted(p for p in RECIPES_DIR.glob("*.yaml") if p.name != DEFAULTS_FILENAME),
     ids=lambda p: p.name,
 )
 def test_bundled_recipe_loads_and_instantiates(recipe_path: Path) -> None:
