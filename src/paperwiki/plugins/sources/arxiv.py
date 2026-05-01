@@ -123,7 +123,17 @@ class ArxivSource:
             if owns_client:
                 await client.aclose()
 
+        # Task 9.169: source-level dedup. arXiv sometimes returns the
+        # same paper twice in a single response (cross-listed papers,
+        # pagination boundary races). Collapsing here keeps downstream
+        # filters from having to re-implement the same logic. Counter
+        # surfaces the collapse for observability.
+        seen_ids: set[str] = set()
         for paper in self._parse_atom_feed(body):
+            if paper.canonical_id in seen_ids:
+                ctx.increment("source.arxiv.duplicates")
+                continue
+            seen_ids.add(paper.canonical_id)
             yield paper
 
     def _build_query_params(self, *, target_date: datetime) -> dict[str, Any]:

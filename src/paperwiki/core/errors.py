@@ -53,6 +53,17 @@ class IntegrationError(PaperWikiError):
     exit_code: int = 2
 
 
+class RateLimitError(IntegrationError):
+    """An external service rate-limited us beyond the retry budget.
+
+    Specialised :class:`IntegrationError` raised when 429 responses
+    persist past ``max_retries``. SKILLs and the run-status ledger
+    can match on the type to surface "you've been rate-limited" UX
+    rather than "integration failed". Backward-compat: the parent
+    :class:`IntegrationError` exit code (2) carries through.
+    """
+
+
 class PluginError(PaperWikiError):
     """A plugin violated its contract.
 
@@ -68,5 +79,6 @@ __all__ = [
     "IntegrationError",
     "PaperWikiError",
     "PluginError",
+    "RateLimitError",
     "UserError",
 ]
