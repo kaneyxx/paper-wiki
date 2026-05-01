@@ -204,6 +204,29 @@ def main(
             ),
         ),
     ] = None,
+    properties_dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--properties-dry-run",
+            help=(
+                "Preview the v0.4.0-Phase-1 → Phase-2 Obsidian Properties "
+                "frontmatter rewrite (per task 9.161) without touching the "
+                "filesystem; exits before the index rebuild."
+            ),
+        ),
+    ] = False,
+    restore_properties: Annotated[
+        str | None,
+        typer.Option(
+            "--restore-properties",
+            help=(
+                "Reverse a previous Properties migration by SHA-256-verified "
+                "restore from <vault>/.paperwiki/properties-migration-backup/"
+                "<ts>/. Argument is the backup timestamp (per task 9.161 R12). "
+                "Exits before the index rebuild."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
@@ -214,6 +237,10 @@ def main(
     Per task 9.160: ``--migrate-dry-run`` and ``--restore-migration <ts>``
     short-circuit the normal compile so users can preview / reverse the
     typed-subdir migration without re-running the whole index rebuild.
+
+    Per task 9.161 increment 6: ``--properties-dry-run`` and
+    ``--restore-properties <ts>`` mirror the same pattern for the
+    Phase-1 → Phase-2 Obsidian Properties frontmatter rewrite.
     """
     configure_runner_logging(verbose=verbose)
 
@@ -248,6 +275,33 @@ def main(
             logger.error("wiki_compile.restore_failed", error=str(exc))
             raise typer.Exit(exc.exit_code) from exc
         typer.echo(f"restored migration {restore_migration}")
+        return
+
+    if properties_dry_run:
+        from paperwiki.runners.migrate_properties import dry_run as props_dry_run
+
+        props_plan = props_dry_run(vault)
+        typer.echo(
+            json.dumps(
+                {
+                    "planned_rewrites": [
+                        {"src": str(r.src), "sha256": r.sha256} for r in props_plan.planned_rewrites
+                    ]
+                },
+                indent=2,
+            )
+        )
+        return
+
+    if restore_properties is not None:
+        from paperwiki.runners.migrate_properties import restore as props_restore
+
+        try:
+            props_restore(vault, timestamp=restore_properties)
+        except PaperWikiError as exc:
+            logger.error("wiki_compile.restore_properties_failed", error=str(exc))
+            raise typer.Exit(exc.exit_code) from exc
+        typer.echo(f"restored properties migration {restore_properties}")
         return
 
     try:

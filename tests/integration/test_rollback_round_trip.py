@@ -117,3 +117,77 @@ def test_cli_restore_migration_round_trip(tmp_path: Path) -> None:
 
     after = _snapshot_bytes(vault / "Wiki" / "sources")
     assert after == before
+
+
+# ---------------------------------------------------------------------------
+# Task 9.161 increment 6 — Properties migration CLI flags
+# ---------------------------------------------------------------------------
+
+
+def _stage_phase_1_typed_vault(tmp_path: Path) -> Path:
+    """Build a v0.4.0-Phase-1 typed-subdir vault that lacks the Properties
+    block on every entry, so the Phase-2 migration has work to do."""
+    vault = tmp_path / "phase1-vault"
+    wiki = vault / "Wiki"
+    (wiki / "concepts").mkdir(parents=True)
+    (wiki / "topics").mkdir(parents=True)
+    (wiki / "people").mkdir(parents=True)
+    (wiki / "papers").mkdir(parents=True)
+    (wiki / "concepts" / "transformer.md").write_text(
+        "---\n"
+        "type: concept\n"
+        "name: Transformer\n"
+        "definition: x\n"
+        "tags: [cs.LG]\n"
+        "---\n\n# Transformer\n\nx\n",
+        encoding="utf-8",
+    )
+    (wiki / "papers" / "arxiv-1.md").write_text(
+        "---\ncanonical_id: arxiv:0001\ntitle: P1\n---\n\n# P1\n",
+        encoding="utf-8",
+    )
+    return vault
+
+
+def test_cli_properties_dry_run_does_not_touch_filesystem(tmp_path: Path) -> None:
+    """``paperwiki wiki-compile --properties-dry-run`` is a pure preview."""
+    from paperwiki.runners.wiki_compile import app
+
+    vault = _stage_phase_1_typed_vault(tmp_path)
+    snapshot = _snapshot_bytes(vault / "Wiki")
+
+    runner = CliRunner()
+    result = runner.invoke(app, [str(vault), "--properties-dry-run"])
+    assert result.exit_code == 0
+    assert "planned_rewrites" in result.output
+
+    # Filesystem unchanged.
+    assert _snapshot_bytes(vault / "Wiki") == snapshot
+    # No backup directory created in dry-run mode.
+    assert not (vault / ".paperwiki" / "properties-migration-backup").exists()
+
+
+def test_cli_restore_properties_round_trip(tmp_path: Path) -> None:
+    """``paperwiki wiki-compile --restore-properties <ts>`` reverses migrate()."""
+    from paperwiki.runners.migrate_properties import migrate
+    from paperwiki.runners.wiki_compile import app
+
+    vault = _stage_phase_1_typed_vault(tmp_path)
+    before = _snapshot_bytes(vault / "Wiki")
+
+    result = migrate(vault)
+    assert result.rewritten_count == 2  # 1 concept + 1 paper
+
+    # After migrate the bytes must differ from before.
+    assert _snapshot_bytes(vault / "Wiki") != before
+
+    runner = CliRunner()
+    cli_result = runner.invoke(
+        app,
+        [str(vault), "--restore-properties", result.backup_timestamp],
+    )
+    assert cli_result.exit_code == 0
+    assert "restored properties migration" in cli_result.output
+
+    # Restored bytes must match pre-migration snapshot exactly.
+    assert _snapshot_bytes(vault / "Wiki") == before
