@@ -9,6 +9,176 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-01
+
+Minor release shipping the full v0.4.x roadmap as one monolithic
+release per **decision D-R**. Three themes land together so the
+artifact in the user's vault becomes meaningfully more useful per
+session: a queryable typed knowledge graph (Phase 1), Obsidian-native
+on-disk conventions (Phase 2), and pipeline observability +
+ergonomics (Phase 3). Sixteen tasks (9.156–9.171) + twenty
+ratified decisions (D-A through D-S).
+
+The plugin protocol stays `@experimental` until v1.0; v0.4.x adds
+new entity types and pipeline hooks but does not change the four
+core protocols (`Source` / `Filter` / `Scorer` / `Reporter`).
+
+### Phase 1 — Knowledge-graph foundation
+
+- **Three new typed wiki entities** (D-A): `Concept`, `Topic`,
+  `Person` join `Paper` as first-class citizens. Each gets its own
+  Pydantic model in `paperwiki.core.models` and a Markdown template
+  in `locales/en/templates/{concepts,topics,people}/`. Idea /
+  Experiment / Claim are explicitly deferred to v0.5+ (D-A).
+- **Hybrid graph layer** (D-B): frontmatter is canonical; the
+  materialised query cache lives at `<vault>/Wiki/.graph/{edges,
+  citations}.jsonl`. Built on demand by `paperwiki wiki-compile-graph`,
+  invisible to Obsidian indexing thanks to the leading-dot prefix.
+- **Closed `EdgeType` enum** (D-L): `BUILDS_ON` / `IMPROVES_ON` /
+  `SAME_PROBLEM_AS` / `CITES` / `CONTRADICTS` / `EXTENSION` (the
+  forward-compat hook reserved for v0.5+ edge classes paired with
+  `Edge.subtype`).
+- **`wiki-lint --check-graph`**: opt-in extension adding
+  `ORPHAN_SOURCE` and `GRAPH_INCONSISTENT` rules so bidirectional
+  wikilink integrity is auditable without a new SKILL (D-C).
+- **New `wiki-graph` SKILL** + `paperwiki wiki-graph-query` runner:
+  `--papers-citing` / `--concepts-in-topic` / `--collaborators-of`
+  with `--json` (default) and `--pretty` Markdown table output (D-Q).
+- **Migration helper** (D-J): first `paperwiki wiki-compile` after
+  v0.4.0 install auto-converts the v0.3.x flat layout to typed
+  subdirs `Wiki/{papers,concepts,topics,people}/` (D-I) with a
+  SHA-256 manifest backup at
+  `<vault>/.paperwiki/migration-backup/<ts>/`. Opt-out via
+  `PAPERWIKI_NO_AUTO_MIGRATE=1`. Idempotent. Restorable via
+  `paperwiki wiki-compile --restore-migration <ts>`.
+
+### Phase 2 — Obsidian-native polish
+
+- **Properties API frontmatter** on every emitted note (D-D): six
+  canonical fields (`tags`, `aliases`, `status`, `cssclasses`,
+  `created`, `updated`) plus typed-entity extras. Tags normalise
+  arXiv categories (`cs.LG` → `cs/lg`) for nested-tag-friendly
+  grouping in Obsidian's tag pane.
+- **Obsidian callouts** (`> [!abstract]` / `> [!note]` /
+  `> [!warning]`) in digest and analyze output. Default-on via
+  `recipes/_defaults.yaml` (D-N) with per-recipe override; the new
+  `sources-only` recipe ships with callouts off so plain-Markdown
+  consumers stay unaffected.
+- **Dataview recipes** (`references/dataview-recipes.md`): seven
+  copy-paste DQL queries that work against the Properties API
+  contract — recent papers, papers by tag, papers by topic, paper
+  count by month, missing summaries, concepts by paper backlinks,
+  recently updated notes.
+- **Templater opt-in** (`obsidian.templater: true`): the per-paper
+  Notes section gets a live `<%* tp.file.last_modified_date(...) %>`
+  stamp so Obsidian re-renders the timestamp every time the note
+  opens. Default-off because non-Templater users would see the
+  syntax as literal text.
+- **Obsidian wikilink image embeds** (`![[image|width]]`): all
+  reporters that emit images use the wikilink-with-width shape so
+  Obsidian renders inline at a sensible width. The plain `markdown`
+  reporter still emits no images (vault-agnostic). Regression guard
+  in `tests/unit/test_obsidian_image_embeds.py` scans every Python
+  source for stray CommonMark image bytes.
+
+### Phase 3 — Pipeline observability + ergonomics
+
+- **Per-stage progress reporting**: every digest run emits stable
+  `loguru` start/complete pairs with `elapsed_ms` + per-stage
+  counts (`source.fetch.*`, `filter.<name>.*`, `scorer.*`,
+  `report.write.*`). The stage names are stable contract surface
+  for downstream observability.
+- **Run-status ledger** at `<vault>/.paperwiki/run-status.jsonl`
+  (D-O): one JSONL row per digest run captures source counts,
+  filter drops, final paper count, elapsed_ms, and an error
+  class/message when the run failed. Surfaced via
+  `paperwiki status --vault <path>` (last 5 entries). Vault-bound
+  storage means cross-machine sync (Obsidian Sync, Syncthing, Git)
+  carries the run history with the vault.
+- **Anti-repetition dedup ledger** at
+  `<vault>/.paperwiki/dedup-ledger.jsonl` (D-F + D-M): persistent
+  JSONL the dedup filter consults across runs so the digest stops
+  re-recommending papers the user has seen. Vault-global scope —
+  a paper rejected in one recipe stays out of every recipe's
+  output. Auto-engaged when a recipe has both a `dedup` filter and
+  an `obsidian` reporter; opt-out via `ledger: false`. Three new
+  CLI surfaces: `paperwiki dedup-list` (audit dismissed papers,
+  `--format json` for SKILL pipes), `paperwiki dedup-dismiss
+  <canonical_id> --title ... --vault ...` (manual rejection with
+  optional `--reason`), `paperwiki gc-dedup-ledger --vault ...
+  --keep-days N` (manual sweep, defaults to
+  `PAPERWIKI_DEDUP_LEDGER_KEEP` or 365 days).
+- **arXiv source robustness**: source-level dedup collapses
+  cross-listed duplicates inside a single fetch (counted under
+  `source.arxiv.duplicates`). The retry-with-backoff path now
+  raises a typed `RateLimitError` (subclass of `IntegrationError`)
+  on persistent 429 so SKILLs can spot rate-limit failures
+  without parsing exception messages.
+- **Actionable recipe schema validation** (D-G): bad YAML carries
+  line + column from the `MarkedYAMLError` mark; schema violations
+  emit one `field.path: reason (got value)` line per error so a
+  single run lists every fixable issue. New `paperwiki
+  recipe-validate <path>` runner exits 0 on a clean recipe and 1
+  with the actionable error list otherwise — wires into editor
+  save hooks.
+- **wiki-query composite ranking**: the v0.3.x pure-keyword score
+  is replaced by a `frequency * recency * tag-match` composite
+  with sqrt-damped TF and a 90-day half-life decay against file
+  mtime. CLI flags `--weight-frequency` / `--weight-recency` /
+  `--weight-tag-match` let recipe authors tune per call. Formula
+  documented in `references/wiki-query-ranking.md`.
+
+### Pre-release verification (decision D-S)
+
+- **Synthetic D-S regression baseline**
+  (`tests/integration/test_d_s_regression_baseline.py`) feeds 50
+  fixture papers (15 vlm + 15 agents keepers, 10 out-of-window,
+  10 irrelevant) through the full v0.4.0 pipeline and locks in the
+  source/filter/scorer counters + top-K ranking from this commit.
+  Future quality regressions fail CI rather than slipping into a
+  release.
+- The pre-tag *manual* D-S check (real `daily-arxiv` against arXiv's
+  live API, comparing v0.3.44 baseline to v0.4.0 candidate with the
+  dedup ledger cleared) is documented in
+  `references/release-process.md` and is the caller's
+  responsibility before pushing the v0.4.0 tag.
+
+### Decisions ratified (D-A through D-S)
+
+Twenty decisions tracked in `tasks/plan.md` §3 and the consensus plan
+at `.omc/plans/v0.4.x-consensus-plan.md`:
+
+- **D-A** Concept/Topic/Person only; Idea/Experiment/Claim deferred.
+- **D-B** Hybrid graph: frontmatter canonical + sidecar query cache.
+- **D-C** Bidirectional wikilink integrity = wiki-lint extension.
+- **D-D** Obsidian Properties API as canonical metadata format.
+- **D-E** No new LLM API integrations (SPEC §7 boundary).
+- **D-F** Anti-repetition ledger; silent drop default.
+- **D-G** Recipe authoring stays YAML; v0.4.x adds strict validation.
+- **D-H** English-first surface stays English.
+- **D-I** Vault layout: typed subdirs `Wiki/{papers,concepts,topics,people}/`.
+- **D-J** Default-on auto-migrate + `PAPERWIKI_NO_AUTO_MIGRATE=1` escape.
+- **D-K** Auto-extract during digest/analyze + manual `wiki-add`.
+- **D-L** Fixed Pydantic enum for graph edge types.
+- **D-M** Anti-repetition scope: vault-global.
+- **D-N** Recipe flag scope: `recipes/_defaults.yaml` + per-recipe override.
+- **D-O** Run-status ledger at `<vault>/.paperwiki/run-status.jsonl`.
+- **D-P** SPEC update timing: per-phase incremental.
+- **D-Q** wiki-graph output: `--json` (default) + `--pretty`.
+- **D-R** v0.4.0 = monolithic release (all 3 phases together).
+- **D-S** Rollback trigger = digest output-quality regression
+  EXCLUDING dedup-ledger drops.
+
+### Verification gates
+
+- `pytest -q`                           — **1337 passed** (+148 from v0.3.44 baseline 1189)
+- `mypy --strict src`                   — clean (65 source files)
+- `ruff check src tests`                — clean
+- `ruff format --check src tests`       — clean
+- `claude plugin validate .`            — passed
+- D-S synthetic regression baseline     — locked in
+- Pre-tag D-S live-feed check           — caller's responsibility per `references/release-process.md`
+
 ## [0.3.44] - 2026-04-30
 
 Patch release fixing two bugs surfaced by v0.3.43 release-gate
