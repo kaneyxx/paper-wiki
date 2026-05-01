@@ -178,11 +178,17 @@ def load_recipe(path: Path) -> RecipeSchema:
 
 
 def instantiate_pipeline(recipe: RecipeSchema) -> Pipeline:
-    """Build a fully-wired :class:`Pipeline` from a recipe."""
+    """Build a fully-wired :class:`Pipeline` from a recipe.
+
+    Vault-wide flags from :class:`ObsidianFlags` (task 9.162 / **D-N**)
+    are plumbed through to the reporter builders so a recipe-level
+    ``obsidian.callouts: false`` propagates to every reporter that
+    cares (currently :class:`ObsidianReporter`).
+    """
     sources = [_build_source(s) for s in recipe.sources]
     filters = [_build_filter(f) for f in recipe.filters]
     scorer = _build_scorer(recipe.scorer)
-    reporters = [_build_reporter(r) for r in recipe.reporters]
+    reporters = [_build_reporter(r, obsidian_flags=recipe.obsidian) for r in recipe.reporters]
     return Pipeline(
         sources=sources,
         filters=filters,
@@ -286,7 +292,7 @@ def _build_scorer(spec: PluginSpec) -> Scorer:
     raise UserError(msg)
 
 
-def _build_reporter(spec: PluginSpec) -> Reporter:
+def _build_reporter(spec: PluginSpec, *, obsidian_flags: ObsidianFlags) -> Reporter:
     if spec.name == "markdown":
         config = dict(spec.config)
         if "output_dir" in config:
@@ -296,6 +302,9 @@ def _build_reporter(spec: PluginSpec) -> Reporter:
         config = dict(spec.config)
         if "vault_path" in config:
             config["vault_path"] = _expand(config["vault_path"])
+        # Vault-wide flag layered in unless the per-reporter spec
+        # already set it explicitly (per-reporter > vault-wide).
+        config.setdefault("callouts", obsidian_flags.callouts)
         return ObsidianReporter(**config)
     msg = f"unknown reporter plugin: {spec.name!r}"
     raise UserError(msg)

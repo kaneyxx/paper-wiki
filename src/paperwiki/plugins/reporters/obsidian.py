@@ -63,6 +63,7 @@ def render_obsidian_digest(
     vault_path: Path | None = None,
     topic_strength_threshold: float = 0.3,
     now: datetime | None = None,
+    callouts: bool = True,
 ) -> str:
     """Render an Obsidian-flavored Markdown digest string.
 
@@ -108,6 +109,7 @@ def render_obsidian_digest(
                 rec,
                 vault_path=vault_path,
                 topic_strength_threshold=topic_strength_threshold,
+                callouts=callouts,
             )
         )
         parts.append("---\n")
@@ -118,6 +120,21 @@ def render_obsidian_digest(
 def _render_overview_callout() -> str:
     """Top-of-digest synthesis slot (SKILL fills this in via paper-wiki:overview-slot)."""
     return "> [!summary] Today's Overview\n> <!-- paper-wiki:overview-slot -->\n"
+
+
+def _render_abstract_block(abstract: str, *, callouts: bool) -> str:
+    """Render the per-paper abstract block, callout-aware.
+
+    Per task 9.162 / **D-N**, the default is an Obsidian
+    ``> [!abstract] Abstract`` callout (lines prefixed ``> ``). When
+    ``callouts=False`` the digest falls back to a ``### Abstract``
+    heading + plain paragraph so non-Obsidian Markdown viewers stay
+    readable.
+    """
+    if not callouts:
+        return f"### Abstract\n\n{abstract}"
+    quoted = "\n".join(f"> {line}" if line else ">" for line in abstract.splitlines())
+    return f"> [!abstract] Abstract\n{quoted}"
 
 
 def _render_frontmatter(target_date: str, count: int, *, when: datetime) -> str:
@@ -150,6 +167,7 @@ def _render_recommendation(
     *,
     vault_path: Path | None = None,
     topic_strength_threshold: float = 0.3,
+    callouts: bool = True,
 ) -> str:
     """Render one recommendation as a section-organized Obsidian block.
 
@@ -165,8 +183,10 @@ def _render_recommendation(
        doesn't surface as misleading ``[[concept]]`` wikilinks.
     3. Inline teaser figure when ``Wiki/sources/<id>/images/`` already
        has files (extract-images was run for this paper).
-    4. ``### Abstract`` — abstract under a proper heading so Obsidian's
-       outline pane shows it as a collapsible block.
+    4. Abstract block (task 9.162 / **D-N**): ``> [!abstract] Abstract``
+       Obsidian callout when ``callouts=True`` (default), or a plain
+       ``### Abstract`` heading when ``callouts=False`` for non-Obsidian
+       Markdown viewers.
     5. ``### Detailed report`` — HTML-comment marker
        ``<!-- paper-wiki:per-paper-slot:{canonical_id} -->`` that SKILL
        synthesis passes (v0.3.7+) will replace with synthesized content.
@@ -217,7 +237,7 @@ def _render_recommendation(
 
     figure_block = _try_inline_teaser(canonical_id, source_filename, vault_path)
 
-    abstract_block = "### Abstract\n\n" + paper.abstract.strip()
+    abstract_block = _render_abstract_block(paper.abstract.strip(), callouts=callouts)
 
     detailed = f"### Detailed report\n\n<!-- paper-wiki:per-paper-slot:{canonical_id} -->"
 
@@ -277,6 +297,7 @@ class ObsidianReporter:
         wiki_backend: bool = False,
         wiki_topic_strength_threshold: float = 0.3,
         topic_strength_threshold: float = 0.3,
+        callouts: bool = True,
     ) -> None:
         # ``topic_strength_threshold`` (Task 9.28 / D-9.28.1) gates the
         # digest callout's ``Matched topics`` wikilinks. Default 0.3
@@ -284,12 +305,18 @@ class ObsidianReporter:
         # agree out of the box; conservative readers can raise to 0.6
         # to suppress single-keyword leakage entirely. The two fields
         # stay separate (D-9.28.2): one gate per consumer.
+        #
+        # ``callouts`` (Task 9.162 / **D-N**) controls whether the
+        # per-paper Abstract block renders as ``> [!abstract]`` (default,
+        # Obsidian-flavored) or as a plain ``### Abstract`` heading
+        # (recipe override for plain-Markdown export).
         self.vault_path = vault_path
         self.daily_subdir = daily_subdir
         self.filename_template = filename_template
         self.wiki_backend = wiki_backend
         self.wiki_topic_strength_threshold = wiki_topic_strength_threshold
         self.topic_strength_threshold = topic_strength_threshold
+        self.callouts = callouts
 
     async def emit(
         self,
@@ -313,6 +340,7 @@ class ObsidianReporter:
             ctx,
             vault_path=self.vault_path,
             topic_strength_threshold=self.topic_strength_threshold,
+            callouts=self.callouts,
         )
         path = target_dir / filename
         async with aiofiles.open(path, "w", encoding="utf-8") as fh:
