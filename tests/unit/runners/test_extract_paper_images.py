@@ -160,7 +160,9 @@ class TestExtractPaperImages:
 
         body = path.read_text(encoding="utf-8")
         assert "MY_PRIVATE_NOTES" in body, "Notes section must survive image extraction"
-        assert "## Abstract" in body
+        # Per task 9.162 / **D-N**, the Abstract section uses an Obsidian
+        # callout by default; the title slot acts as the section heading.
+        assert "> [!abstract] Abstract" in body
         assert "## Key Takeaways" in body
 
     async def test_zero_figures_keeps_helpful_placeholder(self, tmp_path: Path) -> None:

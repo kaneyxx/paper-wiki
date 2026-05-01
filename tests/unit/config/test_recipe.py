@@ -50,6 +50,119 @@ _VALID_RECIPE: dict[str, object] = {
 }
 
 
+_VALID_RECIPE_YAML = """\
+name: 9162-fixture
+sources:
+  - name: arxiv
+    config:
+      categories: [cs.AI]
+      lookback_days: 1
+filters:
+  - name: recency
+    config:
+      max_days: 7
+scorer:
+  name: composite
+  config:
+    topics:
+      - name: vlm
+        keywords: [foundation model]
+reporters:
+  - name: markdown
+    config:
+      output_dir: ./out
+"""
+
+
+# ---------------------------------------------------------------------------
+# Task 9.162: Obsidian callouts flag (D-N — recipe defaults + per-recipe override)
+# ---------------------------------------------------------------------------
+
+
+class TestObsidianFlags:
+    def test_default_callouts_true(self) -> None:
+        """Built-in default: ``obsidian.callouts: true``."""
+        recipe = RecipeSchema.model_validate(_VALID_RECIPE)
+        assert recipe.obsidian.callouts is True
+
+    def test_recipe_can_override_callouts(self) -> None:
+        recipe_data = dict(_VALID_RECIPE)
+        recipe_data["obsidian"] = {"callouts": False}
+        recipe = RecipeSchema.model_validate(recipe_data)
+        assert recipe.obsidian.callouts is False
+
+    def test_unknown_obsidian_field_rejected(self) -> None:
+        recipe_data = dict(_VALID_RECIPE)
+        recipe_data["obsidian"] = {"callouts": True, "bogus": 1}
+        with pytest.raises(ValueError, match="bogus"):
+            RecipeSchema.model_validate(recipe_data)
+
+    def test_templater_default_false(self) -> None:
+        """Per task 9.164 acceptance: Templater is opt-in (default off so
+        non-Templater users see plain values, not raw Templater syntax)."""
+        recipe = RecipeSchema.model_validate(_VALID_RECIPE)
+        assert recipe.obsidian.templater is False
+
+    def test_templater_can_be_enabled(self) -> None:
+        recipe_data = dict(_VALID_RECIPE)
+        recipe_data["obsidian"] = {"templater": True}
+        recipe = RecipeSchema.model_validate(recipe_data)
+        assert recipe.obsidian.templater is True
+
+
+class TestDefaultsResolution:
+    """Per **D-N**: ``recipes/_defaults.yaml`` ships with the plugin and
+    layers under per-recipe values. Resolution order is:
+    per-recipe value > _defaults.yaml > built-in default.
+    """
+
+    def test_load_recipe_uses_defaults_when_recipe_omits_obsidian(self, tmp_path: Path) -> None:
+        """A co-located ``_defaults.yaml`` flips the default; the recipe
+        inherits because it doesn't carry an ``obsidian:`` block of its own."""
+        (tmp_path / "_defaults.yaml").write_text(
+            "obsidian:\n  callouts: false\n",
+            encoding="utf-8",
+        )
+        recipe_path = tmp_path / "myrecipe.yaml"
+        recipe_path.write_text(_VALID_RECIPE_YAML, encoding="utf-8")
+
+        recipe = load_recipe(recipe_path)
+        # Default flipped via _defaults.yaml.
+        assert recipe.obsidian.callouts is False
+
+    def test_recipe_overrides_defaults(self, tmp_path: Path) -> None:
+        """Per-recipe value beats _defaults.yaml."""
+        (tmp_path / "_defaults.yaml").write_text(
+            "obsidian:\n  callouts: false\n",
+            encoding="utf-8",
+        )
+        recipe_path = tmp_path / "myrecipe.yaml"
+        recipe_path.write_text(
+            _VALID_RECIPE_YAML + "obsidian:\n  callouts: true\n",
+            encoding="utf-8",
+        )
+
+        recipe = load_recipe(recipe_path)
+        # Per-recipe wins.
+        assert recipe.obsidian.callouts is True
+
+    def test_no_defaults_file_falls_through_to_builtin(self, tmp_path: Path) -> None:
+        """When no _defaults.yaml is present, the schema default applies."""
+        recipe_path = tmp_path / "myrecipe.yaml"
+        recipe_path.write_text(_VALID_RECIPE_YAML, encoding="utf-8")
+
+        recipe = load_recipe(recipe_path)
+        assert recipe.obsidian.callouts is True
+
+    def test_defaults_yaml_not_treated_as_a_recipe(self, tmp_path: Path) -> None:
+        """``_defaults.yaml`` itself must never be loadable as a recipe
+        (it's defaults-only; missing required fields)."""
+        defaults_path = tmp_path / "_defaults.yaml"
+        defaults_path.write_text("obsidian:\n  callouts: false\n", encoding="utf-8")
+        with pytest.raises(UserError):
+            load_recipe(defaults_path)
+
+
 class TestRecipeSchema:
     def test_valid_recipe_parses(self) -> None:
         recipe = RecipeSchema.model_validate(_VALID_RECIPE)

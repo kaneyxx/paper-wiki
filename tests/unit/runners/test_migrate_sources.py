@@ -70,7 +70,9 @@ class TestMigrateSource:
         body = _read(path)
         for section in (
             "## Core Information",
-            "## Abstract",
+            # Per task 9.162 / **D-N**, the Abstract section uses an
+            # Obsidian ``> [!abstract] Abstract`` callout by default.
+            "> [!abstract] Abstract",
             "## Key Takeaways",
             "## Figures",
             "## Notes",
@@ -110,8 +112,11 @@ class TestMigrateSource:
         migrate_source(path)
 
         body = _read(path)
-        # Abstract paragraph lives under the Abstract heading now.
-        abstract_idx = body.index("## Abstract")
+        # Per task 9.162, the abstract paragraph now lives inside an
+        # Obsidian ``> [!abstract] Abstract`` callout (each line
+        # prefixed ``> ``) between the Abstract callout and the next
+        # section heading.
+        abstract_idx = body.index("> [!abstract] Abstract")
         next_heading_idx = body.index("## Key Takeaways")
         abstract_block = body[abstract_idx:next_heading_idx]
         assert "Test-time adaptation has emerged" in abstract_block

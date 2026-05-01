@@ -226,3 +226,161 @@ class TestCli:
         payload = json.loads(result.output)
         assert "findings" in payload
         assert "counts" in payload
+
+
+# ---------------------------------------------------------------------------
+# --check-graph rules (v0.4.x task 9.158)
+#
+# Adds two opt-in rules that consume the typed-subdir layout from D-I and
+# the .graph/ sidecar from D-B:
+#
+# * ORPHAN_SOURCE   — Concept/Topic file with no inbound wikilinks.
+# * GRAPH_INCONSISTENT — edges.jsonl claims A→B but B's frontmatter
+#   ``references:`` is present and does NOT list A.
+#
+# Default off; opt-in via ``check_graph=True`` / ``--check-graph`` so
+# existing pre-v0.4.x vaults don't surface new findings on upgrade.
+# ---------------------------------------------------------------------------
+
+
+def _seed_typed_vault(root: Path) -> None:
+    """Seed a 4-note typed-subdir vault for graph-layer lint tests."""
+    for sub in ("papers", "concepts", "topics", "people"):
+        (root / sub).mkdir(parents=True)
+
+
+class TestCheckGraphFlag:
+    async def test_default_off_no_new_findings(self, tmp_path: Path) -> None:
+        # Seed a typed vault with an obvious orphan concept; without
+        # ``check_graph=True`` no ORPHAN_SOURCE finding should fire.
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "concepts" / "lonely.md").write_text(
+            "---\ntype: concept\nname: Lonely\n---\n\n# Lonely\n\nNo papers.\n"
+        )
+        report = await wiki_lint_runner.lint_wiki(tmp_path, wiki_subdir=".", now=_NOW)
+        assert all(f.code != "ORPHAN_SOURCE" for f in report.findings)
+        assert all(f.code != "GRAPH_INCONSISTENT" for f in report.findings)
+
+
+class TestOrphanSource:
+    async def test_concept_with_no_inbound_links_flagged(self, tmp_path: Path) -> None:
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "concepts" / "lonely.md").write_text(
+            "---\ntype: concept\nname: Lonely\n---\n\n# Lonely\n"
+        )
+        # Add a paper that does NOT reference the concept.
+        (tmp_path / "papers" / "p1.md").write_text(
+            "---\ntype: paper\n---\n\n# p1\n\nNo wikilinks.\n"
+        )
+        report = await wiki_lint_runner.lint_wiki(
+            tmp_path, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        codes = {f.code for f in report.findings}
+        assert "ORPHAN_SOURCE" in codes
+
+    async def test_concept_with_inbound_link_not_flagged(self, tmp_path: Path) -> None:
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "concepts" / "popular.md").write_text(
+            "---\ntype: concept\nname: Popular\n---\n\n# Popular\n"
+        )
+        (tmp_path / "papers" / "p1.md").write_text(
+            "---\ntype: paper\n---\n\n# p1\n\nUses [[popular]] heavily.\n"
+        )
+        report = await wiki_lint_runner.lint_wiki(
+            tmp_path, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        orphan_paths = [f.path for f in report.findings if f.code == "ORPHAN_SOURCE"]
+        assert "concepts/popular.md" not in orphan_paths
+
+    async def test_orphan_papers_not_flagged(self, tmp_path: Path) -> None:
+        # Papers can be standalone leaves; they shouldn't fire
+        # ORPHAN_SOURCE even with no inbound refs.
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "papers" / "isolated.md").write_text("---\ntype: paper\n---\n\n# isolated\n")
+        report = await wiki_lint_runner.lint_wiki(
+            tmp_path, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        orphan_paths = [f.path for f in report.findings if f.code == "ORPHAN_SOURCE"]
+        assert "papers/isolated.md" not in orphan_paths
+
+
+class TestGraphInconsistent:
+    async def test_fires_when_frontmatter_refs_incomplete(self, tmp_path: Path) -> None:
+        # B declares references: [c] but edges.jsonl will also derive
+        # from a body wikilink in A pointing to B → A→B is in the
+        # graph, but B's frontmatter doesn't list A. INCONSISTENT.
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "papers" / "a.md").write_text("---\ntype: paper\n---\n\n# a\n\nLinks [[b]].\n")
+        (tmp_path / "papers" / "b.md").write_text("---\ntype: paper\nreferences: [c]\n---\n\n# b\n")
+        await compile_graph(tmp_path, wiki_subdir=".")
+        report = await wiki_lint_runner.lint_wiki(
+            tmp_path, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        codes = {f.code for f in report.findings}
+        assert "GRAPH_INCONSISTENT" in codes
+
+    async def test_does_not_fire_when_refs_field_missing(self, tmp_path: Path) -> None:
+        # If B has NO ``references:`` key in frontmatter, no
+        # inconsistency is claimed by the user → no finding.
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "papers" / "a.md").write_text("---\ntype: paper\n---\n\n# a\n\nLinks [[b]].\n")
+        (tmp_path / "papers" / "b.md").write_text("---\ntype: paper\n---\n\n# b\n")
+        await compile_graph(tmp_path, wiki_subdir=".")
+        report = await wiki_lint_runner.lint_wiki(
+            tmp_path, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        codes = {f.code for f in report.findings}
+        assert "GRAPH_INCONSISTENT" not in codes
+
+    async def test_does_not_fire_when_refs_complete(self, tmp_path: Path) -> None:
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "papers" / "a.md").write_text("---\ntype: paper\n---\n\n# a\n\nLinks [[b]].\n")
+        (tmp_path / "papers" / "b.md").write_text("---\ntype: paper\nreferences: [a]\n---\n\n# b\n")
+        await compile_graph(tmp_path, wiki_subdir=".")
+        report = await wiki_lint_runner.lint_wiki(
+            tmp_path, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        codes = {f.code for f in report.findings}
+        assert "GRAPH_INCONSISTENT" not in codes
+
+
+class TestCliCheckGraphFlag:
+    def test_check_graph_flag_accepted(self, tmp_path: Path) -> None:
+        _seed_typed_vault(tmp_path)
+        (tmp_path / "papers" / "p1.md").write_text("---\ntype: paper\n---\n\n# p1\n")
+        runner = CliRunner()
+        result = runner.invoke(
+            wiki_lint_runner.app,
+            [str(tmp_path), "--wiki-subdir", ".", "--check-graph"],
+        )
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert "findings" in payload
+
+
+class TestSyntheticFixturePassesCheckGraph:
+    """Per 9.156a acceptance: the synthetic fixture must pass
+    ``wiki-lint --check-graph`` with zero ORPHAN_SOURCE /
+    GRAPH_INCONSISTENT findings on first build.
+    """
+
+    async def test_no_graph_violations_on_synthetic(self) -> None:
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        fixture = Path(__file__).parent.parent.parent / "fixtures" / "synthetic_vault_100"
+        await compile_graph(fixture, wiki_subdir=".", force_rebuild=True)
+        report = await wiki_lint_runner.lint_wiki(
+            fixture, wiki_subdir=".", check_graph=True, now=_NOW
+        )
+        graph_codes = {"ORPHAN_SOURCE", "GRAPH_INCONSISTENT"}
+        violations = [f for f in report.findings if f.code in graph_codes]
+        assert violations == [], (
+            f"synthetic fixture should pass --check-graph clean; got "
+            f"{[f.code + ' ' + f.path for f in violations]}"
+        )

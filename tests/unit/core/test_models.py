@@ -14,10 +14,15 @@ from pydantic import ValidationError
 
 from paperwiki.core.models import (
     Author,
+    Concept,
+    Edge,
+    EdgeType,
     Paper,
+    Person,
     Recommendation,
     RunContext,
     ScoreBreakdown,
+    Topic,
 )
 
 # ---------------------------------------------------------------------------
@@ -190,3 +195,271 @@ class TestRunContext:
     def test_run_context_target_date_must_be_timezone_aware(self) -> None:
         with pytest.raises(ValidationError):
             RunContext(target_date=datetime(2026, 4, 25), config_snapshot={})  # noqa: DTZ001
+
+
+# ---------------------------------------------------------------------------
+# EdgeType (v0.4.x knowledge graph — task 9.156, D-L)
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeType:
+    def test_canonical_values(self) -> None:
+        # Closed enum used at write-time. Writers may only emit these values.
+        assert EdgeType.BUILDS_ON.value == "builds_on"
+        assert EdgeType.IMPROVES_ON.value == "improves_on"
+        assert EdgeType.SAME_PROBLEM_AS.value == "same_problem_as"
+        assert EdgeType.CITES.value == "cites"
+        assert EdgeType.CONTRADICTS.value == "contradicts"
+
+    def test_extension_reserved_for_forward_compat(self) -> None:
+        # Reserved per consensus plan iter-2 R12 forward-compat strategy:
+        # v0.5+ patches add new edge classes via EdgeType.EXTENSION + subtype
+        # field on Edge, without invalidating existing on-disk edges.
+        assert EdgeType.EXTENSION.value == "extension"
+
+    def test_str_enum_membership(self) -> None:
+        # EdgeType is a str-enum so YAML/JSON serialization is natural.
+        assert isinstance(EdgeType.BUILDS_ON, str)
+        assert EdgeType("builds_on") is EdgeType.BUILDS_ON
+
+
+# ---------------------------------------------------------------------------
+# Edge (v0.4.x knowledge graph — task 9.156)
+# ---------------------------------------------------------------------------
+
+
+class TestEdge:
+    def test_minimal_edge_constructs(self) -> None:
+        edge = Edge(
+            src="arxiv:2401.00001",
+            dst="arxiv:2401.00002",
+            type=EdgeType.BUILDS_ON,
+        )
+        assert edge.type is EdgeType.BUILDS_ON
+        assert edge.weight == 1.0
+        assert edge.evidence is None
+        assert edge.subtype is None
+
+    def test_edge_accepts_canonical_string_for_known_type(self) -> None:
+        # Pydantic should coerce "builds_on" to EdgeType.BUILDS_ON when the
+        # input is a known canonical value.
+        edge = Edge(src="arxiv:a", dst="arxiv:b", type="builds_on")
+        assert edge.type is EdgeType.BUILDS_ON
+
+    def test_edge_preserves_unknown_type_verbatim(self) -> None:
+        # Forward-compat (consensus plan iter-2 MS4 / Scenario 7):
+        # readers must preserve unknown edge-type strings verbatim, not
+        # raise. Idempotent re-emit writes them back unchanged. Writer-side
+        # (this constructor) tolerates them as a str when no enum match.
+        edge = Edge(src="arxiv:a", dst="arxiv:b", type="evaluates_on")
+        assert edge.type == "evaluates_on"
+        assert not isinstance(edge.type, EdgeType)
+
+    def test_edge_unknown_type_round_trip_preserves_value(self) -> None:
+        # `model_dump` must emit the unknown string verbatim so the on-disk
+        # edges.jsonl can be byte-identical across rebuilds.
+        edge = Edge(src="arxiv:a", dst="arxiv:b", type="evaluates_on")
+        dumped = edge.model_dump(mode="json")
+        assert dumped["type"] == "evaluates_on"
+        rebuilt = Edge.model_validate(dumped)
+        assert rebuilt.type == "evaluates_on"
+
+    def test_edge_weight_bounds(self) -> None:
+        # weight is constrained to [0.0, 1.0] mirroring ScoreBreakdown axes.
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="arxiv:b", type=EdgeType.BUILDS_ON, weight=1.5)
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="arxiv:b", type=EdgeType.BUILDS_ON, weight=-0.1)
+
+    def test_edge_extension_carries_subtype(self) -> None:
+        # EXTENSION is the forward-compat hook: the user (or a future
+        # paperwiki version) sets `subtype` to disambiguate without enum
+        # churn. v0.4.0 Python emits the canonical enum members only.
+        edge = Edge(
+            src="arxiv:a",
+            dst="arxiv:b",
+            type=EdgeType.EXTENSION,
+            subtype="evaluates_on",
+        )
+        assert edge.type is EdgeType.EXTENSION
+        assert edge.subtype == "evaluates_on"
+
+    def test_edge_src_must_be_non_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            Edge(src="", dst="arxiv:b", type=EdgeType.BUILDS_ON)
+        with pytest.raises(ValidationError):
+            Edge(src="   ", dst="arxiv:b", type=EdgeType.BUILDS_ON)
+
+    def test_edge_dst_must_be_non_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="", type=EdgeType.BUILDS_ON)
+        with pytest.raises(ValidationError):
+            Edge(src="arxiv:a", dst="  ", type=EdgeType.BUILDS_ON)
+
+    def test_edge_evidence_is_optional_string(self) -> None:
+        edge = Edge(
+            src="arxiv:a",
+            dst="arxiv:b",
+            type=EdgeType.CITES,
+            evidence="cited in §3.2 of arxiv:a",
+        )
+        assert edge.evidence == "cited in §3.2 of arxiv:a"
+
+    def test_edge_serializable_round_trip_canonical(self) -> None:
+        edge = Edge(
+            src="arxiv:2401.00001",
+            dst="concepts/transformer",
+            type=EdgeType.BUILDS_ON,
+            weight=0.8,
+            evidence="builds attention layer on §3 of arxiv:transformer",
+        )
+        rebuilt = Edge.model_validate(edge.model_dump(mode="json"))
+        assert rebuilt == edge
+
+
+# ---------------------------------------------------------------------------
+# Concept (v0.4.x typed entity — task 9.156, D-A + D-I)
+# ---------------------------------------------------------------------------
+
+
+class TestConcept:
+    def test_minimal_concept_constructs(self) -> None:
+        concept = Concept(
+            name="Transformer",
+            definition="Attention-based neural architecture introduced by Vaswani et al.",
+        )
+        assert concept.name == "Transformer"
+        assert concept.aliases == []
+        assert concept.tags == []
+        assert concept.papers == []
+
+    def test_concept_full_construct(self) -> None:
+        concept = Concept(
+            name="Vision-language pretraining",
+            aliases=["VLP", "vision language pretraining"],
+            definition="Joint training of vision and language encoders on paired data.",
+            tags=["multimodal", "pretraining"],
+            papers=["arxiv:2103.00020", "arxiv:2104.00330"],
+        )
+        assert "VLP" in concept.aliases
+        assert "multimodal" in concept.tags
+        assert len(concept.papers) == 2
+
+    def test_concept_name_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Concept(name="   ", definition="placeholder")
+
+    def test_concept_definition_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Concept(name="Transformer", definition="")
+
+    def test_concept_strips_whitespace_in_name(self) -> None:
+        concept = Concept(name="  Transformer  ", definition="placeholder")
+        assert concept.name == "Transformer"
+
+    def test_concept_round_trip(self) -> None:
+        concept = Concept(
+            name="Attention",
+            aliases=["self-attention", "scaled-dot-product"],
+            definition="Mechanism for weighted aggregation across sequence positions.",
+            tags=["transformer", "neural-net"],
+            papers=["arxiv:1706.03762"],
+        )
+        rebuilt = Concept.model_validate(concept.model_dump(mode="json"))
+        assert rebuilt == concept
+
+
+# ---------------------------------------------------------------------------
+# Topic (v0.4.x typed entity — task 9.156, D-A + D-I)
+# ---------------------------------------------------------------------------
+
+
+class TestTopic:
+    def test_minimal_topic_constructs(self) -> None:
+        topic = Topic(
+            name="Vision-Language Models",
+            description="Multimodal foundation models for vision and language.",
+        )
+        assert topic.name == "Vision-Language Models"
+        assert topic.papers == []
+        assert topic.concepts == []
+        assert topic.sota == []
+
+    def test_topic_with_sota_recommendations(self) -> None:
+        rec = Recommendation(
+            paper=_sample_paper(),
+            score=ScoreBreakdown(relevance=0.9, composite=0.85),
+            matched_topics=["vision-language"],
+        )
+        topic = Topic(
+            name="Vision-Language",
+            description="VLMs.",
+            papers=["arxiv:2506.13063"],
+            concepts=["vision-language-pretraining"],
+            sota=[rec],
+        )
+        assert len(topic.sota) == 1
+        assert topic.sota[0].score.composite == 0.85
+
+    def test_topic_name_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Topic(name="", description="VLMs")
+
+    def test_topic_description_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Topic(name="VLMs", description="   ")
+
+    def test_topic_round_trip(self) -> None:
+        topic = Topic(
+            name="Pathology Foundation Models",
+            description="Vision-language FMs trained on histopathology.",
+            papers=["arxiv:2506.13063"],
+            concepts=["vision-language-pretraining", "pathology"],
+        )
+        rebuilt = Topic.model_validate(topic.model_dump(mode="json"))
+        assert rebuilt == topic
+
+
+# ---------------------------------------------------------------------------
+# Person (v0.4.x typed entity — task 9.156, D-A + D-I)
+# ---------------------------------------------------------------------------
+
+
+class TestPerson:
+    def test_minimal_person_constructs(self) -> None:
+        person = Person(name="Yann LeCun")
+        assert person.name == "Yann LeCun"
+        assert person.aliases == []
+        assert person.affiliation is None
+        assert person.papers == []
+        assert person.collaborators == []
+
+    def test_person_full_construct(self) -> None:
+        person = Person(
+            name="Yann LeCun",
+            aliases=["Y. LeCun", "Yann Le Cun"],
+            affiliation="Meta AI / NYU",
+            papers=["arxiv:1102.0183", "arxiv:1611.07004"],
+            collaborators=["geoffrey-hinton", "yoshua-bengio"],
+        )
+        assert person.affiliation == "Meta AI / NYU"
+        assert "geoffrey-hinton" in person.collaborators
+
+    def test_person_name_must_not_be_blank(self) -> None:
+        with pytest.raises(ValidationError):
+            Person(name="")
+
+    def test_person_strips_whitespace_in_name(self) -> None:
+        person = Person(name="  Geoffrey Hinton  ")
+        assert person.name == "Geoffrey Hinton"
+
+    def test_person_round_trip(self) -> None:
+        person = Person(
+            name="Yoshua Bengio",
+            aliases=["Y. Bengio"],
+            affiliation="Mila / U. Montreal",
+            papers=["arxiv:1409.0473"],
+            collaborators=["yann-lecun"],
+        )
+        rebuilt = Person.model_validate(person.model_dump(mode="json"))
+        assert rebuilt == person

@@ -62,3 +62,4 @@ secrets.*
 # cache smaller and avoids confusing user-facing surface area.
 tasks/plan.md
 tasks/todo.md
+tests/fixtures/synthetic_vault_100/.graph/

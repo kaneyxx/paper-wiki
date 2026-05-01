@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from paperwiki.core.errors import IntegrationError
+from paperwiki.core.errors import IntegrationError, RateLimitError
 
 USER_AGENT = "paper-wiki/0.1.0 (+https://github.com/kaneyxx/paper-wiki)"
 DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
@@ -79,14 +79,17 @@ async def fetch_with_retry(
     with the most recent failure attached as the exception cause.
     """
     last_exc: BaseException | None = None
+    last_status: int | None = None
     for attempt in range(max_retries):
         try:
             response = await client.request(method, url, params=params, headers=headers)
         except httpx.RequestError as exc:
             last_exc = exc
+            last_status = None
         else:
             if response.status_code not in RETRYABLE_STATUS:
                 return response
+            last_status = response.status_code
             last_exc = httpx.HTTPStatusError(
                 f"HTTP {response.status_code}",
                 request=response.request,
@@ -98,6 +101,13 @@ async def fetch_with_retry(
             if wait > 0:
                 await asyncio.sleep(wait)
 
+    # Task 9.169: persistent rate-limit raises a typed RateLimitError so
+    # SKILLs / the run-status ledger can spot rate-limit-driven failures
+    # without parsing exception messages. Other exhausted retryable
+    # statuses (5xx) keep the generic IntegrationError class.
+    if last_status == 429:
+        msg = f"{method} {url} rate-limited (HTTP 429) after {max_retries} attempts"
+        raise RateLimitError(msg) from last_exc
     msg = f"{method} {url} failed after {max_retries} attempts"
     raise IntegrationError(msg) from last_exc
 

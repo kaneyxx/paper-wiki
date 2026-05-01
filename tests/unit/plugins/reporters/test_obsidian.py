@@ -161,9 +161,11 @@ class TestRenderObsidianDigest:
 
     def test_per_paper_has_abstract_subheading(self) -> None:
         body = render_obsidian_digest([_make_recommendation()], _make_ctx())
-        # Each entry uses ``### Abstract`` so Obsidian's outline pane
-        # shows abstracts as collapsible blocks.
-        assert "### Abstract" in body
+        # Per task 9.162 / **D-N**, the per-paper abstract block uses an
+        # Obsidian ``> [!abstract] Abstract`` callout by default. The
+        # callout title is detected by Obsidian's outline pane the same
+        # way an ``### Abstract`` heading would be.
+        assert "> [!abstract] Abstract" in body
 
     def test_per_paper_has_detailed_report_subheading(self) -> None:
         """Each entry has a ``### Detailed report`` subheading."""
@@ -191,6 +193,115 @@ class TestRenderObsidianDigest:
         assert "fill in the cross-paper synthesis here" not in body, (
             "digest must not emit old cross-paper synthesis prose stub"
         )
+
+
+class TestObsidianDigestObsidianProperties:
+    """Task 9.161 / **D-D**: Obsidian digest frontmatter carries the
+    canonical six-field Properties block alongside the existing keys.
+    """
+
+    def _frontmatter(self, body: str) -> dict[str, object]:
+        import yaml
+
+        assert body.startswith("---\n")
+        end = body.index("\n---\n", 4)
+        parsed = yaml.safe_load(body[4:end])
+        assert isinstance(parsed, dict)
+        return parsed
+
+    def test_frontmatter_includes_all_six_properties_fields(self) -> None:
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        for key in ("tags", "aliases", "status", "cssclasses", "created", "updated"):
+            assert key in fm, f"missing Properties field: {key}"
+
+    def test_tags_normalized_and_includes_obsidian_marker(self) -> None:
+        """Properties tags are lowercased + nested-tag-friendly; obsidian
+        reporter still ships its own ``obsidian`` tag for graph-view filtering."""
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert isinstance(fm["tags"], list)
+        assert "obsidian" in fm["tags"]
+
+    def test_created_and_updated_are_iso8601_with_timezone(self) -> None:
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            now=datetime(2026, 5, 1, 12, 30, 45, tzinfo=UTC),
+        )
+        fm = self._frontmatter(body)
+        assert fm["created"] == "2026-05-01T12:30:45+00:00"
+        assert fm["updated"] == "2026-05-01T12:30:45+00:00"
+
+
+class TestCalloutsFlag:
+    """Task 9.162 / **D-N**: ``obsidian.callouts: true`` (default) wraps
+    the per-paper Abstract block in an Obsidian ``> [!abstract]`` callout.
+    Setting it to ``false`` falls back to the plain ``### Abstract``
+    heading style so the digest stays usable in non-Obsidian Markdown
+    viewers.
+    """
+
+    def test_default_renders_abstract_as_callout(self) -> None:
+        body = render_obsidian_digest([_make_recommendation()], _make_ctx())
+        # Default callouts=True: Abstract wrapped in an Obsidian callout.
+        assert "> [!abstract] Abstract" in body
+        # The plain heading must NOT appear when callouts are on.
+        assert "### Abstract" not in body
+
+    def test_callouts_false_falls_back_to_plain_heading(self) -> None:
+        body = render_obsidian_digest(
+            [_make_recommendation()],
+            _make_ctx(),
+            callouts=False,
+        )
+        # Plain heading style for non-Obsidian consumers.
+        assert "### Abstract" in body
+        assert "> [!abstract]" not in body
+
+    def test_callout_carries_actual_abstract_text(self) -> None:
+        rec = _make_recommendation()
+        body = render_obsidian_digest([rec], _make_ctx())
+        # The abstract body must appear inside the callout (lines
+        # prefixed with ``> ``), not as a standalone paragraph.
+        callout_idx = body.index("> [!abstract]")
+        # Walk forward to find the abstract body wrapped under ``> ``.
+        snippet = body[callout_idx : callout_idx + 500]
+        assert "> A vision-language foundation model" in snippet
+
+
+class TestObsidianReporterCalloutsKwarg:
+    """``ObsidianReporter`` exposes the ``callouts`` flag via __init__ so the
+    recipe builder can plumb the vault-wide ``obsidian.callouts`` setting
+    through (task 9.162 slice 2)."""
+
+    def test_init_accepts_callouts_flag(self) -> None:
+        reporter = ObsidianReporter(
+            vault_path=Path("/nonexistent/never-written"),
+            callouts=False,
+        )
+        assert reporter.callouts is False
+
+    def test_default_callouts_is_true(self) -> None:
+        reporter = ObsidianReporter(vault_path=Path("/nonexistent/never-written"))
+        assert reporter.callouts is True
+
+    async def test_emit_propagates_callouts_to_render(self, tmp_path: Path) -> None:
+        reporter = ObsidianReporter(vault_path=tmp_path, callouts=False)
+        await reporter.emit([_make_recommendation()], _make_ctx())
+
+        body = (tmp_path / "Daily" / "2026-04-25-paper-digest.md").read_text(encoding="utf-8")
+        # callouts=False at construction → plain heading on disk.
+        assert "### Abstract" in body
+        assert "> [!abstract]" not in body
 
 
 # ---------------------------------------------------------------------------

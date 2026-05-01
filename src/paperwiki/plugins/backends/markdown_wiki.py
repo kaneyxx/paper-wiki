@@ -39,6 +39,7 @@ import aiofiles
 import yaml
 
 from paperwiki.config.layout import WIKI_SUBDIR
+from paperwiki.core.properties import build_properties_block
 
 if TYPE_CHECKING:
     from paperwiki.core.models import Recommendation, ScoreBreakdown
@@ -140,16 +141,26 @@ class ConceptSummary:
 
 
 class MarkdownWikiBackend:
-    """File-system backed implementation of :class:`WikiBackend`."""
+    """File-system backed implementation of :class:`WikiBackend`.
+
+    ``callouts`` (task 9.162 / **D-N**) controls whether the per-paper
+    source body wraps its Abstract section in an Obsidian
+    ``> [!abstract] Abstract`` callout (default) or a plain
+    ``## Abstract`` heading (recipe override for plain-Markdown export).
+    """
 
     def __init__(
         self,
         vault_path: Path,
         *,
         wiki_subdir: str = WIKI_SUBDIR,
+        callouts: bool = True,
+        templater: bool = False,
     ) -> None:
         self.vault_path = vault_path
         self.wiki_root = vault_path / wiki_subdir
+        self.callouts = callouts
+        self.templater = templater
 
     # ------------------------------------------------------------------
     # WikiBackend protocol methods
@@ -190,13 +201,25 @@ class MarkdownWikiBackend:
             threshold=topic_strength_threshold,
         )
         related = [f"[[{topic}]]" for topic in filtered_topics]
+        now = datetime.now(UTC)
+        # Per task 9.161 / **D-D**, every paper-wiki output carries the
+        # canonical six-field Obsidian Properties block. ``status`` is
+        # already part of the legacy frontmatter; the Properties block
+        # supplies it via ``status="draft"`` so the Properties pane and
+        # the legacy ``status`` consumer (wiki-lint STATUS_MISMATCH) see
+        # the same value.
+        properties = build_properties_block(
+            when=now,
+            tags=list(paper.categories),
+            aliases=[],
+            status="draft",
+        )
         frontmatter: dict[str, object] = {
             "canonical_id": paper.canonical_id,
             "title": paper.title,
-            "status": "draft",
+            **properties,  # tags / aliases / status / cssclasses / created / updated
             "confidence": round(score.composite, 4),
             "domain": _infer_domain(paper.categories),
-            "tags": list(paper.categories),
             "published_at": paper.published_at.strftime("%Y-%m-%d"),
             "landing_url": paper.landing_url or "",
             "pdf_url": paper.pdf_url or "",
@@ -209,10 +232,14 @@ class MarkdownWikiBackend:
                 "rigor": round(score.rigor, 4),
             },
             "related_concepts": related,
-            "last_synthesized": datetime.now(UTC).strftime("%Y-%m-%d"),
+            "last_synthesized": now.strftime("%Y-%m-%d"),
         }
 
-        body = self._default_source_body(rec)
+        body = self._default_source_body(
+            rec,
+            callouts=self.callouts,
+            templater=self.templater,
+        )
         path = self._source_path(paper.canonical_id)
         await self._write_markdown(path, frontmatter, body)
         return path
@@ -281,13 +308,26 @@ class MarkdownWikiBackend:
             raise ValueError(msg)
 
         clean_name = name.strip()
+        now = datetime.now(UTC)
+        # Per task 9.161 / **D-D**, concept articles also carry the
+        # six-field Properties block. The legacy ``status`` field stays
+        # at the top of the frontmatter for backward compat with
+        # wiki-lint STATUS_MISMATCH; ``build_properties_block`` mirrors
+        # it inside the Properties block so Obsidian's Properties pane
+        # sees a single ``status`` value.
+        properties = build_properties_block(
+            when=now,
+            tags=[],
+            aliases=[],
+            status=status,
+        )
         frontmatter: dict[str, object] = {
             "title": clean_name,
-            "status": status,
+            **properties,
             "confidence": round(confidence, 4),
             "sources": list(sources),
             "related_concepts": list(related_concepts or []),
-            "last_synthesized": datetime.now(UTC).strftime("%Y-%m-%d"),
+            "last_synthesized": now.strftime("%Y-%m-%d"),
         }
         path = self._concept_path(clean_name)
         await self._write_markdown(path, frontmatter, body)
@@ -350,13 +390,29 @@ class MarkdownWikiBackend:
         return self.wiki_root / _CONCEPTS_DIRNAME / f"{_concept_name_to_filename(name)}.md"
 
     @staticmethod
-    def _default_source_body(rec: Recommendation) -> str:
+    def _default_source_body(
+        rec: Recommendation,
+        *,
+        callouts: bool = True,
+        templater: bool = False,
+    ) -> str:
         """Render the section-organized body for a fresh source stub.
 
         The five sections are stable so SKILLs (analyze, wiki-ingest,
         extract-images) can target them deterministically. Empty
         sections include "(Run /paper-wiki:<skill>)" hints so users know
         what fills them.
+
+        ``callouts`` (task 9.162 / **D-N**): when ``True`` (default), the
+        Abstract section uses an Obsidian ``> [!abstract] Abstract``
+        callout; when ``False``, falls back to ``## Abstract`` for
+        plain-Markdown export.
+
+        ``templater`` (task 9.164): when ``True``, the Notes section is
+        stamped with a Templater ``<%* tp.file.last_modified_date(...) %>``
+        block so the user gets a live "last edited" timestamp every time
+        Obsidian re-renders the file. Default-off because non-Templater
+        users would see ``<%* %>`` as literal text.
         """
         paper = rec.paper
         score = rec.score
@@ -368,6 +424,23 @@ class MarkdownWikiBackend:
             f"- **Citations**: {paper.citation_count}\n"
             if paper.citation_count is not None
             else "- **Citations**: —\n"
+        )
+
+        abstract_text = paper.abstract.strip()
+        if callouts:
+            quoted = "\n".join(f"> {ln}" if ln else ">" for ln in abstract_text.splitlines())
+            abstract_section = f"> [!abstract] Abstract\n{quoted}\n"
+        else:
+            abstract_section = f"## Abstract\n\n{abstract_text}\n"
+
+        # Per task 9.164: when ``templater=True``, prepend a Templater
+        # ``<%* %>`` block to the Notes section so the user gets a live
+        # "last edited" stamp via ``tp.file.last_modified_date``. Off by
+        # default — non-Templater users would see this as literal text.
+        notes_templater_stamp = (
+            ("\n_Last edit: <%* tR += tp.file.last_modified_date('YYYY-MM-DD HH:mm') %>_\n\n")
+            if templater
+            else ""
         )
 
         return (
@@ -386,10 +459,8 @@ class MarkdownWikiBackend:
                 f"momentum {score.momentum:.2f}, rigor {score.rigor:.2f})\n"
             )
             + "\n"
-            "## Abstract\n"
-            "\n"
-            f"{paper.abstract.strip()}\n"
-            "\n"
+            + abstract_section
+            + "\n"
             "## Key Takeaways\n"
             "\n"
             "_Run `/paper-wiki:wiki-ingest "
@@ -402,8 +473,7 @@ class MarkdownWikiBackend:
             f"{paper.canonical_id}` to download the arXiv source tarball "
             "and embed real paper figures here._\n"
             "\n"
-            "## Notes\n"
-            "\n"
+            "## Notes\n" + notes_templater_stamp + "\n"
             "_Your annotations and follow-up questions go here. Survives "
             "re-ingest because SKILLs only rewrite the sections above._\n"
         )

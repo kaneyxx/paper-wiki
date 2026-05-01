@@ -106,11 +106,39 @@ class TestUpsertSource:
         assert fm["title"] == "PRISM2: Unlocking Multi-Modal AI"
         assert fm["status"] == "draft"
         assert fm["confidence"] == 0.78  # composite as initial confidence
-        assert fm["tags"] == ["cs.CV", "cs.LG"]
+        # Per task 9.161, ``tags`` is normalized to lowercased + nested-tag
+        # form so Obsidian's tag pane groups arXiv categories under their
+        # area (``cs/cv``, ``cs/lg``).
+        assert fm["tags"] == ["cs/cv", "cs/lg"]
         # matched_topics flow into related_concepts as starter wikilinks.
         related = fm["related_concepts"]
         assert isinstance(related, list)
         assert any("vision-language" in s for s in related)
+
+    async def test_source_frontmatter_carries_obsidian_properties_block(
+        self, tmp_path: Path
+    ) -> None:
+        """Per task 9.161 / **D-D**: every per-paper file carries the canonical
+        six-field Properties block alongside the legacy ``canonical_id`` /
+        ``confidence`` / ``score_breakdown`` keys."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        for key in ("tags", "aliases", "status", "cssclasses", "created", "updated"):
+            assert key in fm, f"missing Properties field: {key}"
+        # Type assertions per acceptance criteria.
+        assert isinstance(fm["tags"], list)
+        assert isinstance(fm["aliases"], list)
+        assert isinstance(fm["status"], str)
+        assert isinstance(fm["cssclasses"], list)
+        assert isinstance(fm["created"], str)
+        assert isinstance(fm["updated"], str)
+        # ISO-8601 with timezone offset (round-trip via ``yaml.safe_load``
+        # may also produce a ``datetime`` if the string is unquoted; we
+        # assert the string form by re-reading the raw file).
+        text = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        assert "+00:00" in text  # UTC offset is preserved verbatim
 
     async def test_source_frontmatter_includes_publication_metadata(self, tmp_path: Path) -> None:
         """Frontmatter must carry enough metadata for downstream tools (lint,
@@ -143,7 +171,10 @@ class TestUpsertSource:
 
         for section in (
             "## Core Information",
-            "## Abstract",
+            # Per task 9.162 / **D-N**, the Abstract uses an Obsidian
+            # ``> [!abstract] Abstract`` callout by default; the title
+            # slot acts as the section heading for outline navigation.
+            "> [!abstract] Abstract",
             "## Key Takeaways",
             "## Figures",
             "## Notes",
@@ -438,6 +469,80 @@ class TestUpsertConcept:
                 sources=["arxiv:1"],
                 confidence=1.5,
             )
+
+    async def test_abstract_section_uses_callout_by_default(self, tmp_path: Path) -> None:
+        """Per task 9.162 / **D-N**: per-paper source body wraps the abstract
+        in an Obsidian ``> [!abstract] Abstract`` callout by default."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Drop frontmatter for body assertions.
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+        assert "> [!abstract] Abstract" in body
+        # Plain ``## Abstract`` heading must NOT appear when callouts=True.
+        assert "## Abstract" not in body
+
+    async def test_callouts_false_uses_plain_heading(self, tmp_path: Path) -> None:
+        """Setting ``callouts=False`` falls back to the legacy ``## Abstract``
+        heading style for plain-Markdown export."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path, callouts=False)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+        assert "## Abstract" in body
+        assert "> [!abstract]" not in body
+
+    async def test_templater_default_off_means_no_templater_syntax(self, tmp_path: Path) -> None:
+        """Per task 9.164: Templater is opt-in. Default-off output must not
+        contain raw ``<%`` or ``<%*`` substrings — non-Templater users would
+        see them as literal noise."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        assert "<%" not in body, "Templater syntax leaked into default output"
+        assert "<%*" not in body
+
+    async def test_templater_on_adds_template_block_in_notes(self, tmp_path: Path) -> None:
+        """Per task 9.164 acceptance: when ``templater=True``, the Notes
+        section carries a Templater date/file variable wrapped in
+        ``<%* %>`` blocks."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path, templater=True)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Strip frontmatter so we look at the body proper.
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+        # Notes section carries a Templater expression — at minimum a date
+        # variable so the user gets a live "last edited" stamp.
+        assert "## Notes" in body
+        assert "<%" in body, "Templater flag must inject at least one <% ... %> block"
+        # ``tp.file.last_modified_date`` is the canonical Templater date helper.
+        assert "tp.file" in body or "tp.date" in body
+
+    async def test_concept_carries_obsidian_properties_block(self, tmp_path: Path) -> None:
+        """Per task 9.161 / **D-D**: synthesized concept articles also carry
+        the canonical six-field Properties block."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_concept(
+            name="Multimodal Reasoning",
+            body="...",
+            sources=["arxiv:2506.13063"],
+        )
+
+        fm = _read_frontmatter(tmp_path / "Wiki" / "concepts" / "Multimodal_Reasoning.md")
+        for key in ("tags", "aliases", "status", "cssclasses", "created", "updated"):
+            assert key in fm, f"missing Properties field: {key}"
+        assert isinstance(fm["tags"], list)
+        assert isinstance(fm["aliases"], list)
+        assert isinstance(fm["cssclasses"], list)
+        assert isinstance(fm["created"], str)
+        assert isinstance(fm["updated"], str)
 
 
 # ---------------------------------------------------------------------------

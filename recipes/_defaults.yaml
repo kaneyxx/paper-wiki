@@ -1,0 +1,22 @@
+# paper-wiki recipe defaults (task 9.162 / decision **D-N**)
+#
+# This file is a SIBLING fall-through layer for every recipe in this
+# directory. The recipe loader (paperwiki.config.recipe.load_recipe)
+# reads ``_defaults.yaml`` first, then layers per-recipe values on top
+# before schema validation. Per-recipe values always win.
+#
+# Resolution order:
+#   per-recipe value > _defaults.yaml > built-in Pydantic default
+#
+# The values below mirror the built-in ``ObsidianFlags`` defaults so a
+# user inheriting from this file gets identical behavior to a user with
+# no defaults file at all. Edit individual entries to flip them
+# vault-wide; or override per-recipe by setting the same key in your
+# recipe YAML.
+
+obsidian:
+  # ``> [!abstract]`` / ``> [!note]`` / ``> [!warning]`` callouts in
+  # digest + analyze output. Set to ``false`` for plain Markdown export
+  # (e.g. ``sources-only.yaml`` flips this to keep its output usable
+  # outside Obsidian).
+  callouts: true

@@ -28,7 +28,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from paperwiki.core.errors import UserError
 from paperwiki.core.pipeline import Pipeline
-from paperwiki.plugins.filters.dedup import DedupFilter, MarkdownVaultKeyLoader
+from paperwiki.plugins.filters.dedup import (
+    DedupFilter,
+    DedupLedgerKeyLoader,
+    MarkdownVaultKeyLoader,
+)
 from paperwiki.plugins.filters.recency import RecencyFilter
 from paperwiki.plugins.filters.relevance import RelevanceFilter, Topic
 from paperwiki.plugins.reporters.markdown import MarkdownReporter
@@ -49,6 +53,38 @@ class PluginSpec(BaseModel):
 
     name: str = Field(min_length=1)
     config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ObsidianFlags(BaseModel):
+    """Vault-wide Obsidian rendering switches (task 9.162, decision **D-N**).
+
+    These flags are applied uniformly across all reporters and backends so
+    a vault stays internally consistent — turning off ``callouts`` for
+    one slot and leaving it on for another would create jarring style
+    drift in the user's vault.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ``> [!abstract]`` / ``> [!note]`` / ``> [!warning]`` callouts in
+    # digest + analyze output (per **D-N**, default-on; the
+    # ``sources-only`` recipe ships with this off so plain-Markdown
+    # consumers don't see Obsidian-only syntax).
+    callouts: bool = True
+    # ``<%* ... %>`` Templater expressions in note bodies (task 9.164).
+    # Default off because non-Templater users would see the syntax as
+    # literal text. Recipes targeting power users with the Templater
+    # plugin installed flip this to true to get live "last edited"
+    # stamps and date helpers in the Notes section of every per-paper
+    # source stub.
+    templater: bool = False
+
+
+# Defaults file shipped with the plugin / co-located with user recipes.
+# Per **D-N**, ``recipes/_defaults.yaml`` carries vault-wide overrides
+# that apply to every recipe in the same directory; per-recipe values
+# always win.
+DEFAULTS_FILENAME = "_defaults.yaml"
 
 
 class RecipeSchema(BaseModel):
@@ -75,39 +111,155 @@ class RecipeSchema(BaseModel):
     # that would burn Claude time. The digest SKILL clamps to
     # ``min(auto_ingest_top, top_k)`` at runtime.
     auto_ingest_top: int = Field(default=0, ge=0, le=20)
+    # Vault-wide Obsidian rendering flags (task 9.162, **D-N**). Defaults
+    # come from ``recipes/_defaults.yaml`` (if present) and the
+    # :class:`ObsidianFlags` field defaults; per-recipe values override.
+    obsidian: ObsidianFlags = Field(default_factory=ObsidianFlags)
 
 
-def load_recipe(path: Path) -> RecipeSchema:
-    """Read and validate a YAML recipe file."""
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Read a YAML file and assert it's a mapping at the top level."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        msg = f"failed to read recipe {path}: {exc}"
+        msg = f"failed to read {path}: {exc}"
         raise UserError(msg) from exc
 
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        msg = f"recipe {path} is not valid YAML: {exc}"
+        # Task 9.170: surface line/column from yaml.MarkedYAMLError so
+        # editors can jump to the offending bracket / colon / indent.
+        location = ""
+        problem_mark = getattr(exc, "problem_mark", None)
+        if problem_mark is not None:
+            location = f" at line {problem_mark.line + 1}, column {problem_mark.column + 1}"
+        problem = getattr(exc, "problem", None) or str(exc)
+        msg = f"{path} is not valid YAML{location}: {problem}"
         raise UserError(msg) from exc
 
+    if data is None:
+        return {}
     if not isinstance(data, dict):
-        msg = f"recipe {path} must be a YAML mapping at top level"
+        msg = f"{path} must be a YAML mapping at top level"
+        raise UserError(msg)
+    return data
+
+
+def _format_validation_error(path: Path, exc: ValidationError) -> str:
+    """Render a Pydantic ValidationError into a recipe-author-friendly listing.
+
+    Each error becomes one line of the form
+    ``<dotted.field.path>: <reason> (got <repr>)`` so the user sees
+    exactly which field to fix. Nested list items use bracket notation
+    (``scorer.config.weights.relevance``, ``sources[0].config``).
+    """
+    lines: list[str] = [f"recipe {path} has invalid schema:"]
+    for error in exc.errors():
+        loc_parts: list[str] = []
+        for piece in error["loc"]:
+            if isinstance(piece, int):
+                loc_parts.append(f"[{piece}]")
+            elif loc_parts:
+                loc_parts.append(f".{piece}")
+            else:
+                loc_parts.append(str(piece))
+        loc = "".join(loc_parts) or "<root>"
+        message = error["msg"]
+        got = error.get("input")
+        suffix = ""
+        if got is not None and not isinstance(got, dict | list):
+            suffix = f" (got {got!r})"
+        lines.append(f"  - {loc}: {message}{suffix}")
+    return "\n".join(lines)
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Return a new dict that's ``base`` with ``override`` layered on top.
+
+    Nested dicts merge recursively; non-dict values from ``override`` win
+    outright. Used for ``_defaults.yaml`` ⊕ per-recipe resolution.
+    """
+    out = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _load_defaults(recipe_dir: Path) -> dict[str, Any]:
+    """Load ``recipe_dir/_defaults.yaml`` (if any) into a plain dict."""
+    defaults_path = recipe_dir / DEFAULTS_FILENAME
+    if not defaults_path.is_file():
+        return {}
+    return _load_yaml_mapping(defaults_path)
+
+
+def load_recipe(path: Path) -> RecipeSchema:
+    """Read and validate a YAML recipe file.
+
+    Per **D-N**: layers ``<recipe_dir>/_defaults.yaml`` (if any) under
+    the per-recipe values before validating, so vault-wide flags like
+    ``obsidian.callouts`` can be set once for an entire recipe family.
+    Loading the defaults file directly is rejected because it lacks the
+    required ``name`` / ``sources`` / ``scorer`` / ``reporters`` keys.
+    """
+    if path.name == DEFAULTS_FILENAME:
+        msg = (
+            f"{path} is a defaults file, not a recipe; load a sibling recipe to inherit its values"
+        )
         raise UserError(msg)
 
+    data = _load_yaml_mapping(path)
+    defaults = _load_defaults(path.parent)
+    merged = _deep_merge(defaults, data)
+
     try:
-        return RecipeSchema.model_validate(data)
+        return RecipeSchema.model_validate(merged)
     except ValidationError as exc:
-        msg = f"recipe {path} has invalid schema: {exc}"
+        # Task 9.170: render an actionable per-error listing so the
+        # recipe author sees exactly which field to fix instead of
+        # the opaque Pydantic dump.
+        msg = _format_validation_error(path, exc)
         raise UserError(msg) from exc
+
+
+def _resolve_obsidian_vault(recipe: RecipeSchema) -> Path | None:
+    """Pull the obsidian reporter's ``vault_path`` (if any) for vault-bound state.
+
+    Used by both the run-status ledger (task 9.167) and the dedup
+    ledger (task 9.168) per **D-O** + **D-M** to anchor vault-global
+    state in one place. Recipes without an obsidian reporter return
+    ``None``; downstream wiring no-ops the vault-bound features.
+    """
+    for spec in recipe.reporters:
+        if spec.name == "obsidian":
+            value = spec.config.get("vault_path")
+            if isinstance(value, str | Path):
+                return Path(value).expanduser()
+    return None
 
 
 def instantiate_pipeline(recipe: RecipeSchema) -> Pipeline:
-    """Build a fully-wired :class:`Pipeline` from a recipe."""
+    """Build a fully-wired :class:`Pipeline` from a recipe.
+
+    Vault-wide flags from :class:`ObsidianFlags` (task 9.162 / **D-N**)
+    are plumbed through to the reporter builders so a recipe-level
+    ``obsidian.callouts: false`` propagates to every reporter that
+    cares (currently :class:`ObsidianReporter`).
+
+    The obsidian reporter's ``vault_path`` is pulled out at this layer
+    and threaded into :func:`_build_filter` so the dedup filter can
+    auto-engage the persistent dedup ledger (task 9.168 / **D-F** +
+    **D-M**) without recipe authors having to wire it twice.
+    """
+    vault_path = _resolve_obsidian_vault(recipe)
     sources = [_build_source(s) for s in recipe.sources]
-    filters = [_build_filter(f) for f in recipe.filters]
+    filters = [_build_filter(f, ledger_vault=vault_path) for f in recipe.filters]
     scorer = _build_scorer(recipe.scorer)
-    reporters = [_build_reporter(r) for r in recipe.reporters]
+    reporters = [_build_reporter(r, obsidian_flags=recipe.obsidian) for r in recipe.reporters]
     return Pipeline(
         sources=sources,
         filters=filters,
@@ -187,16 +339,24 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def _build_filter(spec: PluginSpec) -> Filter:
+def _build_filter(spec: PluginSpec, *, ledger_vault: Path | None = None) -> Filter:
     if spec.name == "recency":
         return RecencyFilter(**spec.config)
     if spec.name == "relevance":
         topics = _topics_from_config(spec.config.get("topics", []))
         return RelevanceFilter(topics=topics)
     if spec.name == "dedup":
-        loaders = [
+        loaders: list[Any] = [
             MarkdownVaultKeyLoader(root=_expand(p)) for p in spec.config.get("vault_paths", [])
         ]
+        # Task 9.168 / **D-F** + **D-M**: auto-engage the persistent
+        # dedup ledger when an obsidian reporter exposes a vault_path.
+        # Opt-out via ``ledger: false`` keeps the door open for
+        # sources-only recipes that share a vault but want isolated
+        # dedup semantics.
+        ledger_enabled = bool(spec.config.get("ledger", True))
+        if ledger_enabled and ledger_vault is not None:
+            loaders.append(DedupLedgerKeyLoader(vault_path=ledger_vault))
         return DedupFilter(loaders=loaders)
     msg = f"unknown filter plugin: {spec.name!r}"
     raise UserError(msg)
@@ -211,7 +371,7 @@ def _build_scorer(spec: PluginSpec) -> Scorer:
     raise UserError(msg)
 
 
-def _build_reporter(spec: PluginSpec) -> Reporter:
+def _build_reporter(spec: PluginSpec, *, obsidian_flags: ObsidianFlags) -> Reporter:
     if spec.name == "markdown":
         config = dict(spec.config)
         if "output_dir" in config:
@@ -221,6 +381,10 @@ def _build_reporter(spec: PluginSpec) -> Reporter:
         config = dict(spec.config)
         if "vault_path" in config:
             config["vault_path"] = _expand(config["vault_path"])
+        # Vault-wide flags layered in unless the per-reporter spec
+        # already set them explicitly (per-reporter > vault-wide).
+        config.setdefault("callouts", obsidian_flags.callouts)
+        config.setdefault("templater", obsidian_flags.templater)
         return ObsidianReporter(**config)
     msg = f"unknown reporter plugin: {spec.name!r}"
     raise UserError(msg)
@@ -246,6 +410,8 @@ def _expand(value: str | Path) -> Path:
 
 
 __all__ = [
+    "DEFAULTS_FILENAME",
+    "ObsidianFlags",
     "PluginSpec",
     "RecipeSchema",
     "instantiate_pipeline",

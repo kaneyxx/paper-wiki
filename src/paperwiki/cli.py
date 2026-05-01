@@ -34,6 +34,8 @@ from paperwiki._internal.paths import (
     resolve_paperwiki_bak_dir,
     resolve_paperwiki_venv_dir,
 )
+from paperwiki.runners.dedup_dismiss import main as _dedup_dismiss_main
+from paperwiki.runners.dedup_list import main as _dedup_list_main
 from paperwiki.runners.diag import render_diag as _render_diag
 from paperwiki.runners.diagnostics import main as _diagnostics_main
 from paperwiki.runners.digest import main as _digest_main
@@ -59,9 +61,11 @@ from paperwiki.runners.gc_bak import (
 from paperwiki.runners.gc_bak import (
     main as _gc_bak_main,
 )
+from paperwiki.runners.gc_dedup_ledger import main as _gc_dedup_ledger_main
 from paperwiki.runners.gc_digest_archive import main as _gc_archive_main
 from paperwiki.runners.migrate_recipe import main as _migrate_recipe_main
 from paperwiki.runners.migrate_sources import main as _migrate_sources_main
+from paperwiki.runners.recipe_validate import main as _recipe_validate_main
 from paperwiki.runners.uninstall import (
     UninstallOpts,
 )
@@ -70,6 +74,7 @@ from paperwiki.runners.uninstall import (
 )
 from paperwiki.runners.where import main as _where_main
 from paperwiki.runners.wiki_compile import main as _wiki_compile_main
+from paperwiki.runners.wiki_graph_query import main as _wiki_graph_query_main
 from paperwiki.runners.wiki_ingest_plan import main as _wiki_ingest_main
 from paperwiki.runners.wiki_lint import main as _wiki_lint_main
 from paperwiki.runners.wiki_query import main as _wiki_query_main
@@ -107,15 +112,20 @@ app = typer.Typer(
 # Typer app for ``python -m paperwiki.runners.<name>`` invocation; this file
 # only re-uses the ``main`` callable as a parent-app command.
 app.command(name="migrate-recipe")(_migrate_recipe_main)
+app.command(name="recipe-validate")(_recipe_validate_main)
 app.command(name="digest")(_digest_main)
 app.command(name="wiki-ingest")(_wiki_ingest_main)
 app.command(name="wiki-lint")(_wiki_lint_main)
 app.command(name="wiki-compile")(_wiki_compile_main)
 app.command(name="wiki-query")(_wiki_query_main)
+app.command(name="wiki-graph")(_wiki_graph_query_main)
 app.command(name="extract-images")(_extract_images_main)
 app.command(name="migrate-sources")(_migrate_sources_main)
 app.command(name="gc-archive")(_gc_archive_main)
 app.command(name="gc-bak")(_gc_bak_main)
+app.command(name="gc-dedup-ledger")(_gc_dedup_ledger_main)
+app.command(name="dedup-list")(_dedup_list_main)
+app.command(name="dedup-dismiss")(_dedup_dismiss_main)
 app.command(name="where")(_where_main)
 # Task 9.59 (v0.3.34): expose `paperwiki diagnostics` so the setup and
 # bio-search SKILLs can use the shim consistently. The runner module
@@ -742,6 +752,17 @@ def status(
             "(opt-in; default exits 0 regardless).",
         ),
     ] = False,
+    vault: Annotated[
+        Path | None,
+        typer.Option(
+            "--vault",
+            help=(
+                "Path to an Obsidian vault. When given, surface the last 5 "
+                "rows of <vault>/.paperwiki/run-status.jsonl after the "
+                "install-health section (task 9.167 / D-O)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Print a 3-line state report (cache / marketplace / enabledPlugins)."""
     configure_runner_logging(verbose=verbose)
@@ -792,12 +813,46 @@ def status(
         else:
             typer.echo(f"  ✗ {label}  (action: {hint})")
 
+    # v0.4.x task 9.167 / D-O: opt-in run-status section. When the user
+    # passes --vault, surface the last 5 rows from
+    # ``<vault>/.paperwiki/run-status.jsonl`` so they can audit recent
+    # digest outcomes (success counts, source errors, schema failures)
+    # without grepping JSONL by hand. The flag is opt-in because most
+    # status invocations are about plugin install state, not vault state;
+    # automation that pipes status output without --vault is unaffected.
+    if vault is not None:
+        _emit_run_status_section(vault.expanduser())
+
     # v0.3.41 D-9.41.2: opt-in strict mode flips exit code to 1 when any
     # health row is ✗. Default (no --strict) preserves the v0.3.40 D-9.40.1
     # warn-not-error contract — automation that pipes status output without
     # the flag is unaffected.
     if strict and healthy < len(health_rows):
         raise typer.Exit(1)
+
+
+def _emit_run_status_section(vault_path: Path) -> None:
+    """Print the last 5 run-status ledger rows for ``vault_path``.
+
+    Friendly fallback when the ledger doesn't exist yet — fresh-install
+    vaults haven't run a digest, and that should not look like an error.
+    """
+    from paperwiki._internal.run_status import read_recent_run_status
+
+    typer.echo(f"recent runs      : {vault_path / '.paperwiki' / 'run-status.jsonl'}")
+    entries = read_recent_run_status(vault_path, limit=5)
+    if not entries:
+        typer.echo("  (no runs recorded yet)")
+        return
+    for entry in entries:
+        when = entry.timestamp.strftime("%Y-%m-%d %H:%M")
+        if entry.error_class is not None:
+            typer.echo(f"  ✗ {when}  {entry.recipe}  ({entry.error_class}: {entry.error_message})")
+        else:
+            typer.echo(
+                f"  ✓ {when}  {entry.recipe}  "
+                f"final={entry.final_count} elapsed={entry.elapsed_ms}ms"
+            )
 
 
 # v0.3.43 D-9.43.3: install-health logic moved to

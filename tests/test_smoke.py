@@ -36,17 +36,38 @@ def test_version_string_is_semver_like() -> None:
 
 def test_plugin_manifest_is_valid_json() -> None:
     """``.claude-plugin/plugin.json`` is parseable and well-formed."""
+    from paperwiki import __version__
+
     manifest = REPO_ROOT / ".claude-plugin" / "plugin.json"
     assert manifest.is_file(), manifest
 
     data = json.loads(manifest.read_text(encoding="utf-8"))
 
     assert data["name"] == "paper-wiki"
-    assert data["version"] == "0.3.44"
+    # Pin to paperwiki.__version__ so the manifest version cannot drift
+    # away from the package version. Updating the package bumps the
+    # manifest in lockstep — caught here at test time, not at release.
+    assert data["version"] == __version__
     assert data["license"] == "GPL-3.0"
     assert data["commands"] == "./.claude/commands"
     assert data["repository"].endswith("/paper-wiki")
     assert data["homepage"].endswith("/paper-wiki")
+
+
+def test_pyproject_version_matches_package() -> None:
+    """``pyproject.toml`` carries the same version as paperwiki.__version__.
+
+    Three places hold the version (paperwiki/__init__.py, pyproject.toml,
+    plugin.json); this test + the manifest test above pin them all to a
+    single source of truth so a partial bump is caught in CI rather
+    than at release-tag time.
+    """
+    from paperwiki import __version__
+
+    body = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert f'version = "{__version__}"' in body, (
+        f"pyproject.toml version drifted from paperwiki.__version__ ({__version__!r})"
+    )
 
 
 def test_marketplace_manifest_lists_paper_wiki() -> None:
