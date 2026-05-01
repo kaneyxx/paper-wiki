@@ -39,6 +39,7 @@ import aiofiles
 import yaml
 
 from paperwiki.config.layout import WIKI_SUBDIR
+from paperwiki.core.properties import build_properties_block
 
 if TYPE_CHECKING:
     from paperwiki.core.models import Recommendation, ScoreBreakdown
@@ -190,13 +191,25 @@ class MarkdownWikiBackend:
             threshold=topic_strength_threshold,
         )
         related = [f"[[{topic}]]" for topic in filtered_topics]
+        now = datetime.now(UTC)
+        # Per task 9.161 / **D-D**, every paper-wiki output carries the
+        # canonical six-field Obsidian Properties block. ``status`` is
+        # already part of the legacy frontmatter; the Properties block
+        # supplies it via ``status="draft"`` so the Properties pane and
+        # the legacy ``status`` consumer (wiki-lint STATUS_MISMATCH) see
+        # the same value.
+        properties = build_properties_block(
+            when=now,
+            tags=list(paper.categories),
+            aliases=[],
+            status="draft",
+        )
         frontmatter: dict[str, object] = {
             "canonical_id": paper.canonical_id,
             "title": paper.title,
-            "status": "draft",
+            **properties,  # tags / aliases / status / cssclasses / created / updated
             "confidence": round(score.composite, 4),
             "domain": _infer_domain(paper.categories),
-            "tags": list(paper.categories),
             "published_at": paper.published_at.strftime("%Y-%m-%d"),
             "landing_url": paper.landing_url or "",
             "pdf_url": paper.pdf_url or "",
@@ -209,7 +222,7 @@ class MarkdownWikiBackend:
                 "rigor": round(score.rigor, 4),
             },
             "related_concepts": related,
-            "last_synthesized": datetime.now(UTC).strftime("%Y-%m-%d"),
+            "last_synthesized": now.strftime("%Y-%m-%d"),
         }
 
         body = self._default_source_body(rec)
@@ -281,13 +294,26 @@ class MarkdownWikiBackend:
             raise ValueError(msg)
 
         clean_name = name.strip()
+        now = datetime.now(UTC)
+        # Per task 9.161 / **D-D**, concept articles also carry the
+        # six-field Properties block. The legacy ``status`` field stays
+        # at the top of the frontmatter for backward compat with
+        # wiki-lint STATUS_MISMATCH; ``build_properties_block`` mirrors
+        # it inside the Properties block so Obsidian's Properties pane
+        # sees a single ``status`` value.
+        properties = build_properties_block(
+            when=now,
+            tags=[],
+            aliases=[],
+            status=status,
+        )
         frontmatter: dict[str, object] = {
             "title": clean_name,
-            "status": status,
+            **properties,
             "confidence": round(confidence, 4),
             "sources": list(sources),
             "related_concepts": list(related_concepts or []),
-            "last_synthesized": datetime.now(UTC).strftime("%Y-%m-%d"),
+            "last_synthesized": now.strftime("%Y-%m-%d"),
         }
         path = self._concept_path(clean_name)
         await self._write_markdown(path, frontmatter, body)
