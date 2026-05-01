@@ -47,6 +47,10 @@ from paperwiki.core.templates import (  # noqa: E402
 )
 
 SEED = 42  # locked per plan §9.156a acceptance.
+# Fixed timestamp for the Obsidian Properties block (task 9.161). The
+# fixture must stay byte-identical across rebuilds, so we hard-code this
+# rather than using ``datetime.now()``.
+FIXTURE_WHEN = datetime(2026, 5, 1, 0, 0, 0, tzinfo=UTC)
 FIXTURE_ROOT = Path(__file__).parent / "synthetic_vault_100"
 PAPERS_PER_CLUSTER = 8
 CONCEPTS_PER_CLUSTER = 6
@@ -233,7 +237,7 @@ def _build_cluster(
             papers=papers,
         )
         concepts_by_slug[slug] = concept
-        concept_files.append((f"concepts/{slug}.md", render_concept(concept)))
+        concept_files.append((f"concepts/{slug}.md", render_concept(concept, when=FIXTURE_WHEN)))
 
     # --- Topics ---
     topic_files: list[tuple[str, str]] = []
@@ -252,7 +256,7 @@ def _build_cluster(
             papers=papers,
             concepts=concepts,
         )
-        topic_files.append((f"topics/{slug}.md", render_topic(topic)))
+        topic_files.append((f"topics/{slug}.md", render_topic(topic, when=FIXTURE_WHEN)))
 
     # --- People ---
     people_files: list[tuple[str, str]] = []
@@ -269,7 +273,7 @@ def _build_cluster(
             papers=papers,
             collaborators=collaborators,
         )
-        people_files.append((f"people/{slug}.md", render_person(person)))
+        people_files.append((f"people/{slug}.md", render_person(person, when=FIXTURE_WHEN)))
 
     # --- Papers ---
     # Each paper references its primary topic, 2 concepts, 1-2 other

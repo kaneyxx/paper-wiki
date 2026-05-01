@@ -1,8 +1,22 @@
 ---
 type: person
 name: Alec Radford
-aliases: [alec_radford]
 affiliation: Synthetic Fixture Inst 0
+tags: []
+aliases:
+- alec_radford
+status: draft
+cssclasses: []
+created: '2026-05-01T00:00:00+00:00'
+updated: '2026-05-01T00:00:00+00:00'
+papers:
+- arxiv:2401.00004
+- arxiv:2401.00006
+- arxiv:2401.00001
+- arxiv:2401.00007
+- arxiv:2401.00002
+collaborators:
+- jong-wook-kim
 ---
 
 # Alec Radford

@@ -1,8 +1,21 @@
 ---
 type: person
 name: Jason Wei
-aliases: [jason_wei]
 affiliation: Synthetic Fixture Inst 1
+tags: []
+aliases:
+- jason_wei
+status: draft
+cssclasses: []
+created: '2026-05-01T00:00:00+00:00'
+updated: '2026-05-01T00:00:00+00:00'
+papers:
+- arxiv:2401.00011
+- arxiv:2401.00016
+- arxiv:2401.00010
+- arxiv:2401.00013
+collaborators:
+- denny-zhou
 ---
 
 # Jason Wei

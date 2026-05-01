@@ -2,13 +2,17 @@
 
 Renders :class:`Concept` / :class:`Topic` / :class:`Person` instances into
 Markdown strings ready to write to ``Wiki/{concepts,topics,people}/``
-inside the user's vault. Templates are deterministic — same input produces
-byte-identical output, which is required so :mod:`paperwiki.runners.wiki_compile_graph`
-(task 9.157) can stay idempotent on second-pass writes.
+inside the user's vault. Templates are deterministic — same input
+(including the ``when`` timestamp) produces byte-identical output, which
+is required so :mod:`paperwiki.runners.wiki_compile_graph` (task 9.157)
+can stay idempotent on second-pass writes.
 
-Phase 2 (task 9.161) will tune the YAML frontmatter shape for Obsidian
-Properties API (D-D); v0.4.0 ships the minimal contract expected by
-9.157 + 9.159.
+Phase 2 (task 9.161, decision **D-D**) tunes the YAML frontmatter shape
+to first-class Obsidian Properties: every render carries ``tags`` /
+``aliases`` / ``status`` / ``cssclasses`` / ``created`` / ``updated`` so
+the user's Properties pane and Dataview queries work without manual
+glue. Type-specific fields (``type``, ``name``, ``definition``, …) live
+above the Properties block but below the opening ``---``.
 
 Why the templates live in Python rather than ``locales/en/templates/``
 .md files: v0.4.0 surface is English-only (SPEC §7 boundary). Adding a
@@ -22,32 +26,33 @@ catches template/model drift; a file-based engine would not).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import yaml
+
+from paperwiki.core.properties import build_properties_block
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from paperwiki.core.models import Concept, Person, Topic
 
 
-def _yaml_string_list(values: list[str]) -> str:
-    """Render a list of strings as a YAML flow-style sequence.
+def _render_frontmatter(payload: dict[str, Any]) -> str:
+    """Render a YAML frontmatter block with stable, Obsidian-friendly output.
 
-    >>> _yaml_string_list([])
-    '[]'
-    >>> _yaml_string_list(["a", "b"])
-    '[a, b]'
+    Uses block-style (``- item``) sequences for list values so the
+    Properties pane in Obsidian 1.4+ renders them as first-class lists.
+    Key order is preserved so callers control field ordering for
+    determinism.
     """
-    if not values:
-        return "[]"
-    # Quote individually only when the value contains a YAML-special
-    # character; bare scalars round-trip cleanly otherwise.
-    rendered: list[str] = []
-    for v in values:
-        if any(ch in v for ch in ":#,[]{}&*!|>'\"%@`\n"):
-            quoted = v.replace("\\", "\\\\").replace('"', '\\"')
-            rendered.append(f'"{quoted}"')
-        else:
-            rendered.append(v)
-    return "[" + ", ".join(rendered) + "]"
+    body = yaml.safe_dump(
+        payload,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+    return f"---\n{body}---\n"
 
 
 def _wikilink_section(heading: str, targets: list[str]) -> str:
@@ -64,37 +69,45 @@ def _wikilink_section(heading: str, targets: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_concept(concept: Concept) -> str:
-    """Render a :class:`Concept` to Markdown.
+def render_concept(concept: Concept, *, when: datetime) -> str:
+    """Render a :class:`Concept` to Markdown with Obsidian Properties frontmatter.
 
-    Output structure:
+    Frontmatter shape (per task 9.161, **D-D**)::
 
-    ```
-    ---
-    type: concept
-    name: <name>
-    aliases: <yaml flow seq>
-    tags: <yaml flow seq>
-    ---
+        ---
+        type: concept
+        name: <name>
+        definition: <definition>
+        tags: [...]
+        aliases: [...]
+        status: draft
+        cssclasses: []
+        created: <iso8601>
+        updated: <iso8601>
+        papers: [...]   # optional, only when non-empty
+        ---
 
-    # <name>
-
-    <definition>
-
-    [optional ## Aliases]
-    [optional ## Papers]
-    ```
+    The body keeps ``# <name>`` + definition text + optional aliases /
+    papers wikilink sections so Obsidian's outline pane stays useful.
     """
+    fm: dict[str, Any] = {
+        "type": "concept",
+        "name": concept.name,
+        "definition": concept.definition,
+    }
+    fm.update(
+        build_properties_block(
+            when=when,
+            tags=list(concept.tags),
+            aliases=list(concept.aliases),
+        )
+    )
+    if concept.papers:
+        fm["papers"] = list(concept.papers)
+
     parts: list[str] = []
-    parts.append("---")
-    parts.append("type: concept")
-    parts.append(f"name: {concept.name}")
-    parts.append(f"aliases: {_yaml_string_list(concept.aliases)}")
-    parts.append(f"tags: {_yaml_string_list(concept.tags)}")
-    parts.append("---")
-    parts.append("")
-    parts.append(f"# {concept.name}")
-    parts.append("")
+    parts.append(_render_frontmatter(fm))
+    parts.append(f"# {concept.name}\n")
     parts.append(concept.definition)
     parts.append("")
     if concept.aliases:
@@ -107,16 +120,28 @@ def render_concept(concept: Concept) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
-def render_topic(topic: Topic) -> str:
-    """Render a :class:`Topic` to Markdown."""
+def render_topic(topic: Topic, *, when: datetime) -> str:
+    """Render a :class:`Topic` to Markdown with Obsidian Properties frontmatter."""
+    fm: dict[str, Any] = {
+        "type": "topic",
+        "name": topic.name,
+        "description": topic.description,
+    }
+    fm.update(
+        build_properties_block(
+            when=when,
+            tags=[],
+            aliases=[],
+        )
+    )
+    if topic.papers:
+        fm["papers"] = list(topic.papers)
+    if topic.concepts:
+        fm["concepts"] = list(topic.concepts)
+
     parts: list[str] = []
-    parts.append("---")
-    parts.append("type: topic")
-    parts.append(f"name: {topic.name}")
-    parts.append("---")
-    parts.append("")
-    parts.append(f"# {topic.name}")
-    parts.append("")
+    parts.append(_render_frontmatter(fm))
+    parts.append(f"# {topic.name}\n")
     parts.append(topic.description)
     parts.append("")
     if topic.papers:
@@ -133,24 +158,34 @@ def render_topic(topic: Topic) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
-def render_person(person: Person) -> str:
-    """Render a :class:`Person` to Markdown.
+def render_person(person: Person, *, when: datetime) -> str:
+    """Render a :class:`Person` to Markdown with Obsidian Properties frontmatter.
 
     The ``affiliation`` field is intentionally omitted from frontmatter
     when ``None`` — emitting ``affiliation: null`` would let downstream
     tools parse the literal ``"None"`` string as an affiliation.
     """
-    parts: list[str] = []
-    parts.append("---")
-    parts.append("type: person")
-    parts.append(f"name: {person.name}")
-    parts.append(f"aliases: {_yaml_string_list(person.aliases)}")
+    fm: dict[str, Any] = {
+        "type": "person",
+        "name": person.name,
+    }
     if person.affiliation is not None:
-        parts.append(f"affiliation: {person.affiliation}")
-    parts.append("---")
-    parts.append("")
-    parts.append(f"# {person.name}")
-    parts.append("")
+        fm["affiliation"] = person.affiliation
+    fm.update(
+        build_properties_block(
+            when=when,
+            tags=[],
+            aliases=list(person.aliases),
+        )
+    )
+    if person.papers:
+        fm["papers"] = list(person.papers)
+    if person.collaborators:
+        fm["collaborators"] = list(person.collaborators)
+
+    parts: list[str] = []
+    parts.append(_render_frontmatter(fm))
+    parts.append(f"# {person.name}\n")
     if person.affiliation is not None:
         parts.append(f"**Affiliation**: {person.affiliation}")
         parts.append("")

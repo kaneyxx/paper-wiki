@@ -1,8 +1,22 @@
 ---
 type: person
 name: Prafulla Dhariwal
-aliases: [prafulla_dhariwal]
 affiliation: Synthetic Fixture Inst 4
+tags: []
+aliases:
+- prafulla_dhariwal
+status: draft
+cssclasses: []
+created: '2026-05-01T00:00:00+00:00'
+updated: '2026-05-01T00:00:00+00:00'
+papers:
+- arxiv:2401.00038
+- arxiv:2401.00036
+- arxiv:2401.00040
+- arxiv:2401.00035
+- arxiv:2401.00034
+collaborators:
+- jonathan-ho
 ---
 
 # Prafulla Dhariwal
