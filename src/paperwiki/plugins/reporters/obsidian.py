@@ -352,7 +352,10 @@ class ObsidianReporter:
             # backend's yaml round-trip overhead when the flag is off.
             from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
 
-            backend = MarkdownWikiBackend(vault_path=self.vault_path)
+            backend = MarkdownWikiBackend(
+                vault_path=self.vault_path,
+                callouts=self.callouts,
+            )
             async with acquire_vault_lock(self.vault_path):
                 for rec in recs:
                     await backend.upsert_paper(

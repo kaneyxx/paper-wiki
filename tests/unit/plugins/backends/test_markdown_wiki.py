@@ -171,7 +171,10 @@ class TestUpsertSource:
 
         for section in (
             "## Core Information",
-            "## Abstract",
+            # Per task 9.162 / **D-N**, the Abstract uses an Obsidian
+            # ``> [!abstract] Abstract`` callout by default; the title
+            # slot acts as the section heading for outline navigation.
+            "> [!abstract] Abstract",
             "## Key Takeaways",
             "## Figures",
             "## Notes",
@@ -466,6 +469,32 @@ class TestUpsertConcept:
                 sources=["arxiv:1"],
                 confidence=1.5,
             )
+
+    async def test_abstract_section_uses_callout_by_default(self, tmp_path: Path) -> None:
+        """Per task 9.162 / **D-N**: per-paper source body wraps the abstract
+        in an Obsidian ``> [!abstract] Abstract`` callout by default."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        # Drop frontmatter for body assertions.
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+        assert "> [!abstract] Abstract" in body
+        # Plain ``## Abstract`` heading must NOT appear when callouts=True.
+        assert "## Abstract" not in body
+
+    async def test_callouts_false_uses_plain_heading(self, tmp_path: Path) -> None:
+        """Setting ``callouts=False`` falls back to the legacy ``## Abstract``
+        heading style for plain-Markdown export."""
+        backend = MarkdownWikiBackend(vault_path=tmp_path, callouts=False)
+        await backend.upsert_paper(_make_recommendation())
+
+        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        _, _, body = body.partition("---\n")
+        _, _, body = body.partition("---\n")
+        assert "## Abstract" in body
+        assert "> [!abstract]" not in body
 
     async def test_concept_carries_obsidian_properties_block(self, tmp_path: Path) -> None:
         """Per task 9.161 / **D-D**: synthesized concept articles also carry

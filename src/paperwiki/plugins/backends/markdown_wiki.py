@@ -141,16 +141,24 @@ class ConceptSummary:
 
 
 class MarkdownWikiBackend:
-    """File-system backed implementation of :class:`WikiBackend`."""
+    """File-system backed implementation of :class:`WikiBackend`.
+
+    ``callouts`` (task 9.162 / **D-N**) controls whether the per-paper
+    source body wraps its Abstract section in an Obsidian
+    ``> [!abstract] Abstract`` callout (default) or a plain
+    ``## Abstract`` heading (recipe override for plain-Markdown export).
+    """
 
     def __init__(
         self,
         vault_path: Path,
         *,
         wiki_subdir: str = WIKI_SUBDIR,
+        callouts: bool = True,
     ) -> None:
         self.vault_path = vault_path
         self.wiki_root = vault_path / wiki_subdir
+        self.callouts = callouts
 
     # ------------------------------------------------------------------
     # WikiBackend protocol methods
@@ -225,7 +233,7 @@ class MarkdownWikiBackend:
             "last_synthesized": now.strftime("%Y-%m-%d"),
         }
 
-        body = self._default_source_body(rec)
+        body = self._default_source_body(rec, callouts=self.callouts)
         path = self._source_path(paper.canonical_id)
         await self._write_markdown(path, frontmatter, body)
         return path
@@ -376,13 +384,18 @@ class MarkdownWikiBackend:
         return self.wiki_root / _CONCEPTS_DIRNAME / f"{_concept_name_to_filename(name)}.md"
 
     @staticmethod
-    def _default_source_body(rec: Recommendation) -> str:
+    def _default_source_body(rec: Recommendation, *, callouts: bool = True) -> str:
         """Render the section-organized body for a fresh source stub.
 
         The five sections are stable so SKILLs (analyze, wiki-ingest,
         extract-images) can target them deterministically. Empty
         sections include "(Run /paper-wiki:<skill>)" hints so users know
         what fills them.
+
+        ``callouts`` (task 9.162 / **D-N**): when ``True`` (default), the
+        Abstract section uses an Obsidian ``> [!abstract] Abstract``
+        callout; when ``False``, falls back to ``## Abstract`` for
+        plain-Markdown export.
         """
         paper = rec.paper
         score = rec.score
@@ -395,6 +408,13 @@ class MarkdownWikiBackend:
             if paper.citation_count is not None
             else "- **Citations**: —\n"
         )
+
+        abstract_text = paper.abstract.strip()
+        if callouts:
+            quoted = "\n".join(f"> {ln}" if ln else ">" for ln in abstract_text.splitlines())
+            abstract_section = f"> [!abstract] Abstract\n{quoted}\n"
+        else:
+            abstract_section = f"## Abstract\n\n{abstract_text}\n"
 
         return (
             f"# {paper.title}\n"
@@ -412,10 +432,8 @@ class MarkdownWikiBackend:
                 f"momentum {score.momentum:.2f}, rigor {score.rigor:.2f})\n"
             )
             + "\n"
-            "## Abstract\n"
-            "\n"
-            f"{paper.abstract.strip()}\n"
-            "\n"
+            + abstract_section
+            + "\n"
             "## Key Takeaways\n"
             "\n"
             "_Run `/paper-wiki:wiki-ingest "
