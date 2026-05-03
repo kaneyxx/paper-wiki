@@ -53,6 +53,14 @@ GRAPH_SUBDIR = ".graph"
 EDGES_FILENAME = "edges.jsonl"
 CITATIONS_FILENAME = "citations.jsonl"
 
+# Task 9.182 — legacy subdir compat. Maps each pre-v0.4 subdir name to
+# the canonical typed-subdir it should be reported as. Currently only
+# ``sources/`` (the v0.3.x source-paper layout, lowercase ``s``) is
+# tolerated; the strict v0.4.2 end state per D-T is ``Wiki/papers/``
+# canonical, with this map dropped in v0.5.0 alongside the
+# ``ObsidianReporter`` write-path migration.
+LEGACY_SUBDIR_MAP: dict[str, str] = {"sources": "papers"}
+
 # ``[[target]]`` or ``[[target|display]]`` — captures only the target.
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
@@ -242,16 +250,33 @@ def _aliases_for_entity(
 
 
 def _parse_entity_file(file_path: Path, wiki_root: Path) -> ParsedEntity | None:
-    """Parse one ``.md`` file. Returns ``None`` for non-typed files."""
+    """Parse one ``.md`` file. Returns ``None`` for non-typed files.
+
+    Files under :data:`LEGACY_SUBDIR_MAP` keys (e.g. ``sources/``) are
+    reported with their canonical typed-subdir name (e.g. ``papers``)
+    and the ``entity_id`` likewise normalised so downstream consumers
+    treat them identically to canonical-layout files.
+    """
     rel = file_path.relative_to(wiki_root)
     if not rel.parts:
         return None
-    entity_type = rel.parts[0]
+    raw_subdir = rel.parts[0]
+    # Map legacy → canonical entity type (Task 9.182).
+    entity_type = LEGACY_SUBDIR_MAP.get(raw_subdir, raw_subdir)
     if entity_type not in TYPED_SUBDIRS:
         return None
     text = file_path.read_text(encoding="utf-8")
     frontmatter, body = _parse_frontmatter(text)
-    entity_id = _entity_id_from_path(file_path, wiki_root)
+    raw_entity_id = _entity_id_from_path(file_path, wiki_root)
+    # Normalise the entity_id when the file lives under a legacy
+    # subdir — emit ``papers/<id>`` not ``sources/<id>`` so query
+    # output is stable regardless of physical layout.
+    if raw_subdir in LEGACY_SUBDIR_MAP:
+        # raw_entity_id is ``<raw_subdir>/<basename>``; rewrite the prefix.
+        _, _, basename = raw_entity_id.partition("/")
+        entity_id = f"{entity_type}/{basename}"
+    else:
+        entity_id = raw_entity_id
     aliases = _aliases_for_entity(entity_id, frontmatter)
     body_wikilinks = tuple(_WIKILINK_RE.findall(body))
     return ParsedEntity(
@@ -263,9 +288,20 @@ def _parse_entity_file(file_path: Path, wiki_root: Path) -> ParsedEntity | None:
     )
 
 
-def _walk_typed_subdirs(wiki_root: Path) -> Iterator[Path]:
-    """Yield non-dotfile ``.md`` paths under each typed subdir."""
-    for subdir in TYPED_SUBDIRS:
+def _walk_typed_subdirs(
+    wiki_root: Path,
+    *,
+    legacy_subdirs: tuple[str, ...] = (),
+) -> Iterator[Path]:
+    """Yield non-dotfile ``.md`` paths under each typed subdir.
+
+    Walks the canonical :data:`TYPED_SUBDIRS` plus any explicitly
+    enabled ``legacy_subdirs`` (typically ``("sources",)`` per Task
+    9.182, when a v0.3.x vault hasn't been migrated yet). Files in
+    legacy subdirs are surfaced as canonical-typed entities by
+    :func:`_parse_entity_file` via :data:`LEGACY_SUBDIR_MAP`.
+    """
+    for subdir in (*TYPED_SUBDIRS, *legacy_subdirs):
         sub = wiki_root / subdir
         if not sub.is_dir():
             continue
@@ -275,20 +311,62 @@ def _walk_typed_subdirs(wiki_root: Path) -> Iterator[Path]:
             yield md
 
 
-def walk_entities(wiki_root: Path) -> list[ParsedEntity]:
+def walk_entities(
+    wiki_root: Path,
+    *,
+    legacy_subdirs: tuple[str, ...] = (),
+) -> list[ParsedEntity]:
     """Public typed-subdir walker (used by wiki-lint task 9.158).
 
     Returns parsed entities from all four typed subdirs in entity-id
     sorted order. Skips dotfiles and non-typed subdirs (e.g. ``.graph``).
+
+    Pass ``legacy_subdirs=("sources",)`` to also include v0.3.x-layout
+    source papers (Task 9.182 / D-T transition window). Default off so
+    pre-existing callers (notably ``wiki-lint``) keep their current
+    behaviour until they explicitly opt in.
     """
     return sorted(
         (
             entity
-            for path in _walk_typed_subdirs(wiki_root)
+            for path in _walk_typed_subdirs(wiki_root, legacy_subdirs=legacy_subdirs)
             if (entity := _parse_entity_file(path, wiki_root)) is not None
         ),
         key=lambda e: e.entity_id,
     )
+
+
+def _resolve_legacy_subdirs(wiki_root: Path) -> tuple[str, ...]:
+    """Return the legacy subdirs to walk, given the current state of ``wiki_root``.
+
+    Task 9.182: when ``papers/`` is missing or empty AND a legacy subdir
+    has at least one ``.md`` file, walk the legacy subdir and emit a
+    one-shot ``graph.sources.legacy`` warning. Returns an empty tuple
+    when the canonical layout is in use (no warning, no legacy walk).
+    """
+    papers_dir = wiki_root / "papers"
+    canonical_count = sum(1 for _ in papers_dir.glob("*.md")) if papers_dir.is_dir() else 0
+    if canonical_count > 0:
+        return ()
+    legacy: list[str] = []
+    legacy_count_total = 0
+    for subdir in LEGACY_SUBDIR_MAP:
+        sub_dir = wiki_root / subdir
+        if not sub_dir.is_dir():
+            continue
+        legacy_count = sum(1 for _ in sub_dir.glob("*.md"))
+        if legacy_count > 0:
+            legacy.append(subdir)
+            legacy_count_total += legacy_count
+    if legacy:
+        logger.warning(
+            "graph.sources.legacy wiki_root={wiki_root} subdirs={subdirs} "
+            "files={files} action=run_paperwiki_wiki_compile_to_migrate",
+            wiki_root=str(wiki_root),
+            subdirs=tuple(legacy),
+            files=legacy_count_total,
+        )
+    return tuple(legacy)
 
 
 def _build_alias_map(
@@ -413,6 +491,11 @@ async def compile_graph(
     edges_path = graph_dir / EDGES_FILENAME
     citations_path = graph_dir / CITATIONS_FILENAME
 
+    # Task 9.182 — emit-once legacy warning + legacy walk when papers/
+    # is empty. Both code paths below (cache-fresh + full rebuild) use
+    # the same resolved tuple so the entity count stays consistent.
+    legacy_subdirs = _resolve_legacy_subdirs(wiki_root)
+
     if not force_rebuild and not graph_is_stale(vault_path, wiki_subdir=wiki_subdir):
         # Cache is fresh — return summary without touching disk.
         logger.info(
@@ -420,7 +503,9 @@ async def compile_graph(
             edges_path=str(edges_path),
         )
         return CompileGraphResult(
-            entity_count=sum(1 for _ in _walk_typed_subdirs(wiki_root)),
+            entity_count=sum(
+                1 for _ in _walk_typed_subdirs(wiki_root, legacy_subdirs=legacy_subdirs)
+            ),
             edge_count=sum(1 for line in edges_path.read_text().splitlines() if line.strip()),
             citation_count=sum(
                 1 for line in citations_path.read_text().splitlines() if line.strip()
@@ -437,7 +522,7 @@ async def compile_graph(
     entities = sorted(
         (
             entity
-            for path in _walk_typed_subdirs(wiki_root)
+            for path in _walk_typed_subdirs(wiki_root, legacy_subdirs=legacy_subdirs)
             if (entity := _parse_entity_file(path, wiki_root)) is not None
         ),
         key=lambda e: e.entity_id,

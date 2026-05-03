@@ -207,6 +207,130 @@ class TestCompileGraphResolvesWikilinks:
         assert any("concepts/transformer" in d for d in dsts)
 
 
+def _seed_legacy_sources_only_vault(root: Path) -> Path:
+    """Seed a v0.3.x-style vault: ``Wiki/sources/`` populated, ``papers/`` empty.
+
+    Models the upgrade-from-v0.3.x case that bit the maintainer in the
+    v0.4.x real-machine smoke (Task 9.182): a fresh ``wiki-graph`` query
+    returned "No edges matched" because the new compiler only walked
+    ``papers/`` and silently skipped the legacy ``sources/`` tree.
+    """
+    wiki = root / "Wiki"
+    (wiki / "sources").mkdir(parents=True)
+    (wiki / "concepts").mkdir(parents=True)
+    (wiki / "papers").mkdir(parents=True)  # exists but empty
+
+    (wiki / "sources" / "arxiv-2401-00001.md").write_text(
+        "---\n"
+        "type: paper\n"
+        "canonical_id: arxiv:2401.00001\n"
+        "title: Sample legacy paper\n"
+        "---\n\n"
+        "# Sample legacy paper\n\n"
+        "Builds on [[transformer]].\n",
+        encoding="utf-8",
+    )
+    (wiki / "concepts" / "transformer.md").write_text(
+        "---\ntype: concept\nname: Transformer\naliases: [transformer]\n---\n\n# Transformer\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+class TestLegacySourcesCompat:
+    """Task 9.182 — vaults still on v0.3.x ``Wiki/sources/`` are queryable.
+
+    The strict v0.4.2 end state (Task 9.184-9.187, **D-T**) is
+    ``Wiki/papers/`` canonical with ``sources/`` deprecated. Until the
+    user runs ``wiki-compile`` (which auto-migrates), ``wiki-graph`` must
+    still surface their existing graph by walking ``sources/`` as a
+    fallback.
+    """
+
+    def test_legacy_sources_papers_appear_as_paper_entities(self, tmp_path: Path) -> None:
+        """A vault with only ``Wiki/sources/<id>.md`` produces edges
+        identical to one where the same file lives at ``Wiki/papers/<id>.md``.
+        Body wikilinks become edges; ``entity_type`` resolves to
+        ``papers`` so downstream queries treat them uniformly."""
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        vault = _seed_legacy_sources_only_vault(tmp_path)
+        asyncio.run(compile_graph(vault))
+
+        edges_path = vault / "Wiki" / ".graph" / "edges.jsonl"
+        assert edges_path.is_file()
+        edges = [json.loads(line) for line in edges_path.read_text().splitlines() if line.strip()]
+        # Must include a paper→concept edge from the legacy source.
+        # The path tag must be ``papers/<id>`` not ``sources/<id>`` — so
+        # consumers can hand-edit the file under either layout and the
+        # graph reports a stable id.
+        assert any(
+            e["src"] == "papers/arxiv-2401-00001" and e["dst"] == "concepts/transformer"
+            for e in edges
+        ), f"expected papers→concept edge from legacy sources, got {edges}"
+
+    def test_legacy_warning_emitted_exactly_once(self, tmp_path: Path) -> None:
+        """``loguru.warning("graph.sources.legacy", ...)`` fires once on a
+        legacy-only compile so users see the migration opportunity."""
+        import logging
+
+        from loguru import logger
+
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        vault = _seed_legacy_sources_only_vault(tmp_path)
+
+        captured: list[str] = []
+        handler_id = logger.add(
+            lambda msg: captured.append(str(msg)),
+            level="WARNING",
+        )
+        try:
+            asyncio.run(compile_graph(vault, force_rebuild=True))
+        finally:
+            logger.remove(handler_id)
+            # Defensive: keep ``logging`` happy on test teardown.
+            logging.getLogger().handlers.clear()
+
+        legacy_warnings = [m for m in captured if "graph.sources.legacy" in m]
+        assert len(legacy_warnings) == 1, (
+            f"expected exactly one legacy warning, got {len(legacy_warnings)}: {legacy_warnings}"
+        )
+
+    def test_no_warning_when_papers_populated(self, tmp_path: Path) -> None:
+        """Standard v0.4.x vault (``papers/`` non-empty) does NOT emit
+        the legacy warning even if ``sources/`` also has files — the
+        canonical layout is the source of truth and ``sources/`` is
+        ignored when ``papers/`` is non-empty."""
+        from loguru import logger
+
+        from paperwiki.runners.wiki_compile_graph import compile_graph
+
+        vault = _seed_vault(tmp_path)
+        # Add a stale sources/ file alongside the canonical papers/ vault.
+        # The compiler must NOT cross-contaminate.
+        (vault / "Wiki" / "sources").mkdir(parents=True, exist_ok=True)
+        (vault / "Wiki" / "sources" / "arxiv-stale.md").write_text(
+            "---\ntype: paper\ncanonical_id: arxiv:stale\n---\n\n# Stale\n",
+            encoding="utf-8",
+        )
+
+        captured: list[str] = []
+        handler_id = logger.add(
+            lambda msg: captured.append(str(msg)),
+            level="WARNING",
+        )
+        try:
+            asyncio.run(compile_graph(vault, force_rebuild=True))
+        finally:
+            logger.remove(handler_id)
+
+        legacy_warnings = [m for m in captured if "graph.sources.legacy" in m]
+        assert legacy_warnings == [], (
+            f"no legacy warning should fire when papers/ is non-empty; got: {legacy_warnings}"
+        )
+
+
 class TestUnknownEdgeTypePreserved:
     def test_existing_edges_jsonl_with_unknown_type_round_trips(self, tmp_path: Path) -> None:
         """If a future paperwiki version emits an unknown edge type and a
