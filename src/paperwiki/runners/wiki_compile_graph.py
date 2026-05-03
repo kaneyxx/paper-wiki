@@ -31,7 +31,7 @@ import asyncio
 import json
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -76,6 +76,13 @@ app = typer.Typer(
 class EdgeRecord:
     """One row of ``edges.jsonl``. ``type`` is ``EdgeType | str`` to keep
     the read side tolerant of unknown values emitted by future versions.
+
+    The optional ``note`` field (Task 9.183) records edge provenance —
+    typically ``"frontmatter:<field>"`` for edges harvested from
+    typed-list frontmatter (``related_concepts`` / ``topics`` /
+    ``people``). Body-wikilink edges leave ``note`` unset; this lets
+    downstream wiki-lint flag inconsistencies between body prose and
+    frontmatter declarations.
     """
 
     src: str
@@ -84,6 +91,7 @@ class EdgeRecord:
     weight: float = 1.0
     evidence: str | None = None
     subtype: str | None = None
+    note: str | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
         """Render to a dict whose JSON form is byte-stable across runs."""
@@ -96,6 +104,7 @@ class EdgeRecord:
             "weight": self.weight,
             "evidence": self.evidence,
             "subtype": self.subtype,
+            "note": self.note,
         }
 
 
@@ -127,6 +136,13 @@ class ParsedEntity:
 
     Exposed so the wiki-lint runner (task 9.158) can reuse the
     typed-subdir walker without duplicating the parser.
+
+    ``frontmatter_links`` (Task 9.183) maps each typed-list frontmatter
+    field name (``related_concepts`` / ``topics`` / ``people``) to a
+    tuple of resolved wikilink targets. Pre-v0.4.2 the graph compiler
+    only scanned ``body_wikilinks``; that left frontmatter declarations
+    decorative. v0.4.2 closes the contract — these become edges too,
+    tagged with ``EdgeRecord.note = "frontmatter:<field>"``.
     """
 
     entity_id: str
@@ -134,6 +150,7 @@ class ParsedEntity:
     aliases: frozenset[str]
     body_wikilinks: tuple[str, ...]
     frontmatter: dict[str, Any]
+    frontmatter_links: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def graph_is_stale(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> bool:
@@ -193,6 +210,7 @@ def iter_edges_jsonl(path: Path) -> Iterator[EdgeRecord]:
             weight=float(record.get("weight", 1.0)),
             evidence=record.get("evidence"),
             subtype=record.get("subtype"),
+            note=record.get("note"),
         )
 
 
@@ -249,6 +267,48 @@ def _aliases_for_entity(
     return frozenset(aliases)
 
 
+# Typed-list frontmatter fields scanned for wikilinks (Task 9.183).
+# Order is fixed (``related_concepts`` first) so when multiple fields
+# point at the same target, the dedup pass attributes the surviving
+# edge to the earliest field — making lint output deterministic.
+FRONTMATTER_LINK_FIELDS: tuple[str, ...] = ("related_concepts", "topics", "people")
+
+
+def _extract_frontmatter_wikilinks(
+    frontmatter: dict[str, Any],
+    fields: tuple[str, ...] = FRONTMATTER_LINK_FIELDS,
+) -> dict[str, tuple[str, ...]]:
+    """Extract bare wikilink targets from typed-list frontmatter (Task 9.183).
+
+    Recognises both ``[[X]]`` (plain) and ``'[[X]]'`` (yaml-quoted, what
+    the digest writer emits) inside a YAML list. Bare strings (no
+    wikilink syntax) are also tolerated — pre-v0.4 recipes occasionally
+    used ``topics: [vlm]`` without the brackets — and treated as
+    aliases for resolution-time lookup.
+    """
+    result: dict[str, tuple[str, ...]] = {}
+    for fname in fields:
+        raw = frontmatter.get(fname)
+        if not isinstance(raw, list):
+            continue
+        targets: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            stripped = item.strip()
+            # Match wikilink syntax inside the value (handles both quoted
+            # and bare forms uniformly).
+            match = _WIKILINK_RE.match(stripped)
+            if match is not None:
+                targets.append(match.group(1).strip())
+            elif stripped:
+                # Bare string — treated as a target name / alias.
+                targets.append(stripped)
+        if targets:
+            result[fname] = tuple(targets)
+    return result
+
+
 def _parse_entity_file(file_path: Path, wiki_root: Path) -> ParsedEntity | None:
     """Parse one ``.md`` file. Returns ``None`` for non-typed files.
 
@@ -279,12 +339,14 @@ def _parse_entity_file(file_path: Path, wiki_root: Path) -> ParsedEntity | None:
         entity_id = raw_entity_id
     aliases = _aliases_for_entity(entity_id, frontmatter)
     body_wikilinks = tuple(_WIKILINK_RE.findall(body))
+    frontmatter_links = _extract_frontmatter_wikilinks(frontmatter)
     return ParsedEntity(
         entity_id=entity_id,
         entity_type=entity_type,
         aliases=aliases,
         body_wikilinks=body_wikilinks,
         frontmatter=frontmatter,
+        frontmatter_links=frontmatter_links,
     )
 
 
@@ -403,11 +465,23 @@ def _build_records(
     entities: list[ParsedEntity],
     alias_map: dict[str, str],
 ) -> tuple[list[EdgeRecord], list[CitationRecord]]:
+    """Resolve wikilinks (body + frontmatter) into edges + citations.
+
+    Body wikilinks take precedence over frontmatter when both point at
+    the same ``(target, edge_type)``: body edges have ``note=None`` and
+    suppress the frontmatter one entirely (Task 9.183 dedup criterion).
+    Frontmatter edges that survive get ``note="frontmatter:<field>"``
+    so wiki-lint can flag stale frontmatter still pointing at deleted
+    body targets.
+    """
     edges: list[EdgeRecord] = []
     citations: list[CitationRecord] = []
     entity_kind_by_id = {e.entity_id: e.entity_type for e in entities}
     for entity in entities:
         cited_papers: list[str] = []
+        # ``(dst, edge_type_value)`` pairs already emitted from this
+        # entity's body — frontmatter edges that match get suppressed.
+        seen: set[tuple[str, str]] = set()
         for raw_target in entity.body_wikilinks:
             target = raw_target.strip()
             resolved = alias_map.get(target)
@@ -417,6 +491,8 @@ def _build_records(
                 continue
             dst_kind = entity_kind_by_id.get(resolved, "")
             edge_type = _infer_edge_type(entity.entity_type, dst_kind)
+            edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
+            seen.add((resolved, edge_type_str))
             edges.append(
                 EdgeRecord(
                     src=entity.entity_id,
@@ -426,6 +502,35 @@ def _build_records(
             )
             if entity.entity_type == "papers" and dst_kind == "papers":
                 cited_papers.append(resolved)
+        # Task 9.183 — harvest typed-list frontmatter into edges.
+        # Iterate fields in fixed order so duplicate-target attribution
+        # is deterministic across compiles.
+        for field_name in FRONTMATTER_LINK_FIELDS:
+            for raw_target in entity.frontmatter_links.get(field_name, ()):
+                target = raw_target.strip()
+                resolved = alias_map.get(target)
+                if resolved is None or resolved == entity.entity_id:
+                    continue
+                dst_kind = entity_kind_by_id.get(resolved, "")
+                edge_type = _infer_edge_type(entity.entity_type, dst_kind)
+                edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
+                key = (resolved, edge_type_str)
+                if key in seen:
+                    # Body already covers this edge — body wins (closer
+                    # to the user's prose); frontmatter origin is
+                    # suppressed to dedupe.
+                    continue
+                seen.add(key)
+                edges.append(
+                    EdgeRecord(
+                        src=entity.entity_id,
+                        dst=resolved,
+                        type=edge_type,
+                        note=f"frontmatter:{field_name}",
+                    )
+                )
+                if entity.entity_type == "papers" and dst_kind == "papers":
+                    cited_papers.append(resolved)
         if entity.entity_type == "papers" and cited_papers:
             citations.append(
                 CitationRecord(
@@ -437,11 +542,17 @@ def _build_records(
 
 
 def _sort_edges(edges: list[EdgeRecord]) -> list[EdgeRecord]:
-    """Deterministic sort key: ``(src, dst, type, subtype, evidence)``."""
+    """Deterministic sort key: ``(src, dst, type, subtype, evidence, note)``.
 
-    def _key(e: EdgeRecord) -> tuple[str, str, str, str, str]:
+    ``note`` (Task 9.183) is included so frontmatter-origin edges sort
+    stably after body edges for the same ``(src, dst, type)`` triple
+    when both end up in the list (e.g. multi-field frontmatter where
+    body has unrelated edges).
+    """
+
+    def _key(e: EdgeRecord) -> tuple[str, str, str, str, str, str]:
         type_str = e.type.value if isinstance(e.type, EdgeType) else e.type
-        return (e.src, e.dst, type_str, e.subtype or "", e.evidence or "")
+        return (e.src, e.dst, type_str, e.subtype or "", e.evidence or "", e.note or "")
 
     return sorted(edges, key=_key)
 
