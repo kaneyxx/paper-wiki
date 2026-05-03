@@ -13,6 +13,12 @@ Exception          ``exit_code`` Meaning
 :class:`PaperWikiError`         2 Catch-all base; defaults to system-style.
 ================== ============= ===============================================
 
+Domain-specific ``UserError`` subclasses (e.g. :class:`paperwiki.config.recipe.RecipeSchemaError`)
+live next to the code that raises them. They override ``exit_code`` when
+the SKILL pipe needs a distinguishable exit signal beyond the
+generic-user-error 1 — typically reserved for "needs migration" paths
+that warrant a dedicated exit code.
+
 We deliberately avoid the name ``SystemError`` because it is a Python
 builtin; ``IntegrationError`` and ``PluginError`` together cover what
 that would have meant.
