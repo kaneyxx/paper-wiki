@@ -328,11 +328,26 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
             )
             config["api_key"] = None
             return config
+        # Task 9.180 / D-U — sharpen the actionable hint. paperwiki digest
+        # auto-loads secrets.env now (per D-U), so reaching this branch
+        # means *either* the file is missing *or* the env var is missing
+        # from the file. Spell both branches out.
+        from paperwiki._internal.paths import resolve_paperwiki_home
+
+        secrets_path = resolve_paperwiki_home() / "secrets.env"
+        if secrets_path.exists():
+            actionable = (
+                f"Add `{env_name}=...` to {secrets_path} (paperwiki digest "
+                "auto-loads it on every run)."
+            )
+        else:
+            actionable = (
+                f"Create {secrets_path} with `{env_name}=...` (paperwiki digest "
+                "auto-loads it on every run; chmod 600 recommended)."
+            )
         msg = (
-            f"semantic_scholar source: env var {env_name!r} is unset or "
-            "empty. Either export it (e.g. via "
-            "`source ~/.config/paper-wiki/secrets.env`) or set "
-            "``api_key`` inline."
+            f"semantic_scholar source: env var {env_name!r} is unset or empty. "
+            f"{actionable} Or set ``api_key`` inline in the recipe."
         )
         raise UserError(msg)
     config["api_key"] = value

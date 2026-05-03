@@ -46,6 +46,7 @@ from loguru import logger
 from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
+from paperwiki.config.secrets import load_secrets_env
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
 from paperwiki.runners._stub_constants import (
@@ -331,6 +332,8 @@ def main(
 ) -> None:
     """Run the ingest plan and emit JSON on stdout."""
     configure_runner_logging(verbose=verbose)
+    # Task 9.180 / D-U: uniform secrets-load contract across runners.
+    load_secrets_env()
     try:
         plan = asyncio.run(plan_ingest(vault, source_id, auto_bootstrap=auto_bootstrap))
     except PaperWikiError as exc:

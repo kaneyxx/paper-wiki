@@ -52,6 +52,14 @@ secrets.*
 *.secret
 .secrets/
 
+# Exception (Task 9.180 / D-U): paperwiki.config.secrets is a legitimate
+# Python module — the auto-loader for ~/.config/paper-wiki/secrets.env.
+# The module name collides with the broad "secrets.*" guard above, so we
+# explicitly un-ignore the source + tests path. The guard still protects
+# any actual secrets.env / secrets.yaml file that might land elsewhere.
+!src/paperwiki/config/secrets.py
+!tests/unit/config/test_secrets.py
+
 # Per-user paperwiki config (if anyone copies it into the project tree)
 .paperwiki/
 

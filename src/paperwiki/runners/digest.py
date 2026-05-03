@@ -44,6 +44,7 @@ from paperwiki.config.recipe import (
     instantiate_pipeline,
     load_recipe,
 )
+from paperwiki.config.secrets import load_secrets_env
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.core.models import Recommendation, RunContext
 
@@ -289,6 +290,9 @@ def main(
 ) -> None:
     """Run a digest, exiting 0 on success or PaperWikiError.exit_code on failure."""
     configure_runner_logging(verbose=verbose)
+    # Task 9.180 / D-U: auto-load $PAPERWIKI_HOME/secrets.env so a naked
+    # `paperwiki digest` from a clean shell works without prior `source`.
+    load_secrets_env()
     parsed_date = _parse_date(target_date) if target_date else None
     try:
         exit_code = asyncio.run(run_digest(recipe, parsed_date))
