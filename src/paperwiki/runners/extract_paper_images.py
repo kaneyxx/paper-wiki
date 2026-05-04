@@ -348,8 +348,28 @@ def _rewrite_figures_section(
 
 @app.command(name="extract-images")
 def main(
-    vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
-    canonical_id: Annotated[str, typer.Argument(help="Canonical id (arxiv:...)")],
+    arg1: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Either the canonical id (arxiv:..., s2:...) when only one positional "
+                "is given, or the vault path when two positionals are given. The "
+                "single-arg form (Task 9.193 / D-V) resolves the vault from "
+                "$PAPERWIKI_DEFAULT_VAULT or ~/.config/paper-wiki/config.toml."
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    arg2: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Canonical id (arxiv:...) when arg1 was a vault path. "
+                "Omit when arg1 already carries the canonical id."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     force: Annotated[
         bool, typer.Option("--force", help="Re-download tarball even if cached")
     ] = False,
@@ -360,6 +380,9 @@ def main(
 ) -> None:
     """Run the extractor and emit a JSON report."""
     configure_runner_logging(verbose=verbose)
+
+    vault, canonical_id = _resolve_vault_and_canonical_id(arg1, arg2)
+
     try:
         result = asyncio.run(extract_paper_images(vault, canonical_id, force=force))
     except PaperWikiError as exc:
@@ -367,6 +390,50 @@ def main(
         raise typer.Exit(exc.exit_code) from exc
 
     typer.echo(json.dumps(asdict(result), indent=2))
+
+
+def _resolve_vault_and_canonical_id(arg1: str | None, arg2: str | None) -> tuple[Path, str]:
+    """Disambiguate the two-form CLI signature into ``(vault, canonical_id)``.
+
+    Two valid forms (Task 9.193 / D-V):
+
+    * ``extract-images <vault> <id>`` — back-compat, both args present.
+    * ``extract-images <id>`` — new form, vault resolved from D-V chain.
+
+    Heuristic: when only ``arg1`` is given, it MUST contain ``:`` to be a
+    canonical id (e.g. ``arxiv:2506.13063`` or ``s2:abc...``). A single
+    arg without ``:`` is rejected with a usage hint rather than silently
+    treated as a vault path that crashes later when the canonical id is
+    missing.
+    """
+    # Lazy import to keep module import cheap and avoid circular issues.
+    from paperwiki.config.vault_resolver import resolve_vault
+
+    if arg1 is None:
+        # Typer normally rejects missing required positionals with exit
+        # code 2 before calling this function; this branch is defensive.
+        raise typer.BadParameter("Missing CANONICAL_ID (e.g. 'arxiv:2506.13063' or 's2:abc123').")
+
+    if arg2 is None:
+        # Single positional — must look like a canonical id.
+        if ":" not in arg1:
+            raise typer.BadParameter(
+                f"Single argument {arg1!r} is not a canonical id "
+                "(expected 'arxiv:...' or 's2:...'). To pass a vault path, "
+                "give the canonical id as the second argument."
+            )
+        canonical_id = arg1
+        try:
+            vault = resolve_vault(None)
+        except UserError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(exc.exit_code) from exc
+    else:
+        # Two positionals — vault first (back-compat), canonical_id second.
+        vault = Path(arg1).expanduser()
+        canonical_id = arg2
+
+    return vault, canonical_id
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry
