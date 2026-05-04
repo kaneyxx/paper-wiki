@@ -280,19 +280,31 @@ paper-wiki/
 
 ### Vault subdirectory defaults
 
-The plugin writes user-facing artifacts under three default subdirs of
-the user's vault. They are exposed as constants in
+The plugin writes user-facing artifacts under default subdirs of the
+user's vault. They are exposed as constants in
 `paperwiki.config.layout`:
 
 | Constant | Default value | Purpose |
 |----------|--------------|---------|
 | `DAILY_SUBDIR` | `Daily` | Per-day digests written by `ObsidianReporter`. |
-| `SOURCES_SUBDIR` | `Sources` | Per-paper notes written by the `analyze` SKILL (Phase 6). |
-| `WIKI_SUBDIR` | `Wiki` | Synthesized concept articles + index (Phase 6). |
+| `WIKI_SUBDIR` | `Wiki` | Top-level wiki container (typed subdirs below). |
+| `PAPERS_SUBDIR` | `papers` | Per-paper notes under `Wiki/`. v0.4.2 D-T canonical (was `Wiki/sources/` in v0.3.x). Written by the `digest` and `analyze` SKILLs. |
+| `CONCEPTS_SUBDIR` | `concepts` | Synthesized concept articles under `Wiki/`. |
+| `LEGACY_PAPERS_SUBDIR` | `sources` | **Read-only deprecation shim** until v0.5.0. Backend's `list_sources` and `extract_paper_images` fall back to this name when `Wiki/papers/` is missing AND `Wiki/sources/` has files. Auto-migrated by `paperwiki wiki-compile` (Task 9.187). |
 
 The defaults are deliberately friendly (no numeric prefixes) so the
 plugin does not impose Johnny.Decimal / PARA conventions on users who
 do not follow them. Users who do can override every subdir per-recipe.
+
+**v0.3.x → v0.4.2 layout migration.** Vaults still on the v0.3.x
+flat layout (`Wiki/sources/<id>.md`) are auto-migrated to the typed
+`Wiki/papers/<id>.md` location on the next `paperwiki wiki-compile`.
+The migration uses a SHA-256-verified backup at
+`<vault>/.paperwiki/migration-backup/<ts>/` (D-J) and reverts via
+`paperwiki wiki-compile <vault> --restore-migration <ts>`. Power
+users opting out: `paperwiki wiki-compile --no-auto-migrate` or
+`PAPERWIKI_NO_AUTO_MIGRATE=1`. The legacy read-fallback (via
+`LEGACY_PAPERS_SUBDIR`) drops in v0.5.0.
 
 ---
 

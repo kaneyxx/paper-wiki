@@ -98,6 +98,84 @@ vault before merge.
   branching on whether the file exists. Matches the D-U auto-load
   contract — the user no longer guesses where the key should live.
 
+### Phase B — Storage layout consolidation (D-T)
+
+Phase B closes the v0.3.x → v0.4.2 vault-layout transition opened
+read-side by Phase A's wiki-compile-graph fix (Task 9.182). The
+canonical write target for per-paper notes is now
+`Wiki/papers/<id>.md` (was `Wiki/sources/<id>.md` in v0.3.x).
+Existing vaults are auto-migrated on the first `paperwiki wiki-compile`
+run via the existing D-J SHA-256 backup; users don't need to know a
+migration exists. Per the maintainer directive *"正常使用者不會想要
+繁複的指令"*, no extra flag is required for the common case.
+
+#### Added (Phase B)
+
+- **`PAPERS_SUBDIR`, `LEGACY_PAPERS_SUBDIR`, `CONCEPTS_SUBDIR`
+  constants** in `paperwiki.config.layout` (Task 9.184 / **D-Z**).
+  Single source of truth for vault subdir names so any future
+  relocation is a one-line edit. Companion to D-X (hardcode
+  prevention from v0.4.1): D-Z extends the rule to wiki backends —
+  the v0.4.0 `_SOURCES_DIRNAME = "sources"` constant in
+  `markdown_wiki.py:48` is the same anti-pattern v0.4.1 hot-fixed in
+  shell artifacts. CI grep guard pinned by
+  `test_d_z_no_hardcoded_subdir_paths_in_backends`.
+  `LEGACY_PAPERS_SUBDIR = "sources"` is tagged for v0.5.0 deletion.
+  `SOURCES_SUBDIR` (vault root `Sources/`) deleted — Q1 ratified
+  that no runner ever wrote to it.
+- **`paperwiki wiki-compile` auto-fires `migrate_v04`** (Task 9.187).
+  When the vault has populated `Wiki/sources/` AND empty
+  `Wiki/papers/`, the compile runner relocates everything via
+  `migrate_v04.migrate_if_needed` BEFORE the index rebuild reads
+  the backend. Banner printed on stdout (`Migrating
+  Wiki/sources/ → Wiki/papers/ (N files, backup at <ts>)`).
+  Idempotent on re-run via the existing `needs_migration` guard.
+  New `--no-auto-migrate` flag prints the dry-run plan and skips
+  the move (the index rebuild still runs against the legacy layout
+  via the read-fallback shim).
+- **`paperwiki update` post-upgrade migration hint** (Task 9.188).
+  When `paperwiki update` finishes, the user-visible "Next:" block
+  (in BOTH the no-op "already at <ver>" branch AND the upgrade
+  summary branch) gains a single-line hint per known recipe vault
+  that still carries `Wiki/sources/<id>.md` files. Hint disappears
+  once `paperwiki wiki-compile` migrates them. New
+  `paperwiki._internal.legacy_vault_scan` module owns the parse
+  + scan; tolerates malformed YAML and bundled placeholder vault
+  paths. Opt-out via `PAPERWIKI_NO_AUTO_DETECT=1`.
+
+#### Changed (Phase B)
+
+- **`MarkdownWikiBackend` writes per-paper notes to `Wiki/papers/`**
+  (Task 9.185). `upsert_paper` write target switched from
+  `Wiki/sources/` to `Wiki/papers/`. `list_sources` walks
+  `Wiki/papers/` first AND surfaces any surviving
+  `Wiki/sources/<id>.md` (v0.3.x layout) for one release with a
+  one-shot `backend.legacy.sources_path` warning per process per
+  file. Same-filename dedupe — canonical wins. Drops in v0.5.0.
+- **`ObsidianReporter._try_inline_teaser` reads `Wiki/papers/`
+  first** (Task 9.185). Falls back silently to `Wiki/sources/`
+  for one release. Wikilink shape is unchanged because Obsidian
+  resolves vault-relative names by index, not literal path.
+- **`extract_paper_images` validates against `Wiki/papers/<id>.md`
+  first** (Task 9.186). Falls back to `Wiki/sources/<id>.md` with
+  a one-shot `extract_images.legacy.sources_path` warning. Image
+  manifest follows wherever the source actually lives so legacy
+  vaults keep their figures co-located. **The internal arXiv
+  tarball cache (`Wiki/.cache/sources/`) is deliberately not
+  renamed** — not user-facing, and renaming would invalidate every
+  existing user's tarball cache.
+- **`migrate_sources` runner walks `Wiki/papers/` first** (Task
+  9.187a). Per-file format-upgrade tool, distinct from the
+  directory migration (`migrate_v04`). Same-name dedupe means
+  mid-migration vaults migrate once via the canonical copy.
+- **SPEC §3 vault-subdir defaults table rewritten** to reflect
+  D-T. `Wiki/sources/` documented as read-only legacy until
+  v0.5.0; auto-migration steps explicit. SKILL docs (`digest`,
+  `wiki-ingest`, `extract-images`, `bio-search`,
+  `migrate-sources`, `setup`) and bundled recipe templates
+  (`daily-arxiv.yaml`, `biomedical-weekly.yaml`) updated to
+  reference `Wiki/papers/`.
+
 ## [0.4.1] - 2026-05-01
 
 Hot-fix for a v0.4.0 release-gate regression caught on first
