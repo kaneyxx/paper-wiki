@@ -299,6 +299,11 @@ def main(
             force_rebuild=rebuild,
         )
     except PaperWikiError as exc:
+        # Task 9.211: surface the actual error to stderr — loguru's
+        # default sink renders ``error=str(exc)`` as a hidden ``extra``
+        # field, so without this echo the user only sees the bare
+        # event name.
+        typer.echo(str(exc), err=True)
         logger.error("wiki_graph_query.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 

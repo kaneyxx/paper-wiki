@@ -68,6 +68,5 @@ secrets.*
 # todo lists). End users who /plugin install paper-wiki@paper-wiki get
 # the whole repo cloned into their cache; trimming these keeps that
 # cache smaller and avoids confusing user-facing surface area.
-tasks/plan.md
-tasks/todo.md
+tasks/*.md
 tests/fixtures/synthetic_vault_100/.graph/

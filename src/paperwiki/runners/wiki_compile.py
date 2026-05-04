@@ -333,6 +333,8 @@ def main(
         try:
             restore(vault, timestamp=restore_migration)
         except PaperWikiError as exc:
+            # Task 9.211: surface the actual error to stderr.
+            typer.echo(str(exc), err=True)
             logger.error("wiki_compile.restore_failed", error=str(exc))
             raise typer.Exit(exc.exit_code) from exc
         typer.echo(f"restored migration {restore_migration}")
@@ -360,6 +362,8 @@ def main(
         try:
             props_restore(vault, timestamp=restore_properties)
         except PaperWikiError as exc:
+            # Task 9.211: surface the actual error to stderr.
+            typer.echo(str(exc), err=True)
             logger.error("wiki_compile.restore_properties_failed", error=str(exc))
             raise typer.Exit(exc.exit_code) from exc
         typer.echo(f"restored properties migration {restore_properties}")
@@ -391,6 +395,8 @@ def main(
     try:
         result = asyncio.run(compile_wiki(vault, allow_auto_migrate=not no_auto_migrate))
     except PaperWikiError as exc:
+        # Task 9.211: surface the actual error to stderr.
+        typer.echo(str(exc), err=True)
         logger.error("wiki_compile.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 
