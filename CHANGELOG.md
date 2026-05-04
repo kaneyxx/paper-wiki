@@ -9,6 +9,49 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-05-04
+
+Phase B.1 hot-fix caught on the maintainer's first real-machine
+smoke of v0.4.3 (3 vaults out of 30 had `extract-images` output
+that didn't follow the per-paper `.md` files into `Wiki/papers/`).
+
+### Fixed
+
+- **`migrate_v04.migrate` now relocates per-paper image
+  subdirectories** in addition to `*.md` paper notes. Pre-fix, a
+  vault with `Wiki/sources/<id>.md` AND
+  `Wiki/sources/<id>/images/teaser.png` would migrate the .md but
+  leave the image subdir orphaned at the legacy path. Obsidian
+  wikilinks (`[[<id>/images/<file>|700]]`) still resolved via
+  vault-index lookup so the user saw nothing visually wrong, but
+  the on-disk layout was structurally inconsistent and
+  `needs_migration` returned `False` on re-runs (it only checked
+  `*.md`), so there was no automatic recovery path. Fix:
+  - `MigrationPlan` gains `planned_dir_moves: list[_PlannedDirMove]`
+    populated by a new `_enumerate_legacy_subdirs` walk.
+  - `needs_migration` returns `True` when EITHER `*.md` files OR
+    per-paper subdirs exist (and `Wiki/papers/` is absent).
+  - `_make_backup` extends the manifest with a `directories` block
+    and uses `shutil.copytree` for recursive snapshots.
+  - `migrate` runs a directory-move loop (`shutil.move`) after the
+    file-move loop, with a defensive skip when the destination
+    already exists (mid-migration retry safety).
+  - `restore` walks the new `directories` manifest block and
+    `copytree`s subdirs back to their legacy location,
+    `rmtree`-ing any partial restore first.
+  - 2 new integration tests
+    (`test_wiki_compile_migrates_per_paper_image_subdirs`,
+    `test_wiki_compile_migrates_only_image_subdirs_no_md`) pin
+    both the canonical path and the edge case where ONLY image
+    subdirs exist (no surviving `.md`).
+
+### Changed
+
+- **Bumped `paperwiki.__version__` to `0.4.4`** to drive the
+  upgrade flow on installations already at 0.4.3. Three SOT
+  files: `src/paperwiki/__init__.py`, `pyproject.toml`,
+  `.claude-plugin/plugin.json`.
+
 ## [0.4.3] - 2026-05-04
 
 Phase B of the v0.4.x release line — storage layout consolidation

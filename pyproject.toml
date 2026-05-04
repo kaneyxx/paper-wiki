@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "paper-wiki"
-version = "0.4.3"
+version = "0.4.4"
 description = "Personal research wiki builder for Claude Code — pipeline-driven paper ingestion with plugin architecture."
 readme = "README.md"
 license = "GPL-3.0-only"
