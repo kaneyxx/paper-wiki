@@ -11,7 +11,7 @@ The acceptance contract for v0.4.x:
 
 * All reporters that emit images use the Obsidian wikilink shape.
 * ``extract_paper_images`` writes wikilinks for both the per-figure
-  embed and the manifest at ``Wiki/sources/<id>/images/index.md``.
+  embed and the manifest at ``Wiki/papers/<id>/images/index.md``.
 * The plain ``markdown`` reporter emits NO images at all (it stays
   vault-agnostic; users on plain Markdown viewers don't get embeds).
 

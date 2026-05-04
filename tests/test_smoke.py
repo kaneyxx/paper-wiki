@@ -1305,7 +1305,7 @@ def test_wiki_upsert_source_filters_by_topic_strength() -> None:
         backend = MarkdownWikiBackend(vault_path=vault)
         asyncio.run(backend.upsert_paper(rec, topic_strength_threshold=0.5))
 
-        path = vault / "Wiki" / "sources" / "arxiv_0001.9999.md"
+        path = vault / "Wiki" / "papers" / "arxiv_0001.9999.md"
         assert path.is_file()
         text = path.read_text(encoding="utf-8")
         end = text.find("\n---\n", 4)
@@ -1426,14 +1426,14 @@ def test_setup_skill_biomedical_keywords_exclude_generic_terms() -> None:
 
 def test_digest_skill_inlines_figures_in_detailed_report() -> None:
     """digest SKILL.md Process Step 8 must document the inline-figure embed
-    contract: figures from Wiki/sources/<id>/images/ are embedded via
-    ![[Wiki/sources/<id>/images/<file>|600]] inside the Detailed report block.
+    contract: figures from Wiki/papers/<id>/images/ are embedded via
+    ![[Wiki/papers/<id>/images/<file>|600]] inside the Detailed report block.
     """
     body = (REPO_ROOT / "skills" / "digest" / "SKILL.md").read_text(encoding="utf-8")
     flat = " ".join(body.split())
 
-    assert "![[Wiki/sources/" in flat, (
-        "digest SKILL.md must reference the ![[Wiki/sources/ embed shape "
+    assert "![[Wiki/papers/" in flat, (
+        "digest SKILL.md must reference the ![[Wiki/papers/ embed shape "
         "for inline figures inside the Detailed report"
     )
     assert "|600]]" in flat, (

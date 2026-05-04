@@ -165,7 +165,7 @@ async def test_full_digest_auto_chain_lands_top_papers_into_wiki(
     1.  Pipeline produces a Daily digest file (AC-9.14.1/2/3).
     2.  Digest contains <!-- paper-wiki:overview-slot --> (AC-9.14.2).
     3.  Digest contains per-paper slot markers for each top-K paper (AC-9.14.3).
-    4.  Wiki/sources/ files exist for each top-K paper (AC-9.14.4).
+    4.  Wiki/papers/ files exist for each top-K paper (AC-9.14.4).
     5.  wiki_ingest_plan --auto-bootstrap exits 0 (AC-9.14.5).
     6.  JSON has created_stubs + folded_citations keys (AC-9.14.6).
     7.  Concepts already seen appear in folded_citations, NOT created_stubs (AC-9.14.7).
@@ -237,8 +237,8 @@ async def test_full_digest_auto_chain_lands_top_papers_into_wiki(
             f"digest missing per-paper marker for {rec.paper.canonical_id}"
         )
 
-    # AC-9.14.4: Wiki/sources/ files for each top-K paper
-    sources_dir = vault / "Wiki" / "sources"
+    # AC-9.14.4: Wiki/papers/ files for each top-K paper
+    sources_dir = vault / "Wiki" / "papers"
     for rec in top_recs:
         stem = rec.paper.canonical_id.replace(":", "_")
         source_file = sources_dir / f"{stem}.md"

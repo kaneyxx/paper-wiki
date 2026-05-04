@@ -26,7 +26,7 @@ import aiofiles
 import yaml
 
 from paperwiki._internal.locking import acquire_vault_lock
-from paperwiki.config.layout import DAILY_SUBDIR
+from paperwiki.config.layout import DAILY_SUBDIR, LEGACY_PAPERS_SUBDIR, PAPERS_SUBDIR
 from paperwiki.core.errors import UserError
 from paperwiki.plugins.reporters.markdown import _digest_frontmatter_payload
 
@@ -257,11 +257,23 @@ def _try_inline_teaser(
     source_filename: str,
     vault_path: Path | None,
 ) -> str:
-    """Embed the first extracted figure as a teaser if one exists on disk."""
+    """Embed the first extracted figure as a teaser if one exists on disk.
+
+    Task 9.185 (D-T): checks the v0.4.2 canonical
+    ``Wiki/papers/<id>/images/`` location first, then falls back to
+    the v0.3.x legacy ``Wiki/sources/<id>/images/`` for one release.
+    The teaser is best-effort — no warning is emitted on the legacy
+    hit (the embed wikilink itself is identical because Obsidian
+    resolves vault-relative names by index, not literal path).
+    """
     if vault_path is None:
         return ""
-    images_dir = vault_path / "Wiki" / "sources" / source_filename / "images"
-    if not images_dir.is_dir():
+    candidate_dirs = (
+        vault_path / "Wiki" / PAPERS_SUBDIR / source_filename / "images",
+        vault_path / "Wiki" / LEGACY_PAPERS_SUBDIR / source_filename / "images",
+    )
+    images_dir = next((d for d in candidate_dirs if d.is_dir()), None)
+    if images_dir is None:
         return ""
     candidates = sorted(images_dir.iterdir())
     image = next(

@@ -1,24 +1,27 @@
 ---
 name: migrate-sources
-description: Upgrades existing Wiki/sources/<id>.md files to the current source-stub format while preserving user-edited content in Notes / Key Takeaways / Figures sections. Use when /paper-wiki:migrate-sources is invoked, after upgrading paper-wiki to a new minor version, when wiki-lint surfaces stale-format warnings, or when the user notices their old source files lack the Core Information / Key Takeaways / Figures section structure.
+description: Upgrades existing per-paper source files to the current source-stub format while preserving user-edited content in Notes / Key Takeaways / Figures sections. Walks Wiki/papers/<id>.md (v0.4.2 canonical) first, then falls back to legacy Wiki/sources/<id>.md. Use when /paper-wiki:migrate-sources is invoked, after upgrading paper-wiki to a new minor version, when wiki-lint surfaces stale-format warnings, or when the user notices their old source files lack the Core Information / Key Takeaways / Figures section structure.
 ---
 
 # paper-wiki Migrate Sources
 
 ## Overview
 
-Paper-wiki's per-paper source-stub format (``Wiki/sources/<id>.md``)
-evolves between minor releases. New ingests always write the current
-format, but files already in the user's vault stay on whichever
-format they were originally written under — leaving the wiki visually
+Paper-wiki's per-paper source-stub format (``Wiki/papers/<id>.md``,
+canonical since v0.4.2; ``Wiki/sources/<id>.md`` in v0.3.x) evolves
+between minor releases. New ingests always write the current format,
+but files already in the user's vault stay on whichever format they
+were originally written under — leaving the wiki visually
 inconsistent (some entries have ``## Figures`` placeholders, some
 don't; outline panes look different per paper).
 
 This SKILL runs ``paperwiki.runners.migrate_sources``, which walks
-every ``Wiki/sources/*.md`` and rewrites legacy files to the current
-format while preserving any user-authored content in ``## Notes``,
-``## Key Takeaways``, and ``## Figures``. Files already in the
-current format are skipped (no-op).
+every ``Wiki/papers/*.md`` (v0.4.2 canonical) plus any surviving
+``Wiki/sources/*.md`` (v0.3.x legacy, read-only until v0.5.0) and
+rewrites stale-format files to the current format while preserving
+any user-authored content in ``## Notes``, ``## Key Takeaways``, and
+``## Figures``. Files already in the current format are skipped
+(no-op).
 
 ## When to Use
 

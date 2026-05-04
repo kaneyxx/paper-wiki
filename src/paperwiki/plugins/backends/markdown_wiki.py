@@ -1,9 +1,11 @@
-"""Markdown wiki backend — persists sources + concepts as Markdown files.
+"""Markdown wiki backend — persists papers + concepts as Markdown files.
 
-Layout produced inside ``vault_path / WIKI_SUBDIR``::
+Layout produced inside ``vault_path / WIKI_SUBDIR`` (v0.4.2 canonical,
+per **D-T**)::
 
     Wiki/
-    ├── sources/        # one file per ingested paper
+    ├── papers/         # one file per ingested paper (was ``sources/``
+    │   │               # in v0.3.x — read-only fallback until v0.5.0)
     │   └── arxiv_2506.13063.md
     └── concepts/       # synthesized topic articles
         └── Vision-Language_Foundation_Models.md
@@ -12,18 +14,24 @@ This backend is the file-IO half of the wiki story. It does **not**
 synthesize prose — concept bodies are written by SKILLs that have run
 through Claude. Backends are intentionally narrow:
 
-* ``upsert_paper`` (protocol method) writes a per-paper source summary.
+* ``upsert_paper`` (protocol method) writes a per-paper source summary
+  to ``Wiki/papers/`` (Task 9.185 / D-T).
 * ``upsert_concept`` (extension) writes a synthesized concept article.
-* ``query`` (protocol method) is a thin substring search across source
+* ``query`` (protocol method) is a thin substring search across paper
   titles. Heavier ranking lives in the ``wiki_query`` runner so storage
   and presentation stay decoupled.
 * ``list_sources`` / ``list_concepts`` are typed discovery helpers used
-  by the lint and compile runners.
+  by the lint and compile runners. ``list_sources`` reads ``papers/``
+  first AND surfaces any surviving ``Wiki/sources/`` files (v0.3.x
+  layout) for one release with a one-shot deprecation warning.
 
 Frontmatter conventions match the format documented in
 ``tasks/plan.md`` §6.2.1, mirroring the ``status`` / ``confidence`` /
 ``sources`` / ``related_concepts`` fields used by ``kytmanov``'s
 reference implementation so users can layer their own tools on top.
+The ``sources`` field name is a *frontmatter schema key* (back-compat
+contract, NOT a path) and stays as ``sources`` regardless of where
+the on-disk file lives.
 """
 
 from __future__ import annotations
@@ -37,10 +45,12 @@ from typing import TYPE_CHECKING
 
 import aiofiles
 import yaml
+from loguru import logger
 
 from paperwiki.config.layout import (
     CONCEPTS_SUBDIR,
     LEGACY_PAPERS_SUBDIR,
+    PAPERS_SUBDIR,
     WIKI_SUBDIR,
 )
 from paperwiki.core.properties import build_properties_block
@@ -49,11 +59,15 @@ if TYPE_CHECKING:
     from paperwiki.core.models import Recommendation, ScoreBreakdown
 
 
-# Task 9.184 (D-Z): the per-paper subdir name lives in
-# ``paperwiki.config.layout``. 9.184 is pure SOT consolidation — the
-# backend keeps writing to the legacy ``sources/`` location for one
-# more commit; Task 9.185 flips the write target to ``PAPERS_SUBDIR``
-# in a follow-up commit so each step stays atomically testable.
+# Task 9.185 (D-T): the canonical write target for per-paper notes is
+# ``Wiki/papers/`` (PAPERS_SUBDIR). For one release, the backend's
+# read path additionally surfaces files surviving in the v0.3.x
+# ``Wiki/sources/`` legacy layout (LEGACY_PAPERS_SUBDIR). Each
+# legacy file is warned about exactly once per process via the
+# module-level ``_LEGACY_WARNED`` set so chatty operators don't see
+# the same noise every time ``list_sources()`` is called from
+# ``wiki-compile`` / ``wiki-lint`` / ``wiki-query``.
+_LEGACY_WARNED: set[Path] = set()
 _FRONTMATTER_END_RE = re.compile(r"\n---\n", re.MULTILINE)
 _FILENAME_UNSAFE_RE = re.compile(r'[\\/:#?*|<>"\[\]^]+')
 _RUN_OF_UNDERSCORE_OR_WHITESPACE = re.compile(r"[\s_]+")
@@ -179,7 +193,7 @@ class MarkdownWikiBackend:
         *,
         topic_strength_threshold: float = 0.0,
     ) -> Path:
-        """Write or refresh a per-paper source file under ``sources/``.
+        """Write or refresh a per-paper source file under ``Wiki/papers/``.
 
         The frontmatter carries everything downstream tools need to surface
         the paper without re-reading the body: identifiers (``canonical_id``,
@@ -341,26 +355,50 @@ class MarkdownWikiBackend:
         return path
 
     async def list_sources(self) -> list[SourceSummary]:
-        """Return one :class:`SourceSummary` per file under ``sources/``."""
-        directory = self.wiki_root / LEGACY_PAPERS_SUBDIR
-        if not directory.is_dir():
-            return []
+        """Return one :class:`SourceSummary` per per-paper file in the vault.
+
+        Reads from ``Wiki/papers/`` (the v0.4.2 canonical layout)
+        first; any file surviving in ``Wiki/sources/`` (v0.3.x
+        legacy) is also surfaced for one release with a one-shot
+        ``backend.legacy.sources_path`` warning per file. v0.5.0
+        drops the legacy fallback — see the ``LEGACY_PAPERS_SUBDIR``
+        constant in :mod:`paperwiki.config.layout`.
+
+        When a filename appears in BOTH directories the canonical
+        ``papers/`` copy wins (legacy is silently skipped to avoid
+        duplicate ``SourceSummary`` records, which would mislead
+        ``wiki_compile`` / ``wiki_lint``).
+        """
         out: list[SourceSummary] = []
-        for path in sorted(directory.glob("*.md")):
-            fm = await _read_frontmatter(path)
-            if fm is None:
-                continue
-            out.append(
-                SourceSummary(
-                    canonical_id=str(fm.get("canonical_id") or ""),
-                    title=str(fm.get("title") or path.stem),
-                    path=path,
-                    status=str(fm.get("status") or "draft"),
-                    confidence=_as_float(fm.get("confidence")),
-                    related_concepts=_str_list(fm.get("related_concepts")),
-                    tags=_str_list(fm.get("tags")),
-                )
-            )
+        seen_filenames: set[str] = set()
+
+        canonical_dir = self.wiki_root / PAPERS_SUBDIR
+        if canonical_dir.is_dir():
+            for path in sorted(canonical_dir.glob("*.md")):
+                summary = await _build_source_summary(path)
+                if summary is None:
+                    continue
+                seen_filenames.add(path.name)
+                out.append(summary)
+
+        legacy_dir = self.wiki_root / LEGACY_PAPERS_SUBDIR
+        if legacy_dir.is_dir():
+            for path in sorted(legacy_dir.glob("*.md")):
+                if path.name in seen_filenames:
+                    # Canonical copy already collected — skip silently
+                    # so we don't double-count.
+                    continue
+                summary = await _build_source_summary(path)
+                if summary is None:
+                    continue
+                if path not in _LEGACY_WARNED:
+                    _LEGACY_WARNED.add(path)
+                    logger.warning(
+                        "backend.legacy.sources_path path={path}",
+                        path=str(path),
+                    )
+                out.append(summary)
+
         return out
 
     async def list_concepts(self) -> list[ConceptSummary]:
@@ -391,8 +429,12 @@ class MarkdownWikiBackend:
     # ------------------------------------------------------------------
 
     def _source_path(self, canonical_id: str) -> Path:
+        # Task 9.185 (D-T): all NEW per-paper writes land at
+        # ``Wiki/papers/`` (PAPERS_SUBDIR). The legacy
+        # ``Wiki/sources/`` (LEGACY_PAPERS_SUBDIR) is read-only via
+        # ``list_sources`` for one release before deletion in v0.5.0.
         filename = _canonical_id_to_filename(canonical_id)
-        return self.wiki_root / LEGACY_PAPERS_SUBDIR / f"{filename}.md"
+        return self.wiki_root / PAPERS_SUBDIR / f"{filename}.md"
 
     def _concept_path(self, name: str) -> Path:
         return self.wiki_root / CONCEPTS_SUBDIR / f"{_concept_name_to_filename(name)}.md"
@@ -602,6 +644,27 @@ async def _read_frontmatter(path: Path) -> dict[str, object] | None:
     if not isinstance(data, dict):
         return None
     return data
+
+
+async def _build_source_summary(path: Path) -> SourceSummary | None:
+    """Read frontmatter + return a :class:`SourceSummary` (or ``None``).
+
+    Extracted from :meth:`MarkdownWikiBackend.list_sources` (Task 9.185)
+    so the canonical-vs-legacy walk can re-use the same conversion
+    logic without duplicating the frontmatter handling.
+    """
+    fm = await _read_frontmatter(path)
+    if fm is None:
+        return None
+    return SourceSummary(
+        canonical_id=str(fm.get("canonical_id") or ""),
+        title=str(fm.get("title") or path.stem),
+        path=path,
+        status=str(fm.get("status") or "draft"),
+        confidence=_as_float(fm.get("confidence")),
+        related_concepts=_str_list(fm.get("related_concepts")),
+        tags=_str_list(fm.get("tags")),
+    )
 
 
 __all__ = [

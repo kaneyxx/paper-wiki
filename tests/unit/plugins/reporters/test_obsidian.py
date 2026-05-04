@@ -103,7 +103,7 @@ class TestRenderObsidianDigest:
         body = render_obsidian_digest([_make_recommendation()], _make_ctx())
         # Target is the canonical-id-derived source filename, not a
         # sanitized title — that way clicking the wikilink jumps
-        # straight into ``Wiki/sources/arxiv_2506.13063.md``.
+        # straight into ``Wiki/papers/arxiv_2506.13063.md``.
         target = "arxiv_2506.13063"
         title = "PRISM2: Unlocking Multi-Modal AI"
         assert f"[[{target}|{title}]]" in body
@@ -151,12 +151,12 @@ class TestRenderObsidianDigest:
         assert "> [!info]" in body
 
     def test_per_paper_links_to_wiki_source_stub(self) -> None:
-        """Title wikilink points at ``Wiki/sources/arxiv_<id>`` (the rich
+        """Title wikilink points at ``Wiki/papers/arxiv_<id>`` (the rich
         per-paper note) rather than a free-form title-based target."""
         rec = _make_recommendation(canonical_id="arxiv:2506.13063")
         body = render_obsidian_digest([rec], _make_ctx())
         assert "[[arxiv_2506.13063" in body, (
-            "title link must reference the Wiki/sources stub, not just the title"
+            "title link must reference the Wiki/papers stub, not just the title"
         )
 
     def test_per_paper_has_abstract_subheading(self) -> None:
@@ -359,12 +359,12 @@ class TestObsidianReporter:
         assert not (tmp_path / "Wiki").exists()
 
     async def test_wiki_backend_true_writes_per_paper_source(self, tmp_path: Path) -> None:
-        """With ``wiki_backend=True`` each rec lands as ``Wiki/sources/<id>.md``."""
+        """With ``wiki_backend=True`` each rec lands as ``Wiki/papers/<id>.md``."""
         reporter = ObsidianReporter(vault_path=tmp_path, wiki_backend=True)
         ctx = _make_ctx()
         await reporter.emit([_make_recommendation()], ctx)
 
-        expected = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md"
+        expected = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md"
         assert expected.exists()
         body = expected.read_text(encoding="utf-8")
         assert "canonical_id: arxiv:2506.13063" in body
@@ -372,10 +372,10 @@ class TestObsidianReporter:
         assert ctx.counters["reporter.obsidian.wiki_backend.written"] == 1
 
     async def test_inline_teaser_figure_embed_when_extracted(self, tmp_path: Path) -> None:
-        """If ``Wiki/sources/<id>/images/`` already has figures (via
+        """If ``Wiki/papers/<id>/images/`` already has figures (via
         extract-images), the daily entry inlines the first one as a
         teaser. Otherwise the section is silently skipped — no clutter."""
-        images_dir = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+        images_dir = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063" / "images"
         images_dir.mkdir(parents=True)
         (images_dir / "Figure_1.pdf").write_bytes(b"%PDF-1.4 stub\n")
 
@@ -396,6 +396,43 @@ class TestObsidianReporter:
         body = (tmp_path / "Daily" / "2026-04-25-paper-digest.md").read_text(encoding="utf-8")
         assert "![[arxiv_2506.13063/images" not in body
 
+    async def test_inline_teaser_falls_back_to_legacy_sources_dir(self, tmp_path: Path) -> None:
+        """Task 9.185 (D-T): a vault still on the v0.3.x layout
+        (``Wiki/sources/<id>/images/`` only — no ``papers/``) keeps
+        producing teasers via the read-fallback. Drops in v0.5.0.
+        """
+        legacy_images = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+        legacy_images.mkdir(parents=True)
+        (legacy_images / "Figure_1.png").write_bytes(b"PNG-stub")
+        # No ``papers/`` directory — the fallback must kick in.
+        assert not (tmp_path / "Wiki" / "papers").exists()
+
+        reporter = ObsidianReporter(vault_path=tmp_path)
+        await reporter.emit([_make_recommendation()], _make_ctx())
+
+        body = (tmp_path / "Daily" / "2026-04-25-paper-digest.md").read_text(encoding="utf-8")
+        # Wikilink shape stays the same — Obsidian resolves by index,
+        # not literal path. Only the on-disk search location changed.
+        assert "![[arxiv_2506.13063/images/Figure_1.png" in body
+
+    async def test_inline_teaser_papers_takes_priority_over_legacy(self, tmp_path: Path) -> None:
+        """When BOTH ``Wiki/papers/<id>/images/`` AND
+        ``Wiki/sources/<id>/images/`` exist, the canonical (papers/)
+        figure wins."""
+        canonical_images = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063" / "images"
+        canonical_images.mkdir(parents=True)
+        (canonical_images / "canonical.png").write_bytes(b"new")
+        legacy_images = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+        legacy_images.mkdir(parents=True)
+        (legacy_images / "old.png").write_bytes(b"old")
+
+        reporter = ObsidianReporter(vault_path=tmp_path)
+        await reporter.emit([_make_recommendation()], _make_ctx())
+
+        body = (tmp_path / "Daily" / "2026-04-25-paper-digest.md").read_text(encoding="utf-8")
+        assert "canonical.png" in body
+        assert "old.png" not in body
+
     async def test_wiki_backend_true_writes_one_file_per_recommendation(
         self, tmp_path: Path
     ) -> None:
@@ -408,7 +445,7 @@ class TestObsidianReporter:
         ctx = _make_ctx()
         await reporter.emit(recs, ctx)
 
-        sources_dir = tmp_path / "Wiki" / "sources"
+        sources_dir = tmp_path / "Wiki" / "papers"
         files = sorted(p.name for p in sources_dir.glob("*.md"))
         assert files == [
             "arxiv_1111.1111.md",

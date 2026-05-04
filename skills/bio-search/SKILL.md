@@ -78,7 +78,7 @@ specifically asking for biomedical-domain literature.
      paperclip:bio_<id>` (or `arxiv:<id>` if the hit has an arXiv id
      under `external_ids`).
    - "Save these as wiki sources" → for each chosen hit, write the
-     source stub under `Wiki/sources/<canonical-id>.md` via
+     source stub under `Wiki/papers/<canonical-id>.md` via
      `MarkdownWikiBackend.upsert_paper` directly, then chain to
      `/paper-wiki:wiki-ingest`. (A dedicated `paperwiki fetch-pdf`
      subcommand is a future-Phase candidate; today the wiki backend
@@ -107,7 +107,7 @@ specifically asking for biomedical-domain literature.
   to broaden (drop one keyword, expand the date window) before giving
   up.
 - A hit's `id` collides with an existing source under
-  `Wiki/sources/` — surface the duplicate; do not silently overwrite.
+  `Wiki/papers/` — surface the duplicate; do not silently overwrite.
 - The user asks for "the latest treatment for <disease>" — biomedical
   literature is not clinical advice. Decline to summarize as
   recommendations; surface the papers and let the user / their
@@ -117,7 +117,7 @@ specifically asking for biomedical-domain literature.
 
 - `paperclip` appears in the diagnostics `mcp_servers` field before
   the SKILL invokes any MCP tool.
-- The user's vault has at least one new file under `Wiki/sources/` if
+- The user's vault has at least one new file under `Wiki/papers/` if
   the user opted to save hits.
 - `/paper-wiki:wiki-lint` surfaces a `DANGLING_SOURCE` finding for any
   newly saved source until the user runs `/paper-wiki:wiki-ingest`.
