@@ -38,15 +38,22 @@ from typing import TYPE_CHECKING
 import aiofiles
 import yaml
 
-from paperwiki.config.layout import WIKI_SUBDIR
+from paperwiki.config.layout import (
+    CONCEPTS_SUBDIR,
+    LEGACY_PAPERS_SUBDIR,
+    WIKI_SUBDIR,
+)
 from paperwiki.core.properties import build_properties_block
 
 if TYPE_CHECKING:
     from paperwiki.core.models import Recommendation, ScoreBreakdown
 
 
-_SOURCES_DIRNAME = "sources"
-_CONCEPTS_DIRNAME = "concepts"
+# Task 9.184 (D-Z): the per-paper subdir name lives in
+# ``paperwiki.config.layout``. 9.184 is pure SOT consolidation — the
+# backend keeps writing to the legacy ``sources/`` location for one
+# more commit; Task 9.185 flips the write target to ``PAPERS_SUBDIR``
+# in a follow-up commit so each step stays atomically testable.
 _FRONTMATTER_END_RE = re.compile(r"\n---\n", re.MULTILINE)
 _FILENAME_UNSAFE_RE = re.compile(r'[\\/:#?*|<>"\[\]^]+')
 _RUN_OF_UNDERSCORE_OR_WHITESPACE = re.compile(r"[\s_]+")
@@ -335,7 +342,7 @@ class MarkdownWikiBackend:
 
     async def list_sources(self) -> list[SourceSummary]:
         """Return one :class:`SourceSummary` per file under ``sources/``."""
-        directory = self.wiki_root / _SOURCES_DIRNAME
+        directory = self.wiki_root / LEGACY_PAPERS_SUBDIR
         if not directory.is_dir():
             return []
         out: list[SourceSummary] = []
@@ -358,7 +365,7 @@ class MarkdownWikiBackend:
 
     async def list_concepts(self) -> list[ConceptSummary]:
         """Return one :class:`ConceptSummary` per file under ``concepts/``."""
-        directory = self.wiki_root / _CONCEPTS_DIRNAME
+        directory = self.wiki_root / CONCEPTS_SUBDIR
         if not directory.is_dir():
             return []
         out: list[ConceptSummary] = []
@@ -384,10 +391,11 @@ class MarkdownWikiBackend:
     # ------------------------------------------------------------------
 
     def _source_path(self, canonical_id: str) -> Path:
-        return self.wiki_root / _SOURCES_DIRNAME / f"{_canonical_id_to_filename(canonical_id)}.md"
+        filename = _canonical_id_to_filename(canonical_id)
+        return self.wiki_root / LEGACY_PAPERS_SUBDIR / f"{filename}.md"
 
     def _concept_path(self, name: str) -> Path:
-        return self.wiki_root / _CONCEPTS_DIRNAME / f"{_concept_name_to_filename(name)}.md"
+        return self.wiki_root / CONCEPTS_SUBDIR / f"{_concept_name_to_filename(name)}.md"
 
     @staticmethod
     def _default_source_body(
