@@ -9,6 +9,95 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-04
+
+Phase A of the v0.4.2 cycle: four hot bugs blocking everyday use,
+caught in real-machine smoke during the v0.4.1 → v0.4.2 transition.
+Each individually small but together they were the difference between
+"v0.4.0 looks shipped" and "the user can finish a typical session
+without manual workarounds." Verified end-to-end on the maintainer's
+vault before merge.
+
+### Added
+
+- **`paperwiki.config.secrets` module — auto-load
+  `${PAPERWIKI_HOME}/secrets.env`** (Task 9.180 / **D-U**). The
+  pre-D-U contract required users to manually
+  `source ~/.config/paper-wiki/secrets.env` before any runner that
+  constructed a source plugin needing API keys (notably the
+  `semantic_scholar` `api_key_env` indirection). A naked
+  `paperwiki digest` from a fresh shell crashed with
+  `UserError("env var PAPERWIKI_S2_API_KEY is unset")`. The new
+  loader auto-fires at the top of every CLI entry point that may
+  touch user secrets (`digest`, `wiki-query`, `wiki-ingest-plan`).
+  Minimal `KEY=VALUE` parser, no `python-dotenv` dependency.
+  No-clobber (existing `os.environ[K]` always wins). Mode hygiene
+  warning when not `0600`. Idempotent across the process. Opt-out
+  via `PAPERWIKI_NO_AUTO_SECRETS=1`.
+- **`RecipeSchemaError` exception type** (Task 9.181 / **D-W**).
+  Pre-v0.4 recipes (`scorer.config.weights: {keyword, category,
+  recency}`) used to crash mid-run inside `CompositeScorer` with a
+  generic axes-missing exception. The v0.4.0 SKILL session that hit
+  this responded by silently rewriting the user's recipe with v0.4
+  defaults, losing the maintainer's intent. The new exception is
+  raised at recipe-load time before pydantic validation, exits with
+  code `2` (`RECIPE_STALE`, distinct from generic `UserError` exit
+  `1`), and contains the literal slash-form action hint
+  `/paper-wiki:migrate-recipe <path>` so SKILL pipes auto-route.
+  `skills/digest/SKILL.md` now has a "When this fails" stanza
+  forbidding default-weight substitution.
+- **`EdgeRecord.note` field + frontmatter-link harvest** (Task 9.183).
+  `wiki-compile-graph` now harvests typed-list frontmatter
+  (`related_concepts`, `topics`, `people`) into edges in addition to
+  body wikilinks. Frontmatter-origin edges are tagged
+  `note="frontmatter:<field>"` so wiki-lint can flag inconsistencies
+  with body prose. Closes the digest-write ↔ graph-read contract
+  that was decorative pre-v0.4.2. Body wins on dedup when both body
+  and frontmatter point at the same target.
+
+### Fixed
+
+- **`wiki-compile-graph` walks legacy `Wiki/sources/`** when
+  `Wiki/papers/` is missing or empty (Task 9.182). Pre-fix, an
+  upgraded user with hundreds of source notes saw zero graph activity
+  on their first `wiki-graph` query because the v0.4.x compiler only
+  walked the typed subdirs (`papers/concepts/topics/people/`). Fix
+  bridges the transition window until D-T storage layout
+  consolidation lands in Phase B: when `papers/` has zero `.md`,
+  `_walk_typed_subdirs` falls back to `sources/`, entities are tagged
+  with canonical `entity_type=papers`, `entity_id` prefix is rewritten
+  so downstream queries return stable `papers/<id>` paths regardless
+  of physical layout, and a one-shot `graph.sources.legacy` warning
+  fires per compile (action: "run paperwiki wiki-compile to migrate").
+  Real-machine result: the maintainer's 20-file `Wiki/sources/` vault
+  now produces 54 edges (was 0) and `--papers-citing vision-multimodal`
+  returns 20 papers (was empty).
+- **`PaperWikiError` messages reach stderr in CLI runners** (Phase A
+  regression fix, caught during real-machine verification). Loguru's
+  default format renders the message string verbatim but drops keyword
+  `extra` fields; pre-fix,
+  `logger.error("digest.failed", error=str(exc), exit_code=...)`
+  emitted only the literal `"digest.failed"` and the multi-line
+  actionable hint (e.g. `/paper-wiki:migrate-recipe <path>` from
+  `RecipeSchemaError`) never reached the user's terminal despite
+  the exit code being correct. All three runners that catch
+  `PaperWikiError` (`digest`, `wiki-query`, `wiki-ingest-plan`) now
+  emit the full message via `typer.echo(str(exc), err=True)` before
+  the structured logger line. Test gap closed:
+  `test_digest_cli_emits_full_message_on_stderr` runs `paperwiki
+  digest` as a real subprocess so loguru's stderr handler is
+  exercised end-to-end.
+
+### Changed
+
+- **`_resolve_s2_secrets` error message distinguishes file-missing
+  vs key-missing-from-file** (Task 9.180 companion). When the recipe
+  declares an `api_key_env` indirection and the env var is unset, the
+  message now spells out the exact path
+  (`~/.config/paper-wiki/secrets.env`) and the exact key name to add,
+  branching on whether the file exists. Matches the D-U auto-load
+  contract — the user no longer guesses where the key should live.
+
 ## [0.4.1] - 2026-05-01
 
 Hot-fix for a v0.4.0 release-gate regression caught on first
