@@ -2,7 +2,7 @@
 
 The runner orchestrates:
 1. download arxiv source tarball
-2. extract figures into Wiki/sources/<id>/images/
+2. extract figures into Wiki/papers/<id>/images/
 3. rewrite the ``## Figures`` section in the source .md with embeds
 
 Tests stub the HTTP client with ``httpx.MockTransport`` and feed a
@@ -76,6 +76,29 @@ async def _seed_source(vault: Path, canonical_id: str) -> Path:
     return await backend.upsert_paper(_make_recommendation(canonical_id))
 
 
+def _seed_legacy_source(vault: Path, canonical_id: str) -> Path:
+    """Write a minimal source file under the v0.3.x ``Wiki/sources/``
+    layout, bypassing the backend so we can exercise the
+    ``extract_paper_images`` legacy-fallback path (Task 9.186).
+    """
+    filename = canonical_id.replace(":", "_") + ".md"
+    legacy_path = vault / "Wiki" / "sources" / filename
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(
+        "---\n"
+        f"canonical_id: {canonical_id}\n"
+        "title: Legacy Vault Paper\n"
+        "status: draft\n"
+        "confidence: 0.5\n"
+        "---\n\n"
+        "# Legacy Paper Body\n\n"
+        "## Figures\n\n"
+        f"_Run `/paper-wiki:extract-images {canonical_id}` to populate._\n",
+        encoding="utf-8",
+    )
+    return legacy_path
+
+
 def _mock_client(tarball_bytes: bytes | None, *, status: int = 200) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         if tarball_bytes is None:
@@ -113,7 +136,7 @@ class TestExtractPaperImages:
         assert result.canonical_id == "arxiv:2506.13063"
         assert result.image_count == 2
         # Files actually exist on disk.
-        images_dir = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+        images_dir = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063" / "images"
         assert images_dir.is_dir()
         names = sorted(p.name for p in images_dir.glob("*.png"))
         assert names == ["method.png", "teaser.png"]
@@ -129,7 +152,7 @@ class TestExtractPaperImages:
         finally:
             await client.aclose()
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Embed uses Obsidian wikilink-with-width syntax pointing at the
         # extracted file.
         assert "![[arxiv_2506.13063/images/teaser.png" in body
@@ -179,7 +202,7 @@ class TestExtractPaperImages:
             await client.aclose()
 
         assert result.image_count == 0
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Body still has Figures section with a "no figures found" note.
         assert "## Figures" in body
         assert "no figures" in body.lower() or "0 figures" in body.lower()
@@ -189,10 +212,85 @@ class TestExtractPaperImages:
 
         client = _mock_client(b"")
         try:
-            with pytest.raises(UserError, match="Wiki/sources"):
+            with pytest.raises(UserError, match="Wiki/papers"):
                 await runner.extract_paper_images(tmp_path, "arxiv:9999.99999", http_client=client)
         finally:
             await client.aclose()
+
+    async def test_falls_back_to_legacy_sources_with_warning(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Task 9.186 (D-T): a vault still on the v0.3.x layout
+        (only ``Wiki/sources/<id>.md``) keeps working via the
+        read-fallback. Drops in v0.5.0.
+
+        The image manifest follows wherever the source file actually
+        lives so the user's existing figures stay co-located.
+        """
+        import logging
+
+        from loguru import logger
+
+        from paperwiki.runners import extract_paper_images as runner
+
+        runner._LEGACY_WARNED.clear()
+        _seed_legacy_source(tmp_path, "arxiv:2506.13063")
+        # Sanity: NOT on the v0.4.2 layout.
+        assert not (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").exists()
+
+        tarball = _build_tarball([("paper/figures/teaser.png", _TINY_PNG)])
+        client = _mock_client(tarball)
+        handler_id = logger.add(
+            lambda msg: logging.getLogger("paperwiki.extract.test").warning(msg),
+            level="INFO",
+        )
+        try:
+            with caplog.at_level(logging.WARNING, logger="paperwiki.extract.test"):
+                result = await runner.extract_paper_images(
+                    tmp_path, "arxiv:2506.13063", http_client=client
+                )
+        finally:
+            await client.aclose()
+            logger.remove(handler_id)
+
+        assert result.image_count == 1
+        # Images land alongside the source file the user actually has.
+        legacy_images_dir = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+        assert legacy_images_dir.is_dir()
+        assert (legacy_images_dir / "teaser.png").is_file()
+        # And the deprecation warning fired exactly once.
+        legacy_warnings = [
+            rec for rec in caplog.records if "extract_images.legacy.sources_path" in rec.message
+        ]
+        assert len(legacy_warnings) == 1, (
+            f"expected exactly one extract_images legacy warning, got {len(legacy_warnings)}"
+        )
+
+    async def test_canonical_papers_takes_priority_over_legacy_sources(
+        self, tmp_path: Path
+    ) -> None:
+        """When BOTH ``papers/<id>.md`` and ``sources/<id>.md`` exist
+        (mid-migration vault), the canonical file wins and figures
+        land at ``Wiki/papers/<id>/images/``.
+        """
+        from paperwiki.runners import extract_paper_images as runner
+
+        await _seed_source(tmp_path, "arxiv:2506.13063")  # writes to papers/
+        _seed_legacy_source(tmp_path, "arxiv:2506.13063")  # also writes to sources/
+        tarball = _build_tarball([("paper/figures/teaser.png", _TINY_PNG)])
+        client = _mock_client(tarball)
+        try:
+            await runner.extract_paper_images(tmp_path, "arxiv:2506.13063", http_client=client)
+        finally:
+            await client.aclose()
+
+        canonical_images_dir = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063" / "images"
+        legacy_images_dir = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+        assert (canonical_images_dir / "teaser.png").is_file()
+        # Legacy stays empty — extraction follows the canonical source.
+        assert not legacy_images_dir.exists() or not any(legacy_images_dir.iterdir())
 
     async def test_idempotent_re_extraction_skips_when_force_false(self, tmp_path: Path) -> None:
         """Running twice without --force should re-use the cached tarball."""
@@ -287,7 +385,7 @@ class TestIndexManifest:
         finally:
             await client.aclose()
 
-        index_md = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images" / "index.md"
+        index_md = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063" / "images" / "index.md"
         assert index_md.is_file(), "index.md must be written alongside extracted figures"
         content = index_md.read_text(encoding="utf-8")
         assert "arxiv-source" in content

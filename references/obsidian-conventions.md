@@ -195,7 +195,7 @@ custom view.
 ## 5. Image embeds (task 9.165)
 
 `/paper-wiki:extract-images` pulls figures from arXiv source tarballs
-and writes them under `Wiki/sources/<id>/images/`. Embeds use
+and writes them under `Wiki/papers/<id>/images/`. Embeds use
 Obsidian's wikilink-with-width syntax:
 
 ```markdown

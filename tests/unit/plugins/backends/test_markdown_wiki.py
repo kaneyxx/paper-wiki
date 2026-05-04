@@ -77,14 +77,18 @@ def _read_frontmatter(path: Path) -> dict[str, object]:
 
 
 class TestUpsertSource:
-    async def test_writes_file_under_sources_dir(self, tmp_path: Path) -> None:
+    async def test_writes_file_under_papers_dir(self, tmp_path: Path) -> None:
+        """Task 9.185 (D-T): write target switched from
+        ``Wiki/sources/`` (v0.3.x) to ``Wiki/papers/`` (v0.4.2)."""
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         rec = _make_recommendation()
 
         await backend.upsert_paper(rec)
 
-        path = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md"
+        path = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md"
         assert path.is_file()
+        # Sanity: the legacy location must NOT receive new writes.
+        assert not (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").exists()
 
     async def test_canonical_id_with_colon_safely_filenamed(self, tmp_path: Path) -> None:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
@@ -92,7 +96,7 @@ class TestUpsertSource:
 
         await backend.upsert_paper(rec)
 
-        path = tmp_path / "Wiki" / "sources" / "s2_abc-def.md"
+        path = tmp_path / "Wiki" / "papers" / "s2_abc-def.md"
         assert path.is_file()
 
     async def test_source_frontmatter_round_trip(self, tmp_path: Path) -> None:
@@ -101,7 +105,7 @@ class TestUpsertSource:
 
         await backend.upsert_paper(rec)
 
-        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        fm = _read_frontmatter(tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md")
         assert fm["canonical_id"] == "arxiv:2506.13063"
         assert fm["title"] == "PRISM2: Unlocking Multi-Modal AI"
         assert fm["status"] == "draft"
@@ -124,7 +128,7 @@ class TestUpsertSource:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         await backend.upsert_paper(_make_recommendation())
 
-        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        fm = _read_frontmatter(tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md")
         for key in ("tags", "aliases", "status", "cssclasses", "created", "updated"):
             assert key in fm, f"missing Properties field: {key}"
         # Type assertions per acceptance criteria.
@@ -137,7 +141,7 @@ class TestUpsertSource:
         # ISO-8601 with timezone offset (round-trip via ``yaml.safe_load``
         # may also produce a ``datetime`` if the string is unquoted; we
         # assert the string form by re-reading the raw file).
-        text = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        text = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         assert "+00:00" in text  # UTC offset is preserved verbatim
 
     async def test_source_frontmatter_includes_publication_metadata(self, tmp_path: Path) -> None:
@@ -146,7 +150,7 @@ class TestUpsertSource:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         await backend.upsert_paper(_make_recommendation())
 
-        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        fm = _read_frontmatter(tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md")
         assert fm["published_at"] == "2026-04-20"
         assert fm["landing_url"] == "https://arxiv.org/abs/2506.13063"
         assert fm["citation_count"] == 42
@@ -164,7 +168,7 @@ class TestUpsertSource:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         await backend.upsert_paper(_make_recommendation())
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Drop the frontmatter for body assertions.
         _, _, body = body.partition("---\n")
         _, _, body = body.partition("---\n")
@@ -186,7 +190,7 @@ class TestUpsertSource:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         await backend.upsert_paper(_make_recommendation())
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Key Takeaways block points at wiki-ingest.
         assert "/paper-wiki:wiki-ingest" in body
         # Figures block points at the (forthcoming) extract-images workflow.
@@ -199,7 +203,7 @@ class TestUpsertSource:
         rec = _make_recommendation()
         await backend.upsert_paper(rec)
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Core Information renders authors, published date, both links, and citations.
         assert "Jane Doe" in body
         assert "2026-04-20" in body
@@ -221,7 +225,7 @@ class TestUpsertSource:
 
         await backend.upsert_paper(rec, topic_strength_threshold=0.5)
 
-        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        fm = _read_frontmatter(tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md")
         related = fm["related_concepts"]
         assert isinstance(related, list)
         assert any("strong-topic" in s for s in related)
@@ -239,7 +243,7 @@ class TestUpsertSource:
 
         await backend.upsert_paper(rec, topic_strength_threshold=0.0)
 
-        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        fm = _read_frontmatter(tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md")
         related = fm["related_concepts"]
         assert any("strong-topic" in s for s in related)
         assert any("weak-topic" in s for s in related)
@@ -253,7 +257,7 @@ class TestUpsertSource:
 
         await backend.upsert_paper(rec, topic_strength_threshold=0.9)
 
-        fm = _read_frontmatter(tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md")
+        fm = _read_frontmatter(tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md")
         related = fm["related_concepts"]
         assert any("topic-a" in s for s in related)
         assert any("topic-b" in s for s in related)
@@ -263,10 +267,10 @@ class TestUpsertSource:
         rec = _make_recommendation()
 
         await backend.upsert_paper(rec)
-        first = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text()
+        first = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text()
 
         await backend.upsert_paper(rec)
-        second = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text()
+        second = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text()
 
         # Files should remain valid; both have the same canonical_id.
         assert "arxiv:2506.13063" in first
@@ -476,7 +480,7 @@ class TestUpsertConcept:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         await backend.upsert_paper(_make_recommendation())
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Drop frontmatter for body assertions.
         _, _, body = body.partition("---\n")
         _, _, body = body.partition("---\n")
@@ -490,7 +494,7 @@ class TestUpsertConcept:
         backend = MarkdownWikiBackend(vault_path=tmp_path, callouts=False)
         await backend.upsert_paper(_make_recommendation())
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         _, _, body = body.partition("---\n")
         _, _, body = body.partition("---\n")
         assert "## Abstract" in body
@@ -503,7 +507,7 @@ class TestUpsertConcept:
         backend = MarkdownWikiBackend(vault_path=tmp_path)
         await backend.upsert_paper(_make_recommendation())
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         assert "<%" not in body, "Templater syntax leaked into default output"
         assert "<%*" not in body
 
@@ -514,7 +518,7 @@ class TestUpsertConcept:
         backend = MarkdownWikiBackend(vault_path=tmp_path, templater=True)
         await backend.upsert_paper(_make_recommendation())
 
-        body = (tmp_path / "Wiki" / "sources" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
+        body = (tmp_path / "Wiki" / "papers" / "arxiv_2506.13063.md").read_text(encoding="utf-8")
         # Strip frontmatter so we look at the body proper.
         _, _, body = body.partition("---\n")
         _, _, body = body.partition("---\n")
@@ -589,6 +593,115 @@ class TestDiscovery:
 
         assert await backend.list_sources() == []
         assert await backend.list_concepts() == []
+
+
+class TestLegacyPapersSubdirReadFallback:
+    """Task 9.185 (D-T): ``list_sources`` walks ``Wiki/papers/`` first
+    AND surfaces any ``Wiki/sources/`` file (v0.3.x layout) with a
+    one-shot ``backend.legacy.sources_path`` warning. Drops in
+    v0.5.0 — see ``LEGACY_PAPERS_SUBDIR`` constant.
+    """
+
+    @staticmethod
+    def _seed_legacy_source_file(vault: Path, name: str = "arxiv_2506.13063.md") -> Path:
+        """Write a minimal valid-frontmatter source file under
+        ``Wiki/sources/`` (bypassing the backend entirely so we can
+        exercise the read-fallback path).
+        """
+        legacy_path = vault / "Wiki" / "sources" / name
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text(
+            "---\n"
+            "canonical_id: arxiv:2506.13063\n"
+            "title: Legacy Vault Paper\n"
+            "status: draft\n"
+            "confidence: 0.5\n"
+            "related_concepts: []\n"
+            "tags: []\n"
+            "---\n\n"
+            "# Legacy Paper Body\n",
+            encoding="utf-8",
+        )
+        return legacy_path
+
+    async def test_legacy_only_vault_is_still_discoverable(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Vaults still on the v0.3.x layout (only ``Wiki/sources/``,
+        no ``Wiki/papers/``) must keep working until v0.5.0."""
+        from paperwiki.plugins.backends.markdown_wiki import _LEGACY_WARNED
+
+        _LEGACY_WARNED.clear()
+        self._seed_legacy_source_file(tmp_path)
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+
+        summaries = await backend.list_sources()
+
+        assert len(summaries) == 1
+        assert summaries[0].canonical_id == "arxiv:2506.13063"
+        assert summaries[0].title == "Legacy Vault Paper"
+
+    async def test_canonical_papers_take_priority_over_legacy_same_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A vault that has BOTH ``papers/<id>.md`` AND
+        ``sources/<id>.md`` (e.g. mid-migration) must surface the
+        canonical file once, not duplicate the same id.
+        """
+        from paperwiki.plugins.backends.markdown_wiki import _LEGACY_WARNED
+
+        _LEGACY_WARNED.clear()
+        self._seed_legacy_source_file(tmp_path)
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+        await backend.upsert_paper(_make_recommendation())  # writes to papers/
+
+        summaries = await backend.list_sources()
+
+        # Filename appears once (papers/ wins; legacy silently skipped).
+        names = [s.path.name for s in summaries]
+        assert names == ["arxiv_2506.13063.md"]
+        # And it came from papers/ — verified via the path.
+        assert "papers" in summaries[0].path.parts
+
+    async def test_legacy_hit_emits_warning_once(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Per the deprecation contract, the warning fires exactly
+        once per process per file. Two ``list_sources()`` calls do
+        not produce two warnings.
+        """
+        import logging
+
+        from loguru import logger
+
+        from paperwiki.plugins.backends.markdown_wiki import _LEGACY_WARNED
+
+        _LEGACY_WARNED.clear()
+        self._seed_legacy_source_file(tmp_path)
+        backend = MarkdownWikiBackend(vault_path=tmp_path)
+
+        handler_id = logger.add(
+            lambda msg: logging.getLogger("paperwiki.backend.test").warning(msg),
+            level="INFO",
+        )
+        try:
+            with caplog.at_level(logging.WARNING, logger="paperwiki.backend.test"):
+                await backend.list_sources()
+                await backend.list_sources()  # second pass — must NOT warn again.
+        finally:
+            logger.remove(handler_id)
+
+        legacy_warnings = [
+            rec for rec in caplog.records if "backend.legacy.sources_path" in rec.message
+        ]
+        assert len(legacy_warnings) == 1, (
+            f"expected exactly one legacy warning per file, got {len(legacy_warnings)}: "
+            f"{[r.message for r in legacy_warnings]}"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -224,11 +224,11 @@ to `paperwiki:setup`.
    - 2–3 sentence **"Why this matters"** framing from the abstract.
    - 2–4 bullet **"Key takeaways"** (concrete claims from the abstract;
      never invented).
-   - **Figures** (if `Wiki/sources/<canonical-id>/images/` exists and is
+   - **Figures** (if `Wiki/papers/<canonical-id>/images/` exists and is
      non-empty — sort alphabetically, deterministic listing — pick the
      FIRST 1 file if the directory has 1–2 figures total; pick the FIRST
      2 files if the directory has 3+ figures): embed each as
-     `![[Wiki/sources/<canonical-id>/images/<file>|600]]`. Width `|600`
+     `![[Wiki/papers/<canonical-id>/images/<file>|600]]`. Width `|600`
      is intentionally narrower than the card teaser's `|700` so both
      placements are visually distinct. Skip this section silently if the
      directory is empty or does not exist (e.g. `paperclip:` / `s2:`
@@ -388,7 +388,7 @@ than asking them to `source` it manually each run.
   line uses one of the four classifications: success-with-figures /
   success-no-figures / skipped-non-arxiv / failed-with-error.
 - Each paper with extracted images has at least one
-  `![[Wiki/sources/<id>/images/...|600]]` line in the Detailed report block.
+  `![[Wiki/papers/<id>/images/...|600]]` line in the Detailed report block.
 - After Step 8, exactly `min(auto_ingest_top, top_k)` per-paper slots have
   synthesized Detailed reports; the remaining slots have the teaser line.
 - Each Score reasoning sentence interprets WHY (not just WHAT); does not

@@ -4,7 +4,7 @@ Validates the Phase 6.3 contract end-to-end:
 
 1. ``ObsidianReporter`` runs with ``wiki_backend=True``. Each
    recommendation is persisted as a source file under
-   ``Wiki/sources/`` *and* the daily digest is written under
+   ``Wiki/papers/`` *and* the daily digest is written under
    ``Daily/`` as usual.
 2. With no concept articles yet, ``wiki_lint`` flags every freshly
    written source as ``DANGLING_SOURCE`` (severity ``info``) — the
@@ -58,7 +58,7 @@ def _make_ctx() -> RunContext:
 
 
 async def test_wiki_backend_handoff_drops_top_k_into_sources(tmp_path: Path) -> None:
-    """Top-K recommendations land as ``Wiki/sources/`` files."""
+    """Top-K recommendations land as ``Wiki/papers/`` files."""
     top_k = 3
     recs = [_make_rec(f"arxiv:0001.{i:04d}", f"Paper {i}") for i in range(1, top_k + 1)]
     reporter = ObsidianReporter(vault_path=tmp_path, wiki_backend=True)
@@ -69,7 +69,7 @@ async def test_wiki_backend_handoff_drops_top_k_into_sources(tmp_path: Path) -> 
     # Daily digest written as usual.
     assert (tmp_path / "Daily" / "2026-04-25-paper-digest.md").exists()
     # Per-paper sources written via the wiki backend.
-    sources_dir = tmp_path / "Wiki" / "sources"
+    sources_dir = tmp_path / "Wiki" / "papers"
     files = sorted(p.name for p in sources_dir.glob("*.md"))
     assert files == [
         "arxiv_0001.0001.md",

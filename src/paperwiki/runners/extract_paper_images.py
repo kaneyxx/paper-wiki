@@ -61,7 +61,7 @@ from paperwiki._internal.arxiv_source import (
 )
 from paperwiki._internal.http import build_client
 from paperwiki._internal.logging import configure_runner_logging
-from paperwiki.config.layout import WIKI_SUBDIR
+from paperwiki.config.layout import LEGACY_PAPERS_SUBDIR, PAPERS_SUBDIR, WIKI_SUBDIR
 from paperwiki.core.errors import PaperWikiError, UserError
 from paperwiki.plugins.backends.markdown_wiki import _canonical_id_to_filename
 
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     add_completion=False,
-    help="Download arXiv source for a paper, extract figures, embed in Wiki/sources/.",
+    help="Download arXiv source for a paper, extract figures, embed in Wiki/papers/.",
     no_args_is_help=True,
 )
 
@@ -80,6 +80,11 @@ _FIGURES_SECTION_RE = re.compile(
     r"(?P<heading>^## Figures\n)(?P<body>.*?)(?=^## |\Z)",
     re.DOTALL | re.MULTILINE,
 )
+
+# Task 9.186: track legacy ``Wiki/sources/`` hits so the deprecation
+# warning fires exactly once per process per file. Tests reset by
+# clearing this set; production never resets.
+_LEGACY_WARNED: set[Path] = set()
 
 
 @dataclass(slots=True)
@@ -170,21 +175,38 @@ async def extract_paper_images(
     production the runner builds a default client.
     """
     wiki_root = vault_path / wiki_subdir
-    sources_dir = wiki_root / "sources"
     source_filename = _canonical_id_to_filename(canonical_id)
-    source_path = sources_dir / f"{source_filename}.md"
-    if not source_path.is_file():
-        try:
-            relative = source_path.relative_to(vault_path)
-        except ValueError:
-            relative = source_path
+
+    # Task 9.186 (D-T): resolve the per-paper source against the
+    # canonical ``Wiki/papers/<id>.md`` first. For one release, also
+    # accept the v0.3.x legacy ``Wiki/sources/<id>.md`` location with
+    # a one-shot ``extract_images.legacy.sources_path`` warning so
+    # users know to run ``paperwiki wiki-compile`` and migrate.
+    canonical_source_path = wiki_root / PAPERS_SUBDIR / f"{source_filename}.md"
+    legacy_source_path = wiki_root / LEGACY_PAPERS_SUBDIR / f"{source_filename}.md"
+
+    if canonical_source_path.is_file():
+        source_path = canonical_source_path
+    elif legacy_source_path.is_file():
+        source_path = legacy_source_path
+        if legacy_source_path not in _LEGACY_WARNED:
+            _LEGACY_WARNED.add(legacy_source_path)
+            logger.warning(
+                "extract_images.legacy.sources_path path={path}",
+                path=str(legacy_source_path),
+            )
+    else:
         msg = (
             f"extract_paper_images: source file not found at "
-            f"Wiki/sources/{relative.name}. Run `/paper-wiki:digest` or "
-            "`/paper-wiki:analyze` first to create it."
+            f"Wiki/{PAPERS_SUBDIR}/{source_filename}.md. Run "
+            f"`/paper-wiki:digest` or `/paper-wiki:analyze` first to create it."
         )
         raise UserError(msg)
 
+    # The internal arXiv tarball cache (``Wiki/.cache/sources/``) is
+    # NOT renamed — it is not user-facing and keeping the spelling
+    # preserves every existing user's tarball cache across the
+    # v0.4.1 → v0.4.2 upgrade. (See plan §5 risks table.)
     cache_dir = wiki_root / ".cache" / "sources"
     arxiv_id = canonical_id.split(":", 1)[1] if ":" in canonical_id else canonical_id
     tarball_path = cache_dir / f"{arxiv_id}.tar.gz"
@@ -199,7 +221,10 @@ async def extract_paper_images(
         if owns_client:
             await client.aclose()
 
-    images_dir = sources_dir / source_filename / "images"
+    # Image manifest follows the source-file directory the user
+    # actually has, so legacy vaults keep their figures in
+    # ``Wiki/sources/<id>/images/`` until the migrate runs.
+    images_dir = source_path.parent / source_filename / "images"
     if force and images_dir.is_dir():
         for old in images_dir.glob("*"):
             if old.is_file():

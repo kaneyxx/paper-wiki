@@ -1,6 +1,6 @@
 ---
 name: extract-images
-description: Pulls real paper figures from arXiv source tarballs and embeds them in the source's Wiki/sources/<id>.md file. Use when the user invokes /paper-wiki:extract-images, asks to "show me the figures from <paper>", "pull the architecture diagram", "extract images from <id>", or follows up on a digest entry that has an empty Figures section.
+description: Pulls real paper figures from arXiv source tarballs and embeds them in the source's Wiki/papers/<id>.md file. Use when the user invokes /paper-wiki:extract-images, asks to "show me the figures from <paper>", "pull the architecture diagram", "extract images from <id>", or follows up on a digest entry that has an empty Figures section.
 ---
 
 # paper-wiki Extract Images
@@ -11,7 +11,7 @@ Extract Images downloads the arXiv source bundle for a paper, pulls
 the real paper figures (architecture diagrams, experimental plots,
 qualitative results) out of common figure directories
 (`figures/`, `fig/`, `pics/`, `images/`, `img/`), and embeds them
-into the `## Figures` section of `Wiki/sources/<id>.md` using
+into the `## Figures` section of `Wiki/papers/<id>.md` using
 Obsidian wikilink-with-width syntax.
 
 This SKILL is the visual half of the per-paper note story. The text
@@ -26,7 +26,7 @@ Notes) is filled by `/paper-wiki:digest`, `/paper-wiki:analyze`, and
   architecture diagram from <id>", "what does the method look like".
 - The user is reviewing a fresh digest and wants the figures from a
   ranked paper before deciding whether to deep-dive.
-- The `## Figures` section in a `Wiki/sources/<id>.md` file is empty
+- The `## Figures` section in a `Wiki/papers/<id>.md` file is empty
   (still has the placeholder text) — that's the explicit prompt to
   run this SKILL.
 
@@ -85,7 +85,7 @@ one). Surface that to the user instead of running the runner.
 - The user gave a `paperclip:` or `s2:` canonical id — there is no
   arXiv source URL. Surface this and offer alternatives instead of
   running the runner.
-- `Wiki/sources/<id>.md` doesn't exist — the runner errors with
+- `Wiki/papers/<id>.md` doesn't exist — the runner errors with
   `UserError`. Tell the user to run `/paper-wiki:digest` or
   `/paper-wiki:analyze` first to create the source stub.
 - `image_count` is suspiciously high (> 30) — usually means the
@@ -96,7 +96,7 @@ one). Surface that to the user instead of running the runner.
 
 ## Verification
 
-- `Wiki/sources/<id>/images/` exists and contains at least the count
+- `Wiki/papers/<id>/images/` exists and contains at least the count
   the runner reported.
 - The source `.md` file's `## Figures` section now has
   `![[<id>/images/<filename>|800]]` embeds (or the

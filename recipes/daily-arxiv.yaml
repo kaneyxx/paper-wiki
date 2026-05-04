@@ -92,7 +92,7 @@ reporters:
       # Override to "10_Daily" if you use Johnny.Decimal / PARA numbering.
       daily_subdir: Daily
       # Opt in to the wiki backend: each top-K paper is also written to
-      # `Wiki/sources/<canonical-id>.md` so /paper-wiki:wiki-ingest can
+      # `Wiki/papers/<canonical-id>.md` so /paper-wiki:wiki-ingest can
       # fold it into your concept articles. Off by default to avoid
       # touching first-time-user vaults.
       # wiki_backend: true

@@ -2,7 +2,7 @@
 
 Walks the same path the four wiki SKILLs walk together:
 
-1. ``upsert_paper`` populates ``Wiki/sources/``.
+1. ``upsert_paper`` populates ``Wiki/papers/``.
 2. ``upsert_concept`` populates ``Wiki/concepts/``.
 3. ``wiki_ingest_plan`` resolves which concepts reference a source.
 4. ``wiki_compile`` rebuilds ``Wiki/index.md`` deterministically.

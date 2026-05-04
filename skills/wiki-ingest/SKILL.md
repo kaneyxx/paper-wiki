@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Ingests a new source paper into the wiki by regenerating affected concept articles. Use when /paper-wiki:wiki-ingest is invoked, when a fresh source lands in Wiki/sources/ via analyze or digest, or when the user says "fold this paper into the wiki" or "update the wiki with X".
+description: Ingests a new source paper into the wiki by regenerating affected concept articles. Use when /paper-wiki:wiki-ingest is invoked, when a fresh source lands in Wiki/papers/ via analyze or digest, or when the user says "fold this paper into the wiki" or "update the wiki with X".
 ---
 
 # paper-wiki Wiki Ingest
@@ -24,7 +24,7 @@ do not pile up.
 - The `analyze` SKILL has just written a new file under `Sources/` and
   passes control here.
 - The `digest` reporter ran with `wiki_backend: true` and dropped new
-  source files into `Wiki/sources/` — ingest each one in turn.
+  source files into `Wiki/papers/` — ingest each one in turn.
 - The user says "fold this paper into my wiki" / "update the concepts
   for this source".
 
@@ -71,7 +71,7 @@ do not pile up.
    one).
 3. **Honor `source_exists`.** If `source_exists` is `false`, stop and
    ask the user to run `/paper-wiki:analyze <id>` first; ingest cannot
-   work without a source file under `Wiki/sources/`.
+   work without a source file under `Wiki/papers/`.
 4. **Read the runner's summary.** The runner's JSON output now contains
    `folded_citations: [...]` listing concepts whose `sources:` list was
    atomically updated by the runner with the new source's canonical_id.

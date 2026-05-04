@@ -405,7 +405,7 @@ filters:
   - {name: recency, config: {max_days: 7}}
   - {name: relevance, config: {topics: [...]}}
   - {name: dedup, config: {vault_paths: ["<vault>/Daily", "<vault>/Sources",
-     "<vault>/Wiki/sources", "<vault>/Wiki/concepts"]}}
+     "<vault>/Wiki/papers", "<vault>/Wiki/concepts"]}}
 scorer: {name: composite, config: {topics: [...], weights: {...}}}
 reporters:
   - {name: markdown, config: {output_dir: "<vault>/.digest-archive"}}
