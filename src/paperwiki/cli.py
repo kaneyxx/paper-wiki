@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
 from loguru import logger
 
 from paperwiki import __version__ as _PAPERWIKI_VERSION  # noqa: N812 — module constant alias
@@ -38,8 +39,11 @@ from paperwiki._internal.legacy_vault_scan import (
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki._internal.paths import (
     resolve_paperwiki_bak_dir,
+    resolve_paperwiki_home,
     resolve_paperwiki_venv_dir,
 )
+from paperwiki.config.config_toml import CONFIG_FILENAME, write_config
+from paperwiki.core.errors import UserError
 from paperwiki.runners.dedup_dismiss import main as _dedup_dismiss_main
 from paperwiki.runners.dedup_list import main as _dedup_list_main
 from paperwiki.runners.diag import render_diag as _render_diag
@@ -453,6 +457,107 @@ def _consume_rc_just_added_stamp() -> None:
         )
 
 
+def _extract_vault_path_from_recipe(recipe_path: Path) -> str | None:
+    """Best-effort extraction of ``obsidian.vault_path`` from a recipe YAML.
+
+    Returns the raw string value (no tilde expansion) so the writer
+    can emit it verbatim into config.toml. Returns ``None`` on any
+    failure mode (parse error, missing keys, wrong types) — the caller
+    treats ``None`` as "no vault info, skip".
+
+    Defensive: never raises. The post-upgrade hook MUST NOT crash the
+    upgrade flow on a malformed recipe.
+    """
+    try:
+        text = recipe_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    reporters = data.get("reporters")
+    if not isinstance(reporters, list):
+        return None
+    for spec in reporters:
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("name") != "obsidian":
+            continue
+        config = spec.get("config")
+        if not isinstance(config, dict):
+            continue
+        value = config.get("vault_path")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _post_upgrade_ensure_config_toml(*, paperwiki_home: Path | None = None) -> None:
+    """Auto-create ``$PAPERWIKI_HOME/config.toml`` from a recipe (Task 9.212).
+
+    The D-V resolver's Rung 4 reads ``config.toml::default_vault``,
+    but no code path used to write that file. Users upgrading from a
+    pre-D-V build (≤ v0.4.4) end up with a ``recipes/daily.yaml``
+    containing ``obsidian.vault_path`` but no config.toml — every
+    ``--vault``-optional CLI command fails at Rung 5 with the canonical
+    "No vault specified" error.
+
+    The hook fires at the end of ``update()`` (both no-op and apply
+    branches) and bridges the gap by:
+
+    * Skipping silently when ``config.toml`` already exists (idempotent —
+      never clobbers a maintainer's hand-edited config).
+    * Globbing ``recipes/*.yaml`` and proceeding only when **exactly
+      one** recipe with ``obsidian.vault_path`` is in scope. Multi-recipe
+      installs are ambiguous — the hook refuses to guess.
+    * Echoing a single-line action message so the user sees what was
+      written.
+
+    All failure modes (missing dirs, parse errors, multi-recipe,
+    no vault_path) are silent skips. The upgrade flow MUST NOT abort
+    on this best-effort backfill.
+    """
+    home = paperwiki_home if paperwiki_home is not None else resolve_paperwiki_home()
+    if not home.is_dir():
+        return
+
+    config_path = home / CONFIG_FILENAME
+    if config_path.exists():
+        return  # never clobber
+
+    recipes_dir = home / "recipes"
+    if not recipes_dir.is_dir():
+        return
+
+    yaml_files = sorted(p for p in recipes_dir.glob("*.yaml") if p.is_file())
+    if len(yaml_files) != 1:
+        return  # 0 or >1 — refuse to guess
+
+    recipe_path = yaml_files[0]
+    vault_path = _extract_vault_path_from_recipe(recipe_path)
+    if vault_path is None:
+        return
+
+    try:
+        write_config(
+            config_path,
+            default_vault=vault_path,
+            default_recipe=str(recipe_path),
+        )
+    except UserError:
+        # Defensive: writer refused for some reason — don't crash the
+        # upgrade flow.
+        return
+
+    typer.echo(
+        f"paperwiki update: wrote {config_path} "
+        f"(D-V default_vault from {recipe_path.name})."
+    )
+
+
 def _print_update_check_plan(
     *,
     marketplace_ver: str,
@@ -644,6 +749,10 @@ def update(
             typer.echo(legacy_hint)
         # v0.3.43 D-9.43.4: rc-edit note appears AFTER the result line.
         _consume_rc_just_added_stamp()
+        # Task 9.212: backfill config.toml when the user upgraded from a
+        # pre-D-V build. Idempotent — silently skips when file already
+        # exists or no eligible single-recipe is present.
+        _post_upgrade_ensure_config_toml()
         return
 
     # Versions differ — perform upgrade.
@@ -745,6 +854,11 @@ def update(
     # Next: block, not before. Consume-once semantics preserved (the
     # stamp is deleted after the message is printed).
     _consume_rc_just_added_stamp()
+
+    # Task 9.212: backfill config.toml when the user upgraded from a
+    # pre-D-V build. Idempotent — silently skips when file already
+    # exists or no eligible single-recipe is present.
+    _post_upgrade_ensure_config_toml()
 
 
 # ---------------------------------------------------------------------------
