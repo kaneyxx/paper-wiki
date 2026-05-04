@@ -9,6 +9,68 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-05-04
+
+Phase C — `migrate-recipe` hardening (D-W companion + D-Y stamp).
+Closes the v0.4 schema-migration gap exposed in v0.4.0 real-machine
+smoke (a SKILL session "fixing" the schema error by silently
+substituting v0.4 default weights, destroying the user's tuning).
+
+### Added
+
+- **`<recipe>.pre-v04.bak` backup mechanism** (Task 9.189) — schema
+  migration now creates a one-shot byte-identical backup adjacent to
+  the original recipe. Pre-existing `.pre-v04.bak` blocks
+  re-migration with an actionable error pointing the user at
+  `--restore` or manual deletion (avoids double-overwrite).
+- **`paperwiki migrate-recipe --restore <path>`** flag swaps the
+  `<recipe>.pre-v04.bak` content back in place and removes the .bak
+  (one-shot, no leftovers). Refuses cleanly when no .bak exists.
+- **`map_pre_v04_to_v04_weights` pure mapping** (Task 9.190) — translates
+  `keyword`/`category`/`recency` weights to v0.4
+  `relevance`/`novelty`/`momentum`/`rigor` axes via:
+  - `relevance = clip(keyword + 0.5 * category, 0.4, 0.85)`
+  - `novelty = 0.10` (conservative default — "user never opted in")
+  - `rigor = 0.05` (same rationale)
+  - `momentum = 1 - relevance - novelty - rigor` (residual)
+  - `recency` axis silently dropped (it's a filter now, not a scorer
+    axis); the recipe's existing recency filter block is preserved.
+- **D-Y round-trip stamp** (Task 9.190) — every successful
+  `migrate-recipe` run prepends (or replaces) a single
+  `# round-trip stamp YYYY-MM-DD vX.Y.Z` comment at the top of the
+  YAML so "did the user opt into this version?" is one grep away.
+  Multiple consecutive runs replace rather than stack, keeping the
+  recipe header tidy.
+
+### Changed
+
+- `migrate_recipe_file` now runs in two tiers: v0.4 schema migration
+  first (creates `.pre-v04.bak`, applies mapping), then the existing
+  v0.3.17-era keyword migrations (preserves timestamped backups for
+  multi-pivot history). The D-Y stamp is applied at the very end so
+  even an already-current recipe gains a fresh audit comment.
+- Existing `test_clean_recipe_is_noop` was tightened to assert the
+  body BELOW the stamp line is byte-identical (the stamp itself is
+  the deliberate D-Y mutation).
+
+### Verified (no code change)
+
+- `RecipeSchemaError.__str__` was already locked to use the slash form
+  `/paper-wiki:migrate-recipe <path>` since Phase A (v0.4.2 / Task
+  9.181). Task 9.191 adds an explicit regression test naming the
+  task number as the contract anchor — a future grep for "9.191"
+  now surfaces the relevant guard.
+
+### Notes
+
+- Test count: **1460 passed** (1440 baseline + 20 new). `mypy
+  --strict`, `ruff check`, `ruff format --check`, and `claude plugin
+  validate .` all clean.
+- Real-machine smoke (planned post-merge): run `paperwiki
+  migrate-recipe ~/.config/paper-wiki/recipes/daily.yaml` on the
+  maintainer's already-v04 recipe — expect a body-no-op + fresh
+  stamp at the top of the file, no `.pre-v04.bak` created.
+
 ## [0.4.5] - 2026-05-04
 
 Phase D — CLI ergonomic alignment per **D-V**. Four runners that

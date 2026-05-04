@@ -210,6 +210,16 @@ class TestMigrateRecipeFile:
         )
 
     def test_clean_recipe_is_noop(self, clean_recipe_path: Path) -> None:
+        """Clean recipe → no keyword changes, no .pre-v04.bak, body byte-equal
+        below the D-Y stamp line.
+
+        Per Task 9.190 / D-Y: even an already-current-schema recipe gains a
+        ``# round-trip stamp YYYY-MM-DD vX.Y.Z`` comment at the top of the
+        file so the user has an audit trail of which version they last
+        opted into. The body below the stamp must remain byte-identical.
+        """
+        import re
+
         from paperwiki.runners.migrate_recipe import migrate_recipe_file
 
         original_text = clean_recipe_path.read_text(encoding="utf-8")
@@ -219,8 +229,17 @@ class TestMigrateRecipeFile:
             "already-migrated recipe must produce no applied_changes"
         )
         assert report.backup_path is None
-        assert clean_recipe_path.read_text(encoding="utf-8") == original_text, (
-            "clean recipe file must not be modified"
+
+        new_text = clean_recipe_path.read_text(encoding="utf-8")
+        # Stamp line is at the top.
+        assert re.match(
+            r"^# round-trip stamp \d{4}-\d{2}-\d{2} v\d+\.\d+\.\d+\n",
+            new_text,
+        ), "D-Y round-trip stamp must be at the top of the recipe"
+        # Body below the stamp is byte-identical to the original file.
+        body_below_stamp = new_text[new_text.index("\n") + 1 :]
+        assert body_below_stamp == original_text, (
+            "recipe body below the stamp line must remain byte-identical"
         )
 
     def test_backup_files_do_not_overwrite_each_other(
