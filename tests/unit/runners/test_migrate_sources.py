@@ -210,6 +210,58 @@ class TestMigrateVault:
         assert report.migrated == 0
 
 
+class TestPapersAndLegacyDualWalk:
+    """Sub-task 9.187a (D-T): the per-file format-upgrade runner walks
+    ``Wiki/papers/`` (canonical) AND surviving ``Wiki/sources/``
+    (legacy) for one release. Same-name files get deduped (papers/
+    wins).
+    """
+
+    @staticmethod
+    def _seed_papers(vault: Path, filename: str, content: str) -> Path:
+        target = vault / "Wiki" / "papers" / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return target
+
+    async def test_walks_both_directories(self, tmp_path: Path) -> None:
+        from paperwiki.runners.migrate_sources import migrate_vault
+
+        # One stale file in each layout — both should be visited.
+        self._seed_papers(tmp_path, "arxiv_canonical.md", _OLD_FORMAT.replace("21360", "canonical"))
+        _seed(tmp_path, "arxiv_legacy.md", _OLD_FORMAT.replace("21360", "legacy"))
+
+        report = await migrate_vault(tmp_path)
+
+        assert report.checked == 2
+        assert report.migrated == 2
+
+    async def test_papers_priority_when_same_name_exists(self, tmp_path: Path) -> None:
+        """If both ``Wiki/papers/<id>.md`` and ``Wiki/sources/<id>.md``
+        exist (mid-migration vault), the canonical copy is migrated;
+        the legacy duplicate is silently skipped (avoiding a second
+        rewrite of the same id). The dedup keeps ``checked``
+        bounded by the unique filename count.
+        """
+        from paperwiki.runners.migrate_sources import migrate_vault
+
+        same_name = "arxiv_2506.13063.md"
+        self._seed_papers(tmp_path, same_name, _OLD_FORMAT)
+        _seed(tmp_path, same_name, _OLD_FORMAT)
+
+        report = await migrate_vault(tmp_path)
+
+        # Only one file checked / migrated despite both existing.
+        assert report.checked == 1
+        assert report.migrated == 1
+        # The canonical copy was the one migrated.
+        canonical_path = tmp_path / "Wiki" / "papers" / same_name
+        legacy_path = tmp_path / "Wiki" / "sources" / same_name
+        assert "## Core Information" in canonical_path.read_text(encoding="utf-8")
+        # Legacy unchanged (silently skipped).
+        assert "## Core Information" not in legacy_path.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

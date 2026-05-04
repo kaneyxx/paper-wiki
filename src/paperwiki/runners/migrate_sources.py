@@ -150,12 +150,33 @@ async def _migrate_vault_locked(
     dry_run: bool = False,
 ) -> MigrateReport:
     """Inner implementation — called with vault lock already held (unless dry_run)."""
+    from paperwiki.config.layout import LEGACY_PAPERS_SUBDIR, PAPERS_SUBDIR
+
     report = MigrateReport()
-    sources_dir = vault_path / wiki_subdir / "sources"
-    if not sources_dir.is_dir():
+
+    # Sub-task 9.187a (D-T): walk ``Wiki/papers/`` first, then any
+    # surviving ``Wiki/sources/`` (v0.3.x legacy) for one release.
+    # Dedupe by filename so a same-name pair (mid-migration vault)
+    # is migrated once via the canonical copy. Drops in v0.5.0 along
+    # with ``LEGACY_PAPERS_SUBDIR``.
+    canonical_dir = vault_path / wiki_subdir / PAPERS_SUBDIR
+    legacy_dir = vault_path / wiki_subdir / LEGACY_PAPERS_SUBDIR
+    seen: set[str] = set()
+    targets: list[Path] = []
+    if canonical_dir.is_dir():
+        for p in sorted(canonical_dir.glob("*.md")):
+            seen.add(p.name)
+            targets.append(p)
+    if legacy_dir.is_dir():
+        for p in sorted(legacy_dir.glob("*.md")):
+            if p.name in seen:
+                continue
+            targets.append(p)
+
+    if not targets:
         return report
 
-    for path in sorted(sources_dir.glob("*.md")):
+    for path in targets:
         report.checked += 1
         try:
             text = await asyncio.to_thread(path.read_text, encoding="utf-8")

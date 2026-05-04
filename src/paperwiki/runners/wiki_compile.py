@@ -66,14 +66,60 @@ async def compile_wiki(
     *,
     wiki_subdir: str = WIKI_SUBDIR,
     now: datetime | None = None,
+    allow_auto_migrate: bool = True,
 ) -> CompileResult:
     """Rebuild the wiki index file and return a summary.
 
     Acquires the vault advisory lock for the duration of the operation so
     concurrent ingest runs cannot observe a partial index.
+
+    Task 9.187 (D-T): when ``allow_auto_migrate`` is true (default)
+    AND ``PAPERWIKI_NO_AUTO_MIGRATE`` is unset, an in-place
+    ``Wiki/sources/`` → ``Wiki/papers/`` migration via
+    :mod:`paperwiki.runners.migrate_v04` runs BEFORE the index
+    rebuild. The migration is gated by ``migrate_v04.needs_migration``
+    (idempotent — no-op when ``papers/`` is already populated) and
+    uses the existing D-J SHA-256 backup at
+    ``<vault>/.paperwiki/migration-backup/<ts>/``.
+
+    Pass ``allow_auto_migrate=False`` to skip the move entirely
+    (the index rebuild still runs against the legacy layout via
+    :meth:`MarkdownWikiBackend.list_sources`'s read-fallback shim).
     """
     async with acquire_vault_lock(vault_path):
+        if allow_auto_migrate:
+            _run_auto_migrate_if_needed(vault_path, wiki_subdir=wiki_subdir)
         return await _compile_wiki_locked(vault_path, wiki_subdir=wiki_subdir, now=now)
+
+
+def _run_auto_migrate_if_needed(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> None:
+    """Fire :func:`migrate_v04.migrate_if_needed` and print a banner.
+
+    The banner uses :func:`typer.echo` (stdout) rather than ``loguru``
+    so users see it as part of the runner's normal output rather than
+    buried in extras. ``migrate_v04`` already logs its own
+    ``migrate_v04.move.complete`` event for observability.
+    """
+    from paperwiki.runners import migrate_v04
+
+    if not migrate_v04.needs_migration(vault_path, wiki_subdir=wiki_subdir):
+        return
+    plan = migrate_v04.dry_run(vault_path, wiki_subdir=wiki_subdir)
+    file_count = len(plan.planned_moves)
+    result = migrate_v04.migrate_if_needed(vault_path, wiki_subdir=wiki_subdir)
+    if result is None:
+        # User opted out via PAPERWIKI_NO_AUTO_MIGRATE=1.
+        return
+    if result.moved_count == 0:
+        return
+    backup_rel = (
+        result.backup_dir.relative_to(vault_path)
+        if vault_path in result.backup_dir.parents or result.backup_dir.is_relative_to(vault_path)
+        else result.backup_dir
+    )
+    typer.echo(
+        f"Migrating Wiki/sources/ → Wiki/papers/ ({file_count} files, backup at {backup_rel}/)"
+    )
 
 
 async def _compile_wiki_locked(
@@ -227,6 +273,21 @@ def main(
             ),
         ),
     ] = None,
+    no_auto_migrate: Annotated[
+        bool,
+        typer.Option(
+            "--no-auto-migrate",
+            help=(
+                "Skip the v0.3.x → v0.4.x typed-subdir auto-migration "
+                "fired automatically before the index rebuild (Task 9.187). "
+                "Prints the dry-run plan instead, then runs the rebuild "
+                "against the legacy layout via the read-fallback shim. "
+                "Use when you want to inspect the planned moves before "
+                "committing — the global env-var equivalent is "
+                "PAPERWIKI_NO_AUTO_MIGRATE=1."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
@@ -304,8 +365,31 @@ def main(
         typer.echo(f"restored properties migration {restore_properties}")
         return
 
+    # Task 9.187: surface the dry-run plan first if the user is
+    # opting out of the auto-migrate path so they can see what
+    # would have moved.
+    if no_auto_migrate:
+        from paperwiki.runners.migrate_v04 import dry_run
+
+        plan = dry_run(vault)
+        typer.echo(
+            json.dumps(
+                {
+                    "planned_moves": [
+                        {
+                            "src": str(m.src),
+                            "dst": str(m.dst),
+                            "sha256": m.sha256,
+                        }
+                        for m in plan.planned_moves
+                    ]
+                },
+                indent=2,
+            )
+        )
+
     try:
-        result = asyncio.run(compile_wiki(vault))
+        result = asyncio.run(compile_wiki(vault, allow_auto_migrate=not no_auto_migrate))
     except PaperWikiError as exc:
         logger.error("wiki_compile.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
