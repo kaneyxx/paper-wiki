@@ -24,6 +24,8 @@ from loguru import logger
 
 from paperwiki._internal.dedup_ledger import gc_old_entries
 from paperwiki._internal.logging import configure_runner_logging
+from paperwiki.config.vault_resolver import resolve_vault
+from paperwiki.core.errors import UserError
 
 app = typer.Typer(
     add_completion=False,
@@ -35,12 +37,18 @@ app = typer.Typer(
 @app.command(name="gc-dedup-ledger")
 def main(
     vault: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "--vault",
-            help="Path to the Obsidian vault that owns the dedup ledger.",
+            help=(
+                "Path to the Obsidian vault that owns the dedup ledger. "
+                "Optional (Task 9.195 / D-V) — falls back to "
+                "$PAPERWIKI_DEFAULT_VAULT, then "
+                "~/.config/paper-wiki/config.toml::default_vault."
+            ),
+            show_default=False,
         ),
-    ],
+    ] = None,
     keep_days: Annotated[
         int | None,
         typer.Option(
@@ -58,6 +66,12 @@ def main(
 ) -> None:
     """Prune ledger rows older than ``--keep-days`` and print the count."""
     configure_runner_logging(verbose=verbose)
+    if vault is None:
+        try:
+            vault = resolve_vault(None)
+        except UserError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(exc.exit_code) from exc
     deleted = gc_old_entries(vault.expanduser(), keep_days=keep_days)
     typer.echo(f"deleted {deleted} entries")
     logger.info("gc_dedup_ledger.complete", vault=str(vault), deleted=deleted)
