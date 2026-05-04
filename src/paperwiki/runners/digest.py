@@ -44,6 +44,7 @@ from paperwiki.config.recipe import (
     instantiate_pipeline,
     load_recipe,
 )
+from paperwiki.config.secrets import load_secrets_env
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.core.models import Recommendation, RunContext
 
@@ -289,10 +290,21 @@ def main(
 ) -> None:
     """Run a digest, exiting 0 on success or PaperWikiError.exit_code on failure."""
     configure_runner_logging(verbose=verbose)
+    # Task 9.180 / D-U: auto-load $PAPERWIKI_HOME/secrets.env so a naked
+    # `paperwiki digest` from a clean shell works without prior `source`.
+    load_secrets_env()
     parsed_date = _parse_date(target_date) if target_date else None
     try:
         exit_code = asyncio.run(run_digest(recipe, parsed_date))
     except PaperWikiError as exc:
+        # Surface the full user-facing message on stderr (Task 9.181 /
+        # D-W). Loguru's default format treats ``error=str(exc)`` as a
+        # hidden ``extra`` field; without an explicit echo the actionable
+        # hint (e.g. ``/paper-wiki:migrate-recipe <path>`` from
+        # ``RecipeSchemaError``) never reaches the user's terminal —
+        # caught in v0.4.2 Phase A real-machine smoke. The structured
+        # ``logger.error`` line is kept for log-aggregation tools.
+        typer.echo(str(exc), err=True)
         logger.error("digest.failed", error=str(exc), exit_code=exc.exit_code)
         raise typer.Exit(exc.exit_code) from exc
     raise typer.Exit(exit_code)

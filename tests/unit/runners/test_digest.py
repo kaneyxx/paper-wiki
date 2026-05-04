@@ -256,3 +256,66 @@ class TestCliEntryPoint:
 
         assert result.exit_code != 0
         assert "YYYY-MM-DD" in result.output
+
+    def test_auto_loads_secrets_env_before_pipeline_init(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Task 9.180 / D-U integration: ``paperwiki digest <recipe>`` from a
+        clean shell (no prior ``source secrets.env``) succeeds because the
+        runner auto-loads ``${PAPERWIKI_HOME}/secrets.env`` before
+        ``instantiate_pipeline`` reads ``os.environ``.
+
+        Captures the env at the moment ``instantiate_pipeline`` is called and
+        asserts the secrets-loaded var is present — this is the exact moment
+        ``_resolve_s2_secrets`` would crash on a clean shell pre-D-U.
+        """
+        import os
+
+        from paperwiki.config import secrets as secrets_mod
+
+        # Fresh idempotency state for this test (the loader is process-wide
+        # but the test suite must reset between scenarios).
+        secrets_mod.reset_for_testing()
+
+        # Sandbox PAPERWIKI_HOME under tmp_path with a secrets.env that
+        # exports a fake S2 key.
+        home = tmp_path / "paperwiki-home"
+        home.mkdir()
+        (home / "secrets.env").write_text(
+            "PAPERWIKI_S2_API_KEY=auto_loaded_from_file\n",
+            encoding="utf-8",
+        )
+        (home / "secrets.env").chmod(0o600)
+        monkeypatch.setenv("PAPERWIKI_HOME", str(home))
+        # Scrub any pre-existing key so the only path to the value is via
+        # the secrets loader.
+        monkeypatch.delenv("PAPERWIKI_S2_API_KEY", raising=False)
+        monkeypatch.delenv("PAPERWIKI_NO_AUTO_SECRETS", raising=False)
+
+        captured: dict[str, str | None] = {}
+
+        def _capture_env_at_pipeline_init(recipe: object) -> Pipeline:
+            captured["s2_key"] = os.environ.get("PAPERWIKI_S2_API_KEY")
+            pipeline, _ = _stub_pipeline()
+            return pipeline
+
+        monkeypatch.setattr(
+            digest_runner,
+            "instantiate_pipeline",
+            _capture_env_at_pipeline_init,
+        )
+
+        try:
+            recipe_path = _write_recipe(tmp_path)
+            runner = CliRunner()
+            result = runner.invoke(digest_runner.app, [str(recipe_path)])
+        finally:
+            secrets_mod.reset_for_testing()
+
+        assert result.exit_code == 0, result.output
+        assert captured["s2_key"] == "auto_loaded_from_file", (
+            "load_secrets_env() must run before instantiate_pipeline so the "
+            "S2 source's api_key_env indirection resolves"
+        )

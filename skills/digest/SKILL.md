@@ -295,6 +295,36 @@ to `paperwiki:setup`.
    deeper dive or `/paper-wiki:wiki-ingest <paper-id>` to fold it
    into concept articles.
 
+## When this fails
+
+**Recipe stuck on pre-v0.4 schema.** The runner exits with code `2`
+and the structured log emits `digest.failed` referencing
+``RecipeSchemaError``. The error message points at the action:
+
+```
+Recipe at <path> uses pre-v0.4 schema (found stale scorer axes:
+category, keyword, recency). v0.4 axes are
+relevance/novelty/momentum/rigor. Run:
+  /paper-wiki:migrate-recipe <path>
+```
+
+**Run that exact slash command.** Do not invent default v0.4 weights
+to "fix" the recipe yourself — `migrate-recipe` preserves the user's
+original keyword/category bias by deriving the new `relevance` axis
+from the legacy weights, while a default-weight rewrite silently
+destroys the user's tuning. (This footgun was caught in v0.4.0
+real-machine smoke; the SKILL session that "fixed" the error by
+substituting v0.4 defaults lost the maintainer's intent and required
+manual restoration.)
+
+**Missing API key.** If `~/.config/paper-wiki/secrets.env` is absent
+and the recipe declares a source that needs a key (typically
+`semantic_scholar`), the runner exits with code `1` and the message
+spells out the exact `KEY=...` line to add to the file. The runner
+already auto-loads `secrets.env` per **D-U** — the user just needs
+to populate it. Direct them to write the key into the file rather
+than asking them to `source` it manually each run.
+
 ## Common Rationalizations
 
 | Excuse | Why it's wrong |

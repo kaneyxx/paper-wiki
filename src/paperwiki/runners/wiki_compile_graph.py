@@ -31,7 +31,7 @@ import asyncio
 import json
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -53,6 +53,14 @@ GRAPH_SUBDIR = ".graph"
 EDGES_FILENAME = "edges.jsonl"
 CITATIONS_FILENAME = "citations.jsonl"
 
+# Task 9.182 — legacy subdir compat. Maps each pre-v0.4 subdir name to
+# the canonical typed-subdir it should be reported as. Currently only
+# ``sources/`` (the v0.3.x source-paper layout, lowercase ``s``) is
+# tolerated; the strict v0.4.2 end state per D-T is ``Wiki/papers/``
+# canonical, with this map dropped in v0.5.0 alongside the
+# ``ObsidianReporter`` write-path migration.
+LEGACY_SUBDIR_MAP: dict[str, str] = {"sources": "papers"}
+
 # ``[[target]]`` or ``[[target|display]]`` — captures only the target.
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
@@ -68,6 +76,13 @@ app = typer.Typer(
 class EdgeRecord:
     """One row of ``edges.jsonl``. ``type`` is ``EdgeType | str`` to keep
     the read side tolerant of unknown values emitted by future versions.
+
+    The optional ``note`` field (Task 9.183) records edge provenance —
+    typically ``"frontmatter:<field>"`` for edges harvested from
+    typed-list frontmatter (``related_concepts`` / ``topics`` /
+    ``people``). Body-wikilink edges leave ``note`` unset; this lets
+    downstream wiki-lint flag inconsistencies between body prose and
+    frontmatter declarations.
     """
 
     src: str
@@ -76,6 +91,7 @@ class EdgeRecord:
     weight: float = 1.0
     evidence: str | None = None
     subtype: str | None = None
+    note: str | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
         """Render to a dict whose JSON form is byte-stable across runs."""
@@ -88,6 +104,7 @@ class EdgeRecord:
             "weight": self.weight,
             "evidence": self.evidence,
             "subtype": self.subtype,
+            "note": self.note,
         }
 
 
@@ -119,6 +136,13 @@ class ParsedEntity:
 
     Exposed so the wiki-lint runner (task 9.158) can reuse the
     typed-subdir walker without duplicating the parser.
+
+    ``frontmatter_links`` (Task 9.183) maps each typed-list frontmatter
+    field name (``related_concepts`` / ``topics`` / ``people``) to a
+    tuple of resolved wikilink targets. Pre-v0.4.2 the graph compiler
+    only scanned ``body_wikilinks``; that left frontmatter declarations
+    decorative. v0.4.2 closes the contract — these become edges too,
+    tagged with ``EdgeRecord.note = "frontmatter:<field>"``.
     """
 
     entity_id: str
@@ -126,6 +150,7 @@ class ParsedEntity:
     aliases: frozenset[str]
     body_wikilinks: tuple[str, ...]
     frontmatter: dict[str, Any]
+    frontmatter_links: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def graph_is_stale(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> bool:
@@ -185,6 +210,7 @@ def iter_edges_jsonl(path: Path) -> Iterator[EdgeRecord]:
             weight=float(record.get("weight", 1.0)),
             evidence=record.get("evidence"),
             subtype=record.get("subtype"),
+            note=record.get("note"),
         )
 
 
@@ -241,31 +267,103 @@ def _aliases_for_entity(
     return frozenset(aliases)
 
 
+# Typed-list frontmatter fields scanned for wikilinks (Task 9.183).
+# Order is fixed (``related_concepts`` first) so when multiple fields
+# point at the same target, the dedup pass attributes the surviving
+# edge to the earliest field — making lint output deterministic.
+FRONTMATTER_LINK_FIELDS: tuple[str, ...] = ("related_concepts", "topics", "people")
+
+
+def _extract_frontmatter_wikilinks(
+    frontmatter: dict[str, Any],
+    fields: tuple[str, ...] = FRONTMATTER_LINK_FIELDS,
+) -> dict[str, tuple[str, ...]]:
+    """Extract bare wikilink targets from typed-list frontmatter (Task 9.183).
+
+    Recognises both ``[[X]]`` (plain) and ``'[[X]]'`` (yaml-quoted, what
+    the digest writer emits) inside a YAML list. Bare strings (no
+    wikilink syntax) are also tolerated — pre-v0.4 recipes occasionally
+    used ``topics: [vlm]`` without the brackets — and treated as
+    aliases for resolution-time lookup.
+    """
+    result: dict[str, tuple[str, ...]] = {}
+    for fname in fields:
+        raw = frontmatter.get(fname)
+        if not isinstance(raw, list):
+            continue
+        targets: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            stripped = item.strip()
+            # Match wikilink syntax inside the value (handles both quoted
+            # and bare forms uniformly).
+            match = _WIKILINK_RE.match(stripped)
+            if match is not None:
+                targets.append(match.group(1).strip())
+            elif stripped:
+                # Bare string — treated as a target name / alias.
+                targets.append(stripped)
+        if targets:
+            result[fname] = tuple(targets)
+    return result
+
+
 def _parse_entity_file(file_path: Path, wiki_root: Path) -> ParsedEntity | None:
-    """Parse one ``.md`` file. Returns ``None`` for non-typed files."""
+    """Parse one ``.md`` file. Returns ``None`` for non-typed files.
+
+    Files under :data:`LEGACY_SUBDIR_MAP` keys (e.g. ``sources/``) are
+    reported with their canonical typed-subdir name (e.g. ``papers``)
+    and the ``entity_id`` likewise normalised so downstream consumers
+    treat them identically to canonical-layout files.
+    """
     rel = file_path.relative_to(wiki_root)
     if not rel.parts:
         return None
-    entity_type = rel.parts[0]
+    raw_subdir = rel.parts[0]
+    # Map legacy → canonical entity type (Task 9.182).
+    entity_type = LEGACY_SUBDIR_MAP.get(raw_subdir, raw_subdir)
     if entity_type not in TYPED_SUBDIRS:
         return None
     text = file_path.read_text(encoding="utf-8")
     frontmatter, body = _parse_frontmatter(text)
-    entity_id = _entity_id_from_path(file_path, wiki_root)
+    raw_entity_id = _entity_id_from_path(file_path, wiki_root)
+    # Normalise the entity_id when the file lives under a legacy
+    # subdir — emit ``papers/<id>`` not ``sources/<id>`` so query
+    # output is stable regardless of physical layout.
+    if raw_subdir in LEGACY_SUBDIR_MAP:
+        # raw_entity_id is ``<raw_subdir>/<basename>``; rewrite the prefix.
+        _, _, basename = raw_entity_id.partition("/")
+        entity_id = f"{entity_type}/{basename}"
+    else:
+        entity_id = raw_entity_id
     aliases = _aliases_for_entity(entity_id, frontmatter)
     body_wikilinks = tuple(_WIKILINK_RE.findall(body))
+    frontmatter_links = _extract_frontmatter_wikilinks(frontmatter)
     return ParsedEntity(
         entity_id=entity_id,
         entity_type=entity_type,
         aliases=aliases,
         body_wikilinks=body_wikilinks,
         frontmatter=frontmatter,
+        frontmatter_links=frontmatter_links,
     )
 
 
-def _walk_typed_subdirs(wiki_root: Path) -> Iterator[Path]:
-    """Yield non-dotfile ``.md`` paths under each typed subdir."""
-    for subdir in TYPED_SUBDIRS:
+def _walk_typed_subdirs(
+    wiki_root: Path,
+    *,
+    legacy_subdirs: tuple[str, ...] = (),
+) -> Iterator[Path]:
+    """Yield non-dotfile ``.md`` paths under each typed subdir.
+
+    Walks the canonical :data:`TYPED_SUBDIRS` plus any explicitly
+    enabled ``legacy_subdirs`` (typically ``("sources",)`` per Task
+    9.182, when a v0.3.x vault hasn't been migrated yet). Files in
+    legacy subdirs are surfaced as canonical-typed entities by
+    :func:`_parse_entity_file` via :data:`LEGACY_SUBDIR_MAP`.
+    """
+    for subdir in (*TYPED_SUBDIRS, *legacy_subdirs):
         sub = wiki_root / subdir
         if not sub.is_dir():
             continue
@@ -275,20 +373,62 @@ def _walk_typed_subdirs(wiki_root: Path) -> Iterator[Path]:
             yield md
 
 
-def walk_entities(wiki_root: Path) -> list[ParsedEntity]:
+def walk_entities(
+    wiki_root: Path,
+    *,
+    legacy_subdirs: tuple[str, ...] = (),
+) -> list[ParsedEntity]:
     """Public typed-subdir walker (used by wiki-lint task 9.158).
 
     Returns parsed entities from all four typed subdirs in entity-id
     sorted order. Skips dotfiles and non-typed subdirs (e.g. ``.graph``).
+
+    Pass ``legacy_subdirs=("sources",)`` to also include v0.3.x-layout
+    source papers (Task 9.182 / D-T transition window). Default off so
+    pre-existing callers (notably ``wiki-lint``) keep their current
+    behaviour until they explicitly opt in.
     """
     return sorted(
         (
             entity
-            for path in _walk_typed_subdirs(wiki_root)
+            for path in _walk_typed_subdirs(wiki_root, legacy_subdirs=legacy_subdirs)
             if (entity := _parse_entity_file(path, wiki_root)) is not None
         ),
         key=lambda e: e.entity_id,
     )
+
+
+def _resolve_legacy_subdirs(wiki_root: Path) -> tuple[str, ...]:
+    """Return the legacy subdirs to walk, given the current state of ``wiki_root``.
+
+    Task 9.182: when ``papers/`` is missing or empty AND a legacy subdir
+    has at least one ``.md`` file, walk the legacy subdir and emit a
+    one-shot ``graph.sources.legacy`` warning. Returns an empty tuple
+    when the canonical layout is in use (no warning, no legacy walk).
+    """
+    papers_dir = wiki_root / "papers"
+    canonical_count = sum(1 for _ in papers_dir.glob("*.md")) if papers_dir.is_dir() else 0
+    if canonical_count > 0:
+        return ()
+    legacy: list[str] = []
+    legacy_count_total = 0
+    for subdir in LEGACY_SUBDIR_MAP:
+        sub_dir = wiki_root / subdir
+        if not sub_dir.is_dir():
+            continue
+        legacy_count = sum(1 for _ in sub_dir.glob("*.md"))
+        if legacy_count > 0:
+            legacy.append(subdir)
+            legacy_count_total += legacy_count
+    if legacy:
+        logger.warning(
+            "graph.sources.legacy wiki_root={wiki_root} subdirs={subdirs} "
+            "files={files} action=run_paperwiki_wiki_compile_to_migrate",
+            wiki_root=str(wiki_root),
+            subdirs=tuple(legacy),
+            files=legacy_count_total,
+        )
+    return tuple(legacy)
 
 
 def _build_alias_map(
@@ -325,11 +465,23 @@ def _build_records(
     entities: list[ParsedEntity],
     alias_map: dict[str, str],
 ) -> tuple[list[EdgeRecord], list[CitationRecord]]:
+    """Resolve wikilinks (body + frontmatter) into edges + citations.
+
+    Body wikilinks take precedence over frontmatter when both point at
+    the same ``(target, edge_type)``: body edges have ``note=None`` and
+    suppress the frontmatter one entirely (Task 9.183 dedup criterion).
+    Frontmatter edges that survive get ``note="frontmatter:<field>"``
+    so wiki-lint can flag stale frontmatter still pointing at deleted
+    body targets.
+    """
     edges: list[EdgeRecord] = []
     citations: list[CitationRecord] = []
     entity_kind_by_id = {e.entity_id: e.entity_type for e in entities}
     for entity in entities:
         cited_papers: list[str] = []
+        # ``(dst, edge_type_value)`` pairs already emitted from this
+        # entity's body — frontmatter edges that match get suppressed.
+        seen: set[tuple[str, str]] = set()
         for raw_target in entity.body_wikilinks:
             target = raw_target.strip()
             resolved = alias_map.get(target)
@@ -339,6 +491,8 @@ def _build_records(
                 continue
             dst_kind = entity_kind_by_id.get(resolved, "")
             edge_type = _infer_edge_type(entity.entity_type, dst_kind)
+            edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
+            seen.add((resolved, edge_type_str))
             edges.append(
                 EdgeRecord(
                     src=entity.entity_id,
@@ -348,6 +502,35 @@ def _build_records(
             )
             if entity.entity_type == "papers" and dst_kind == "papers":
                 cited_papers.append(resolved)
+        # Task 9.183 — harvest typed-list frontmatter into edges.
+        # Iterate fields in fixed order so duplicate-target attribution
+        # is deterministic across compiles.
+        for field_name in FRONTMATTER_LINK_FIELDS:
+            for raw_target in entity.frontmatter_links.get(field_name, ()):
+                target = raw_target.strip()
+                resolved = alias_map.get(target)
+                if resolved is None or resolved == entity.entity_id:
+                    continue
+                dst_kind = entity_kind_by_id.get(resolved, "")
+                edge_type = _infer_edge_type(entity.entity_type, dst_kind)
+                edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
+                key = (resolved, edge_type_str)
+                if key in seen:
+                    # Body already covers this edge — body wins (closer
+                    # to the user's prose); frontmatter origin is
+                    # suppressed to dedupe.
+                    continue
+                seen.add(key)
+                edges.append(
+                    EdgeRecord(
+                        src=entity.entity_id,
+                        dst=resolved,
+                        type=edge_type,
+                        note=f"frontmatter:{field_name}",
+                    )
+                )
+                if entity.entity_type == "papers" and dst_kind == "papers":
+                    cited_papers.append(resolved)
         if entity.entity_type == "papers" and cited_papers:
             citations.append(
                 CitationRecord(
@@ -359,11 +542,17 @@ def _build_records(
 
 
 def _sort_edges(edges: list[EdgeRecord]) -> list[EdgeRecord]:
-    """Deterministic sort key: ``(src, dst, type, subtype, evidence)``."""
+    """Deterministic sort key: ``(src, dst, type, subtype, evidence, note)``.
 
-    def _key(e: EdgeRecord) -> tuple[str, str, str, str, str]:
+    ``note`` (Task 9.183) is included so frontmatter-origin edges sort
+    stably after body edges for the same ``(src, dst, type)`` triple
+    when both end up in the list (e.g. multi-field frontmatter where
+    body has unrelated edges).
+    """
+
+    def _key(e: EdgeRecord) -> tuple[str, str, str, str, str, str]:
         type_str = e.type.value if isinstance(e.type, EdgeType) else e.type
-        return (e.src, e.dst, type_str, e.subtype or "", e.evidence or "")
+        return (e.src, e.dst, type_str, e.subtype or "", e.evidence or "", e.note or "")
 
     return sorted(edges, key=_key)
 
@@ -413,6 +602,11 @@ async def compile_graph(
     edges_path = graph_dir / EDGES_FILENAME
     citations_path = graph_dir / CITATIONS_FILENAME
 
+    # Task 9.182 — emit-once legacy warning + legacy walk when papers/
+    # is empty. Both code paths below (cache-fresh + full rebuild) use
+    # the same resolved tuple so the entity count stays consistent.
+    legacy_subdirs = _resolve_legacy_subdirs(wiki_root)
+
     if not force_rebuild and not graph_is_stale(vault_path, wiki_subdir=wiki_subdir):
         # Cache is fresh — return summary without touching disk.
         logger.info(
@@ -420,7 +614,9 @@ async def compile_graph(
             edges_path=str(edges_path),
         )
         return CompileGraphResult(
-            entity_count=sum(1 for _ in _walk_typed_subdirs(wiki_root)),
+            entity_count=sum(
+                1 for _ in _walk_typed_subdirs(wiki_root, legacy_subdirs=legacy_subdirs)
+            ),
             edge_count=sum(1 for line in edges_path.read_text().splitlines() if line.strip()),
             citation_count=sum(
                 1 for line in citations_path.read_text().splitlines() if line.strip()
@@ -437,7 +633,7 @@ async def compile_graph(
     entities = sorted(
         (
             entity
-            for path in _walk_typed_subdirs(wiki_root)
+            for path in _walk_typed_subdirs(wiki_root, legacy_subdirs=legacy_subdirs)
             if (entity := _parse_entity_file(path, wiki_root)) is not None
         ),
         key=lambda e: e.entity_id,

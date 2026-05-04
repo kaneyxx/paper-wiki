@@ -46,6 +46,59 @@ if TYPE_CHECKING:
     from paperwiki.core.protocols import Filter, Reporter, Scorer, Source
 
 
+# Pre-v0.4 scorer axes that v0.4.0+ does not understand. Detected at
+# recipe-load time so the user gets a structured "run migrate-recipe"
+# error rather than an opaque ``compute_composite`` runtime crash mid-run.
+# (Task 9.181 / D-W.) The set is closed: any of these keys at
+# ``scorer.config.weights`` flags the recipe as RECIPE_STALE.
+PRE_V04_SCORER_AXES: frozenset[str] = frozenset({"keyword", "category", "recency"})
+
+
+class RecipeSchemaError(UserError):
+    """Recipe is on a pre-v0.4 schema; user must run ``migrate-recipe``.
+
+    Distinct from the generic :class:`UserError` (exit code 1) so SKILL
+    pipes that wrap the runner can disambiguate "user typed bad YAML"
+    (recoverable inline) from "user is on an old schema" (needs the
+    migrate-recipe action). Exit code 2 is reserved for ``RECIPE_STALE``
+    by Task 9.181 / **D-W**.
+
+    The action hint MUST use the slash-prefixed SKILL form
+    ``/paper-wiki:migrate-recipe <path>`` so SKILL session pipes
+    auto-route the action; the bare CLI form
+    ``paperwiki migrate-recipe ...`` does not trigger SKILL routing.
+
+    SKILLs are forbidden from inventing default v0.4 weights to "fix"
+    this error — that path silently destroys the user's intent
+    (caught in v0.4.0 real-machine smoke; the SKILL session rewrote
+    a user's recipe with v0.4 defaults instead of surfacing the
+    migrate-recipe prompt).
+    """
+
+    exit_code: int = 2
+
+    def __init__(self, recipe_path: Path, stale_axes: frozenset[str]) -> None:
+        """Build the user-visible message from the recipe path + offending axes.
+
+        The message is intentionally multi-line so the SKILL pipe sees the
+        slash-form command on its own line — easier for routing logic to
+        match than an inline reference.
+        """
+        self.recipe_path = recipe_path
+        self.stale_axes = stale_axes
+        sorted_axes = ", ".join(sorted(stale_axes))
+        message = (
+            f"Recipe at {recipe_path} uses pre-v0.4 schema "
+            f"(found stale scorer axes: {sorted_axes}). "
+            f"v0.4 axes are relevance/novelty/momentum/rigor. Run:\n"
+            f"  /paper-wiki:migrate-recipe {recipe_path}\n"
+            f"This will migrate the recipe in place while preserving your "
+            f"original intent (relevance is derived from your keyword + "
+            f"category weights, not reset to v0.4 defaults)."
+        )
+        super().__init__(message)
+
+
 class PluginSpec(BaseModel):
     """One plugin entry in a recipe: name + free-form config dict."""
 
@@ -216,6 +269,17 @@ def load_recipe(path: Path) -> RecipeSchema:
     defaults = _load_defaults(path.parent)
     merged = _deep_merge(defaults, data)
 
+    # Task 9.181 / D-W — pre-v0.4 schema detection before pydantic.
+    # Pydantic's ``weights: dict[str, float]`` is permissive (any keys
+    # validate), so a stale recipe would only crash later inside
+    # ``CompositeScorer.__init__ → ScoreBreakdown.compute_composite``
+    # with a generic ``ValueError("missing axes...")``. That late, opaque
+    # failure mode is what the v0.4.0 SKILL session "fixed" by silently
+    # rewriting user weights — losing intent. Catching it here, with a
+    # dedicated exception type, lets the runner surface the migrate-recipe
+    # action hint and prevents downstream silent-default substitution.
+    _maybe_raise_stale_schema(path, merged)
+
     try:
         return RecipeSchema.model_validate(merged)
     except ValidationError as exc:
@@ -224,6 +288,29 @@ def load_recipe(path: Path) -> RecipeSchema:
         # the opaque Pydantic dump.
         msg = _format_validation_error(path, exc)
         raise UserError(msg) from exc
+
+
+def _maybe_raise_stale_schema(path: Path, merged: dict[str, Any]) -> None:
+    """Raise :class:`RecipeSchemaError` if scorer axes are pre-v0.4.
+
+    Looks for any key in :data:`PRE_V04_SCORER_AXES` under
+    ``scorer.config.weights``. Keys outside that set (e.g. v0.4 axes,
+    or genuinely unknown axes) are left to pydantic + downstream
+    validators to handle — this guard only triggers on the specific
+    pre-v0.4 schema the user can fix with one ``migrate-recipe`` call.
+    """
+    scorer = merged.get("scorer")
+    if not isinstance(scorer, dict):
+        return
+    config = scorer.get("config")
+    if not isinstance(config, dict):
+        return
+    weights = config.get("weights")
+    if not isinstance(weights, dict):
+        return
+    stale = PRE_V04_SCORER_AXES & frozenset(weights.keys())
+    if stale:
+        raise RecipeSchemaError(path, frozenset(stale))
 
 
 def _resolve_obsidian_vault(recipe: RecipeSchema) -> Path | None:
@@ -328,11 +415,26 @@ def _resolve_s2_secrets(config: dict[str, Any]) -> dict[str, Any]:
             )
             config["api_key"] = None
             return config
+        # Task 9.180 / D-U — sharpen the actionable hint. paperwiki digest
+        # auto-loads secrets.env now (per D-U), so reaching this branch
+        # means *either* the file is missing *or* the env var is missing
+        # from the file. Spell both branches out.
+        from paperwiki._internal.paths import resolve_paperwiki_home
+
+        secrets_path = resolve_paperwiki_home() / "secrets.env"
+        if secrets_path.exists():
+            actionable = (
+                f"Add `{env_name}=...` to {secrets_path} (paperwiki digest "
+                "auto-loads it on every run)."
+            )
+        else:
+            actionable = (
+                f"Create {secrets_path} with `{env_name}=...` (paperwiki digest "
+                "auto-loads it on every run; chmod 600 recommended)."
+            )
         msg = (
-            f"semantic_scholar source: env var {env_name!r} is unset or "
-            "empty. Either export it (e.g. via "
-            "`source ~/.config/paper-wiki/secrets.env`) or set "
-            "``api_key`` inline."
+            f"semantic_scholar source: env var {env_name!r} is unset or empty. "
+            f"{actionable} Or set ``api_key`` inline in the recipe."
         )
         raise UserError(msg)
     config["api_key"] = value
@@ -411,9 +513,11 @@ def _expand(value: str | Path) -> Path:
 
 __all__ = [
     "DEFAULTS_FILENAME",
+    "PRE_V04_SCORER_AXES",
     "ObsidianFlags",
     "PluginSpec",
     "RecipeSchema",
+    "RecipeSchemaError",
     "instantiate_pipeline",
     "load_recipe",
 ]

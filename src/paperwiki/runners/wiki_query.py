@@ -43,6 +43,7 @@ from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
+from paperwiki.config.secrets import load_secrets_env
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
 
@@ -345,6 +346,8 @@ def main(
 ) -> None:
     """Run a wiki keyword search and emit JSON to stdout."""
     configure_runner_logging(verbose=verbose)
+    # Task 9.180 / D-U: uniform secrets-load contract across runners.
+    load_secrets_env()
     weights = RankingWeights(
         frequency=weight_frequency,
         recency=weight_recency,
@@ -353,6 +356,9 @@ def main(
     try:
         hits = asyncio.run(query_wiki(vault, query, top_k=top_k, weights=weights))
     except PaperWikiError as exc:
+        # Surface full message on stderr; loguru's default format hides
+        # ``error=str(exc)`` as an extra field (Task 9.181 / D-W lesson).
+        typer.echo(str(exc), err=True)
         logger.error("wiki_query.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 
