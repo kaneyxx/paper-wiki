@@ -57,6 +57,9 @@ from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.recipe_migrations import RECIPE_MIGRATIONS, TopicMigration
+from paperwiki.core.errors import UserError
+
+PRE_V04_BAK_SUFFIX = ".pre-v04.bak"
 
 app = typer.Typer(
     add_completion=False,
@@ -255,6 +258,65 @@ def _write_with_backup(recipe_path: Path, data: dict[str, Any]) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Pre-v0.4 schema migration backup helpers (Task 9.189 / D-W companion)
+# ---------------------------------------------------------------------------
+
+
+def _pre_v04_bak_path(recipe_path: Path) -> Path:
+    """Return the canonical ``<recipe>.pre-v04.bak`` path next to *recipe_path*.
+
+    The suffix is one-shot: if the .bak already exists, ``create_pre_v04_backup``
+    refuses rather than overwriting. This is intentional — the .bak is the
+    "what I had before v0.4" anchor, and the user must consciously remove it
+    (or ``--restore``) before re-migrating.
+    """
+    return recipe_path.with_name(recipe_path.name + PRE_V04_BAK_SUFFIX)
+
+
+def create_pre_v04_backup(recipe_path: Path) -> Path:
+    """Copy *recipe_path* to ``<recipe>.pre-v04.bak`` byte-for-byte.
+
+    Refuses when the .bak already exists so the user gets a clear signal
+    that they've already migrated this recipe once. The intended fix is
+    either ``--restore`` (revert and try again) or manual deletion of the
+    stale .bak (if the user is sure their current recipe is the wanted state).
+
+    Returns the path of the backup that was just written.
+
+    Raises
+    ------
+    UserError
+        When the .bak already exists.
+    """
+    bak = _pre_v04_bak_path(recipe_path)
+    if bak.exists():
+        raise UserError(
+            f"migrate-recipe: backup already exists at {bak}. "
+            f"Run `paperwiki migrate-recipe {recipe_path} --restore` to revert "
+            f"to that backup, or delete {bak.name} manually before re-migrating."
+        )
+    bak.write_bytes(recipe_path.read_bytes())
+    logger.debug("migrate_recipe.pre_v04_bak.created", path=str(bak))
+    return bak
+
+
+def restore_pre_v04_backup(recipe_path: Path) -> Path:
+    """Replace *recipe_path* contents with ``<recipe>.pre-v04.bak`` bytes,
+    then remove the .bak (one-shot).
+
+    Returns *recipe_path* (the file that was just restored). Raises
+    ``UserError`` if no .bak exists.
+    """
+    bak = _pre_v04_bak_path(recipe_path)
+    if not bak.exists():
+        raise UserError(f"migrate-recipe --restore: no backup found at {bak}. Nothing to restore.")
+    recipe_path.write_bytes(bak.read_bytes())
+    bak.unlink()
+    logger.info("migrate_recipe.pre_v04_bak.restored", recipe=str(recipe_path))
+    return recipe_path
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -265,6 +327,17 @@ def main(
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Show diff without writing (no backup created)."),
+    ] = False,
+    restore: Annotated[
+        bool,
+        typer.Option(
+            "--restore",
+            help=(
+                "Revert the recipe to its pre-v0.4 state from "
+                "<recipe>.pre-v04.bak (Task 9.189). Mutually exclusive with "
+                "the normal migration flow."
+            ),
+        ),
     ] = False,
     target_version: Annotated[
         str,
@@ -284,6 +357,15 @@ def main(
     if not recipe.is_file():
         typer.echo(f"migrate-recipe: recipe not found: {recipe}", err=True)
         raise typer.Exit(1)
+
+    if restore:
+        try:
+            restore_pre_v04_backup(recipe)
+        except UserError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(exc.exit_code) from exc
+        typer.echo(json.dumps({"recipe_path": str(recipe), "action": "restored"}, indent=2))
+        return
 
     try:
         report = migrate_recipe_file(recipe, dry_run=dry_run, target_version=target_version)
@@ -308,9 +390,12 @@ if __name__ == "__main__":  # pragma: no cover - CLI entry
 
 
 __all__ = [
+    "PRE_V04_BAK_SUFFIX",
     "AppliedChange",
     "MigrateRecipeReport",
     "app",
+    "create_pre_v04_backup",
     "main",
     "migrate_recipe_file",
+    "restore_pre_v04_backup",
 ]
