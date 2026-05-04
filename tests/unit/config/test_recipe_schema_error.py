@@ -136,6 +136,44 @@ def test_error_message_includes_skill_form_migrate_hint(tmp_path: Path) -> None:
     )
 
 
+def test_error_message_does_not_carry_bare_cli_form_91_191(tmp_path: Path) -> None:
+    """Task 9.191 contract lock: the SKILL slash form is the SOLE recommended
+    action surface; the bare ``paperwiki migrate-recipe`` CLI string MUST NOT
+    appear inside the error message body, even as a fallback hint.
+
+    Rationale: SKILL session pipes route on the literal slash form. Mixed
+    forms would dilute that contract and re-introduce the v0.4.0 footgun
+    (a SKILL session "fixing" the error by inventing v0.4 defaults
+    instead of executing the migration).
+
+    This test is functionally redundant with the previous one, but names
+    Task 9.191 explicitly so a future grep for "9.191" surfaces the
+    contract anchor.
+    """
+    from paperwiki.config.recipe import RecipeSchemaError, load_recipe
+
+    recipe_path = _write_stale_recipe(
+        tmp_path,
+        weights_block="      keyword: 0.5\n      category: 0.3\n      recency: 0.2",
+    )
+
+    with pytest.raises(RecipeSchemaError) as exc_info:
+        load_recipe(recipe_path)
+
+    message = str(exc_info.value)
+    # Slash form present.
+    assert "/paper-wiki:migrate-recipe" in message
+    # Bare-CLI form absent (regression guard for 9.191).
+    # We check the exact "paperwiki migrate-recipe" literal — anything
+    # that would tempt SKILL pipes to dispatch to bash instead of
+    # invoking the SKILL.
+    assert "paperwiki migrate-recipe" not in message, (
+        "bare CLI form 'paperwiki migrate-recipe' must not appear in the "
+        "error body; SKILL pipes need the slash form as the sole action "
+        "anchor (Task 9.191 / D-W companion)"
+    )
+
+
 def test_error_message_calls_out_pre_v04_schema(tmp_path: Path) -> None:
     """Message text states what's wrong (pre-v0.4 schema), not just the
     fix, so users grasp why migrate-recipe is the action."""
