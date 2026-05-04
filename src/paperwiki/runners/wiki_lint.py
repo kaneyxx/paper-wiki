@@ -401,6 +401,8 @@ def main(
             )
         )
     except PaperWikiError as exc:
+        # Task 9.211: surface the actual error to stderr.
+        typer.echo(str(exc), err=True)
         logger.error("wiki_lint.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 

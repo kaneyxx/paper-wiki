@@ -14,8 +14,11 @@ Setup is the first-run onboarding wizard. It does three things:
 2. **Asks five questions** to build the user's personal `daily.yaml`
    recipe — vault path, topics, S2 API key, auto-ingest depth, and
    whether to add paperclip.
-3. **Writes two files** that downstream SKILLs read:
+3. **Writes three files** that downstream SKILLs and CLI commands read:
    - `~/.config/paper-wiki/recipes/daily.yaml` — the personal recipe
+   - `~/.config/paper-wiki/config.toml` — D-V resolver default (vault
+     + recipe path) so `paperwiki dedup-list` / `wiki-graph` /
+     `extract-paper-images` work without an explicit `--vault` flag
    - `~/.config/paper-wiki/secrets.env` — the API keys (chmod 600)
 
 After setup, the user runs `/paper-wiki:digest` and everything Just
@@ -464,10 +467,46 @@ unconditionally — even on a placeholder-only file — because the
 file's purpose is to become the canonical secrets store the moment
 the user adds anything to it.
 
+#### Step 9c — Write `config.toml` (D-V resolver default)
+
+Write `~/.config/paper-wiki/config.toml` (or
+`$PAPERWIKI_CONFIG_DIR/config.toml` if the env var is set) with the
+two keys the resolver consults at Rung 4:
+
+```toml
+default_vault = "<vault path from Q1 — emit verbatim, no tilde expansion>"
+default_recipe = "<absolute path to the recipe written in Step 9a>"
+```
+
+Use the `Write` tool. Quote the values exactly — the resolver
+re-expands tildes at read time so emitting `~/Documents/Paper-Wiki`
+verbatim is correct.
+
+**Overwrite policy** — mirror the Step 9a recipe-overwrite handling:
+
+- If `config.toml` does NOT exist: write it.
+- If `config.toml` already exists AND the user chose
+  "Reconfigure from scratch" in Branch 1: write it (overwriting
+  is the explicit user intent).
+- If `config.toml` already exists AND the user is on the drill-down
+  edit path (Branch 2 — only changing one Q): leave it alone unless
+  Q1 (vault path) was the field they edited; in that case, rewrite
+  it to keep config.toml in sync with the recipe.
+
+Why this matters: without `config.toml`, the D-V resolver falls
+through to Rung 5 (`UserError`) for every CLI command that does NOT
+load a recipe — `paperwiki dedup-list`, `paperwiki wiki-graph`,
+`paperwiki extract-paper-images`, etc. The recipe rung only fires
+for `paperwiki digest`, so users who run anything else first see
+"No vault specified" until config.toml is written.
+
 ### Step 10 — Confirm + next step
 
 Show the user a summary:
 - Recipe saved to `~/.config/paper-wiki/recipes/daily.yaml`
+- Resolver default at `~/.config/paper-wiki/config.toml` (D-V Rung 4
+  — read by `paperwiki dedup-list`, `paperwiki wiki-graph`,
+  `paperwiki extract-paper-images`, etc. when `--vault` is omitted)
 - Secrets template at `~/.config/paper-wiki/secrets.env` (mode 600,
   commented placeholder — fill in to enable the 100 req/s S2 rate)
 - paperclip MCP: registered / not registered / declined

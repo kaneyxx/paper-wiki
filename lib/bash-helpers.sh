@@ -129,7 +129,13 @@ _paperwiki_diag_render() {
             && [ -n "${_PAPERWIKI_HELPER_VERSION:-}" ] \
             && [ "$on_disk_tag" != "$_PAPERWIKI_HELPER_VERSION" ]; then
             echo "⚠ paperwiki_diag: in-memory function is v$_PAPERWIKI_HELPER_VERSION, on-disk helper is v$on_disk_tag."
-            echo "  Open a new terminal (or 'source $on_disk_helper') to refresh."
+            echo "  Complete the upgrade with the SPEC §8.1 5-step flow:"
+            echo "    1. paperwiki update"
+            echo "    2. /exit                                  # restart 1"
+            echo "    3. claude"
+            echo "    4.   /plugin install paper-wiki@paper-wiki"
+            echo "    5. /exit && claude                        # restart 2 — SessionStart rewrites this helper"
+            echo "  (Or 'source $on_disk_helper' to refresh in-place — but the full flow is required after a real upgrade.)"
             echo
         fi
     fi

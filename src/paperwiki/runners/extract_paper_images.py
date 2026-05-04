@@ -386,6 +386,8 @@ def main(
     try:
         result = asyncio.run(extract_paper_images(vault, canonical_id, force=force))
     except PaperWikiError as exc:
+        # Task 9.211: surface the actual error to stderr.
+        typer.echo(str(exc), err=True)
         logger.error("extract_paper_images.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 

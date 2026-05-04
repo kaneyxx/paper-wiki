@@ -144,8 +144,64 @@ def _extract_line_number(exc: tomllib.TOMLDecodeError) -> str:
     return digits or "?"
 
 
+def write_config(
+    target: Path,
+    *,
+    default_vault: str | Path | None = None,
+    default_recipe: str | Path | None = None,
+    force: bool = False,
+) -> None:
+    """Write a minimal ``config.toml`` to ``target`` (Task 9.212).
+
+    Sibling of :func:`read_config`. Used by:
+
+    * ``paperwiki update`` post-upgrade hook (Task 9.212) — auto-creates
+      config.toml from a recipe's ``obsidian.vault_path`` so D-V
+      resolver Rung 4 works for users upgrading from a pre-D-V build.
+    * ``/paper-wiki:setup`` SKILL (Task 9.213) — first-run wizard
+      writes config.toml after collecting vault path from the user.
+
+    Contract:
+
+    * Refuses to clobber an existing file unless ``force=True``. The
+      auto-create hook always passes ``force=False`` (defends the
+      maintainer's hand-edited config); ``setup`` may pass
+      ``force=True`` after explicit user confirmation.
+    * Refuses to write an empty stub (both keys ``None``) — a blank
+      config.toml is a footgun (it makes the maintainer think the
+      resolver is wired when it's still at Rung 5).
+    * Tilde-expansion is **not** applied — paths are emitted verbatim
+      so a config that says ``"~/Documents/Paper-Wiki"`` survives a
+      write/read round-trip without mutation.
+    * Auto-creates parent directory (the post-upgrade hook may run
+      before ``$PAPERWIKI_HOME`` exists on a fresh upgrade from a
+      pre-D-V build).
+    """
+    if default_vault is None and default_recipe is None:
+        raise UserError(
+            "config.toml writer: at least one of default_vault / default_recipe must be set; "
+            "refusing to write an empty stub."
+        )
+
+    if target.exists() and not force:
+        raise UserError(
+            f"config.toml writer: {target} already exists; pass force=True to overwrite."
+        )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = []
+    if default_vault is not None:
+        lines.append(f'default_vault = "{default_vault}"')
+    if default_recipe is not None:
+        lines.append(f'default_recipe = "{default_recipe}"')
+
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 __all__ = [
     "CONFIG_FILENAME",
     "ConfigToml",
     "read_config",
+    "write_config",
 ]

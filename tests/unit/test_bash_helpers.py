@@ -892,6 +892,49 @@ def test_paperwiki_diag_warns_on_stale_in_memory_function(tmp_path: Path) -> Non
     assert "=== end paperwiki_diag ===" in out
 
 
+def test_paperwiki_diag_warning_includes_full_5_step_upgrade_flow(
+    tmp_path: Path,
+) -> None:
+    """Task 9.198: stale warning must spell out SPEC §8.1's 5-step flow.
+
+    Pre-9.198 the warning said only ``Open a new terminal`` — too vague,
+    and that's exactly the UX hole that hid the v0.4.0 hardcode bug for
+    two days (users restarted the terminal but didn't run
+    ``paperwiki update`` again, so the on-disk helper version never
+    actually advanced).
+
+    The new warning text MUST include all five SPEC §8.1 steps so the
+    user sees the canonical upgrade flow in-band rather than having to
+    consult the SPEC.
+    """
+    canonical_dir = tmp_path / ".local" / "lib" / "paperwiki"
+    canonical_dir.mkdir(parents=True)
+    (canonical_dir / "bash-helpers.sh").write_text(
+        "# paperwiki bash-helpers — v0.3.99 (newer than in-memory)\n",
+        encoding="utf-8",
+    )
+    proc = _run_bash(
+        f"source {_HELPER_PATH}; paperwiki_diag",
+        env_overrides={"HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+
+    # Each SPEC §8.1 step must be visible in the warning.
+    expected_steps = [
+        "paperwiki update",
+        "/exit",
+        "claude",
+        "/plugin install paper-wiki@paper-wiki",
+    ]
+    for step in expected_steps:
+        assert step in out, f"warning must mention SPEC §8.1 step {step!r} in:\n{out}"
+    # SPEC reference is shown so the user can audit.
+    assert "SPEC §8.1" in out or "5-step" in out, (
+        f"warning must reference SPEC §8.1 or call out 5-step flow:\n{out}"
+    )
+
+
 def test_paperwiki_diag_no_warning_when_helper_missing(tmp_path: Path) -> None:
     """v0.3.43 D-9.43.6: no on-disk helper → no warning, no crash.
 
