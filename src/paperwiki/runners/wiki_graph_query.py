@@ -89,7 +89,26 @@ def _ensure_fresh_graph(
     *,
     force_rebuild: bool,
 ) -> None:
-    """Auto-rebuild the cache when stale, or unconditionally when forced."""
+    """Auto-rebuild the cache when stale, or unconditionally when forced.
+
+    Task 9.210: short-circuits when ``vault_path/wiki_subdir`` does not
+    exist (fresh-installed or freshly-wiped vault). Without this guard
+    ``compile_graph`` would raise ``PaperWikiError("wiki root missing:
+    ...")`` and abort the runner — a hostile first-impression for
+    users running ``wiki-graph`` before any ``digest`` has populated
+    the vault. The downstream ``query()`` already treats the missing
+    ``edges.jsonl`` as an empty result, so skipping the rebuild here
+    lets the runner emit ``[]`` cleanly.
+    """
+    wiki_root = vault_path / wiki_subdir
+    if not wiki_root.is_dir():
+        logger.info(
+            "wiki_graph_query.rebuild.skipped.empty_vault",
+            vault=str(vault_path),
+            wiki_subdir=wiki_subdir,
+        )
+        return
+
     if force_rebuild or graph_is_stale(vault_path, wiki_subdir=wiki_subdir):
         logger.info(
             "wiki_graph_query.rebuild.start",
