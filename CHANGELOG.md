@@ -9,6 +9,24 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-04
+
+Phase B of the v0.4.x release line — storage layout consolidation
+(D-T) and anti-hardcode rule extension (D-Z). Same-day micro-bump
+from `0.4.2` so the maintainer's `paperwiki update` flow surfaces
+Phase B's auto-migration code without a manual marketplace pull.
+The 0.4.2 → 0.4.3 transition is purely a version-string bump; the
+substantive Phase B changes shipped under the previous line and
+are documented in the `[0.4.2]` entry below.
+
+### Changed
+
+- **Bumped `paperwiki.__version__` to `0.4.3`** to drive the
+  Claude Code 5-step upgrade flow on the maintainer's vault. No
+  source-code changes beyond the three single-source-of-truth
+  files (`src/paperwiki/__init__.py`, `pyproject.toml`,
+  `.claude-plugin/plugin.json`).
+
 ## [0.4.2] - 2026-05-04
 
 Phase A of the v0.4.2 cycle: four hot bugs blocking everyday use,
