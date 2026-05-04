@@ -29,6 +29,12 @@ from loguru import logger
 
 from paperwiki import __version__ as _PAPERWIKI_VERSION  # noqa: N812 — module constant alias
 from paperwiki._internal.health import check_install_health as _shared_check_install_health
+from paperwiki._internal.legacy_vault_scan import (
+    format_migration_hint as _format_legacy_migration_hint,
+)
+from paperwiki._internal.legacy_vault_scan import (
+    scan_known_vaults_for_legacy_sources as _scan_legacy_vaults,
+)
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki._internal.paths import (
     resolve_paperwiki_bak_dir,
@@ -629,6 +635,13 @@ def update(
 
     if cache_ver == marketplace_ver:
         typer.echo(f"paper-wiki is already at {marketplace_ver}")
+        # Task 9.188 (D-T): even on the no-op upgrade path, surface
+        # any vaults still on the v0.3.x layout so users see the
+        # action item the next time they run ``paperwiki update``.
+        # PAPERWIKI_NO_AUTO_DETECT=1 opts out (CI / privacy).
+        legacy_hint = _format_legacy_migration_hint(_scan_legacy_vaults())
+        if legacy_hint:
+            typer.echo(legacy_hint)
         # v0.3.43 D-9.43.4: rc-edit note appears AFTER the result line.
         _consume_rc_just_added_stamp()
         return
@@ -719,6 +732,14 @@ def update(
         + "\n     (SessionStart fires ensure-env.sh against the now-registered"
         + "\n      plugin and rewrites the shim/helper to the new version)"
     )
+
+    # Task 9.188 (D-T): scan known recipe vaults for surviving
+    # ``Wiki/sources/`` data and add a migration hint after the
+    # upgrade summary so the user can finish the layout transition
+    # in one extra command.
+    legacy_hint = _format_legacy_migration_hint(_scan_legacy_vaults())
+    if legacy_hint:
+        typer.echo(legacy_hint)
 
     # v0.3.43 D-9.43.4: rc-edit note appears AFTER the upgrade summary +
     # Next: block, not before. Consume-once semantics preserved (the
