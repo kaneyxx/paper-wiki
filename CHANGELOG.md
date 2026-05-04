@@ -9,6 +9,82 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-05-04
+
+Phase E + post-launch UX hot-fixes from v0.4.6 real-machine smoke.
+Closes the gap that left `paperwiki update` (v0.4.4 → v0.4.6) users
+with a working binary but broken `--vault`-optional CLI commands
+because nothing wrote `~/.config/paper-wiki/config.toml`.
+
+### Added
+
+- **D-V resolver default auto-write on upgrade** (Task 9.212) —
+  `paperwiki update` post-upgrade hook now backfills
+  `$PAPERWIKI_HOME/config.toml` from a single recipe with
+  `obsidian.vault_path`. Idempotent (never clobbers an existing
+  file); silent when `recipes/` is empty, multi-recipe (ambiguous),
+  or recipe lacks `vault_path`.
+- **`config_toml.write_config()`** — sibling of `read_config`,
+  used by both 9.212 (auto-create) and 9.213 (setup wizard).
+  Refuses to clobber unless `force=True`; refuses to write an
+  empty stub.
+- **`/paper-wiki:setup` SKILL writes `config.toml`** (Task 9.213) —
+  new Step 9c emits the resolver default at the same moment the
+  recipe is saved. Mirrors the recipe-overwrite policy on re-run.
+
+### Changed
+
+- **Visible runner errors across the CLI surface** (Task 9.211) —
+  7 catch sites in 5 runners (`wiki_graph_query`, `wiki_compile` ×3,
+  `wiki_lint`, `extract_paper_images`, `migrate_sources`) now emit
+  the actual `PaperWikiError` message text on stderr instead of
+  only the bare `<runner>.failed` event line. Loguru's structured
+  `error=str(exc)` field is rendered as a hidden `extra` by the
+  default sink, so without an explicit `typer.echo` users saw
+  opaque event names with no actionable hint. Already-correct
+  runners (`digest`, `recipe_validate`, `migrate_recipe`,
+  `wiki_query`, `wiki_ingest_plan`) gain regression-pin tests.
+- **`paperwiki_diag` bash helper warning text** (Task 9.198) —
+  stale-version warning now spells out SPEC §8.1's full 5-step
+  upgrade flow inline (`paperwiki update` → `/exit` → `claude` →
+  `/plugin install paper-wiki@paper-wiki` → `/exit && claude`)
+  instead of the bare "open a new terminal" hint that hid the
+  v0.4.0 hardcode bug for two days.
+
+### Fixed
+
+- **`wiki-graph` graceful degradation on empty vault** (Task 9.210) —
+  fresh-installed or freshly-wiped vaults (no `Wiki/` subdir) now
+  emit `[]` (JSON) or `"No edges matched."` (`--pretty`) and exit 0
+  instead of crashing with `PaperWikiError: wiki root missing: ...`.
+  Reported by maintainer in v0.4.6 real-machine smoke as the first
+  command they ran after upgrading.
+
+### Verified
+
+- 1512 unit tests pass (1460 baseline + 52 new across 9.210/211/196/
+  197/198/212/213).
+- `ruff check src tests` clean. `ruff format --check src tests` clean.
+- `mypy --strict src` clean.
+- `claude plugin validate .` clean.
+
+### Internal
+
+- **Regression pins for v0.3.43 fixes** (Tasks 9.196, 9.197) —
+  source already correct since v0.3.43 D-9.43.1 (`paperwiki diag`
+  flat-array JSON) and D-9.43.4 (`update --check` message order);
+  this release adds direct unit pins on the helpers
+  (`_read_paper_wiki_entry`, `_print_update_check_plan`,
+  `_consume_rc_just_added_stamp`) so future refactors that split
+  format from ordering can't quietly regress.
+
+### Notes
+
+- **9.199 (Fish shell support)** remains deferred to v0.5+.
+- **9.214 (resolver Rung 2.5 — auto-discover single recipe)**
+  deferred — re-evaluate if 9.212/9.213 prove insufficient on
+  fresh-install paths.
+
 ## [0.4.6] - 2026-05-04
 
 Phase C — `migrate-recipe` hardening (D-W companion + D-Y stamp).

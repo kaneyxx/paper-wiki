@@ -55,9 +55,7 @@ def _write_recipe(
 # ---------------------------------------------------------------------------
 
 
-def test_hook_writes_config_when_single_recipe_exists(
-    tmp_path: Path, capsys: object
-) -> None:
+def test_hook_writes_config_when_single_recipe_exists(tmp_path: Path, capsys: object) -> None:
     """Single recipe with ``vault_path`` → config.toml written."""
     paperwiki_home = tmp_path / "paper-wiki"
     paperwiki_home.mkdir()
@@ -85,9 +83,7 @@ def test_hook_writes_config_when_single_recipe_exists(
 # ---------------------------------------------------------------------------
 
 
-def test_hook_does_not_overwrite_existing_config(
-    tmp_path: Path, capsys: object
-) -> None:
+def test_hook_does_not_overwrite_existing_config(tmp_path: Path, capsys: object) -> None:
     """Existing config.toml is sacrosanct — never clobbered."""
     paperwiki_home = tmp_path / "paper-wiki"
     paperwiki_home.mkdir()
@@ -110,9 +106,7 @@ def test_hook_does_not_overwrite_existing_config(
     assert "config.toml" not in captured.out
 
 
-def test_hook_idempotent_across_multiple_invocations(
-    tmp_path: Path, capsys: object
-) -> None:
+def test_hook_idempotent_across_multiple_invocations(tmp_path: Path, capsys: object) -> None:
     """Second call leaves byte-identical file."""
     paperwiki_home = tmp_path / "paper-wiki"
     paperwiki_home.mkdir()
@@ -178,9 +172,7 @@ def test_hook_silent_when_multiple_recipes(tmp_path: Path, capsys: object) -> No
     assert capsys.readouterr().out == ""  # type: ignore[attr-defined]
 
 
-def test_hook_silent_when_recipe_lacks_vault_path(
-    tmp_path: Path, capsys: object
-) -> None:
+def test_hook_silent_when_recipe_lacks_vault_path(tmp_path: Path, capsys: object) -> None:
     """Single recipe but no ``obsidian.vault_path`` → silent skip."""
     paperwiki_home = tmp_path / "paper-wiki"
     paperwiki_home.mkdir()
@@ -195,9 +187,7 @@ def test_hook_silent_when_recipe_lacks_vault_path(
     assert capsys.readouterr().out == ""  # type: ignore[attr-defined]
 
 
-def test_hook_silent_when_recipe_yaml_unparseable(
-    tmp_path: Path, capsys: object
-) -> None:
+def test_hook_silent_when_recipe_yaml_unparseable(tmp_path: Path, capsys: object) -> None:
     """Malformed recipe YAML → silent skip (don't crash the upgrade flow)."""
     paperwiki_home = tmp_path / "paper-wiki"
     paperwiki_home.mkdir()
@@ -212,9 +202,7 @@ def test_hook_silent_when_recipe_yaml_unparseable(
     assert capsys.readouterr().out == ""  # type: ignore[attr-defined]
 
 
-def test_hook_silent_when_paperwiki_home_missing(
-    tmp_path: Path, capsys: object
-) -> None:
+def test_hook_silent_when_paperwiki_home_missing(tmp_path: Path, capsys: object) -> None:
     """``$PAPERWIKI_HOME`` itself doesn't exist → silent skip.
 
     Defensive: never crash the upgrade flow on filesystem state we

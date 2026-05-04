@@ -553,8 +553,7 @@ def _post_upgrade_ensure_config_toml(*, paperwiki_home: Path | None = None) -> N
         return
 
     typer.echo(
-        f"paperwiki update: wrote {config_path} "
-        f"(D-V default_vault from {recipe_path.name})."
+        f"paperwiki update: wrote {config_path} (D-V default_vault from {recipe_path.name})."
     )
 
 

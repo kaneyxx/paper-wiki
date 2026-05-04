@@ -55,9 +55,7 @@ def test_list_entry_passes_through_unchanged(tmp_path: Path) -> None:
     out = _read_paper_wiki_entry(installed)
     parsed = json.loads(out)
 
-    assert parsed == real_shape, (
-        f"list input must pass through unchanged; got {parsed!r}"
-    )
+    assert parsed == real_shape, f"list input must pass through unchanged; got {parsed!r}"
     assert isinstance(parsed, list)
     # Defense-in-depth: confirm it is NOT a list-of-lists.
     assert not all(isinstance(item, list) for item in parsed)
@@ -120,6 +118,4 @@ def test_output_is_always_indent_two_when_json(tmp_path: Path) -> None:
 
     out = _read_paper_wiki_entry(installed)
     # ``[\n  {\n`` is the unmistakable indent=2 list-of-dict opener.
-    assert out.startswith("[\n  {\n"), (
-        f"expected indent=2 JSON shape, got:\n{out!r}"
-    )
+    assert out.startswith("[\n  {\n"), f"expected indent=2 JSON shape, got:\n{out!r}"

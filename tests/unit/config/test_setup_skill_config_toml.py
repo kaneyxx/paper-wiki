@@ -34,10 +34,10 @@ def test_setup_skill_writes_resolver_compatible_config_toml(tmp_path: Path) -> N
     recipe_path = paperwiki_home / "recipes" / "daily.yaml"
     recipe_path.parent.mkdir()
     recipe_path.write_text(
-        'name: personal-daily\n'
-        'reporters:\n'
-        '  - name: obsidian\n'
-        '    config:\n'
+        "name: personal-daily\n"
+        "reporters:\n"
+        "  - name: obsidian\n"
+        "    config:\n"
         '      vault_path: "~/Documents/Paper-Wiki"\n',
         encoding="utf-8",
     )

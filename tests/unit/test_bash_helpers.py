@@ -928,9 +928,7 @@ def test_paperwiki_diag_warning_includes_full_5_step_upgrade_flow(
         "/plugin install paper-wiki@paper-wiki",
     ]
     for step in expected_steps:
-        assert step in out, (
-            f"warning must mention SPEC §8.1 step {step!r} in:\n{out}"
-        )
+        assert step in out, f"warning must mention SPEC §8.1 step {step!r} in:\n{out}"
     # SPEC reference is shown so the user can audit.
     assert "SPEC §8.1" in out or "5-step" in out, (
         f"warning must reference SPEC §8.1 or call out 5-step flow:\n{out}"
