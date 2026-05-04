@@ -337,6 +337,9 @@ def main(
     try:
         plan = asyncio.run(plan_ingest(vault, source_id, auto_bootstrap=auto_bootstrap))
     except PaperWikiError as exc:
+        # Surface full message on stderr; loguru's default format hides
+        # ``error=str(exc)`` as an extra field (Task 9.181 / D-W lesson).
+        typer.echo(str(exc), err=True)
         logger.error("wiki_ingest_plan.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 

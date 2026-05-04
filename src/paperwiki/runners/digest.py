@@ -297,6 +297,14 @@ def main(
     try:
         exit_code = asyncio.run(run_digest(recipe, parsed_date))
     except PaperWikiError as exc:
+        # Surface the full user-facing message on stderr (Task 9.181 /
+        # D-W). Loguru's default format treats ``error=str(exc)`` as a
+        # hidden ``extra`` field; without an explicit echo the actionable
+        # hint (e.g. ``/paper-wiki:migrate-recipe <path>`` from
+        # ``RecipeSchemaError``) never reaches the user's terminal —
+        # caught in v0.4.2 Phase A real-machine smoke. The structured
+        # ``logger.error`` line is kept for log-aggregation tools.
+        typer.echo(str(exc), err=True)
         logger.error("digest.failed", error=str(exc), exit_code=exc.exit_code)
         raise typer.Exit(exc.exit_code) from exc
     raise typer.Exit(exit_code)

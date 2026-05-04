@@ -356,6 +356,9 @@ def main(
     try:
         hits = asyncio.run(query_wiki(vault, query, top_k=top_k, weights=weights))
     except PaperWikiError as exc:
+        # Surface full message on stderr; loguru's default format hides
+        # ``error=str(exc)`` as an extra field (Task 9.181 / D-W lesson).
+        typer.echo(str(exc), err=True)
         logger.error("wiki_query.failed", error=str(exc))
         raise typer.Exit(exc.exit_code) from exc
 

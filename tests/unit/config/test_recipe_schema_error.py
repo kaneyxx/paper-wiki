@@ -181,6 +181,52 @@ def test_digest_cli_exits_two_on_stale_recipe(tmp_path: Path) -> None:
     )
 
 
+def test_digest_cli_emits_full_message_on_stderr(tmp_path: Path) -> None:
+    """Real-machine regression (Phase A 2026-05-04): the actionable
+    multi-line ``RecipeSchemaError`` message must appear on **stderr**,
+    not be swallowed as a loguru ``extra`` field.
+
+    Loguru's default format renders the message string verbatim but drops
+    keyword extras. Pre-patch, ``logger.error("digest.failed",
+    error=str(exc), exit_code=...)`` emitted only ``digest.failed`` — the
+    user never saw ``/paper-wiki:migrate-recipe <path>`` and had no
+    actionable hint despite the exit code being correct. Caught when
+    real-machine verifying Phase A; the original 9.181 tests checked the
+    exception object directly via ``pytest.raises``, missing this surface.
+
+    Real subprocess so loguru's stderr handler is exercised end-to-end
+    (``CliRunner`` doesn't replicate the formatter chain reliably).
+    """
+    import subprocess
+    import sys
+
+    recipe_path = _write_stale_recipe(
+        tmp_path,
+        weights_block="      keyword: 0.5\n      category: 0.3\n      recency: 0.2",
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "paperwiki.cli", "digest", str(recipe_path)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert "/paper-wiki:migrate-recipe" in combined, (
+        "RecipeSchemaError full message must reach stderr; "
+        f"got returncode={result.returncode}\nstderr:\n{result.stderr}"
+    )
+    assert str(recipe_path) in combined, (
+        f"stale recipe path must round-trip into the displayed message; stderr:\n{result.stderr}"
+    )
+    assert "pre-v0.4 schema" in combined.lower(), (
+        "displayed message must explain WHY the recipe is rejected"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Bullet 4: SKILL contract (no silent defaults)
 # ---------------------------------------------------------------------------
