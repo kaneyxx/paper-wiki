@@ -1,7 +1,7 @@
 {
   "name": "paper-wiki",
   "description": "Personal research wiki builder for Claude Code — pipeline-driven paper ingestion with plugin architecture.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "author": { "name": "kaneyxx" },
   "homepage": "https://github.com/kaneyxx/paper-wiki",
   "repository": "https://github.com/kaneyxx/paper-wiki",

@@ -211,6 +211,82 @@ async def test_migration_backup_supports_round_trip_restore(tmp_path: Path) -> N
     assert not canonical_dir.exists() or not any(canonical_dir.iterdir())
 
 
+async def test_wiki_compile_migrates_per_paper_image_subdirs(tmp_path: Path) -> None:
+    """Phase B.1 hot-fix (caught on 2026-05-04 maintainer smoke): the
+    auto-migrate path must ALSO relocate per-paper image
+    subdirectories, not just ``*.md`` paper notes.
+
+    Pre-fix, a vault with ``Wiki/sources/<id>.md`` AND
+    ``Wiki/sources/<id>/images/teaser.png`` would migrate the .md but
+    leave the image dir orphaned at the legacy path. Obsidian
+    wikilinks still resolved via vault-index lookup, but the on-disk
+    layout was structurally inconsistent and ``needs_migration``
+    returned False on re-runs (it only checks ``*.md``), so the user
+    had no automatic recovery.
+
+    The fix: ``migrate_v04.migrate`` walks per-paper subdirectories
+    in ``Wiki/sources/`` and ``shutil.move``s them under
+    ``Wiki/papers/`` after the file migration succeeds. The legacy
+    ``Wiki/sources/`` directory is then ``rmdir``-ed when fully
+    drained.
+    """
+    sources_dir = tmp_path / "Wiki" / "sources"
+    sources_dir.mkdir(parents=True)
+    canonical_id = "arxiv:2506.13063"
+    filename = canonical_id.replace(":", "_")
+    # Seed BOTH the paper note and a per-paper image subdir.
+    (sources_dir / f"{filename}.md").write_text(
+        "---\n"
+        f"canonical_id: {canonical_id}\n"
+        "title: Image-bearing Paper\n"
+        "status: draft\n"
+        "confidence: 0.5\n"
+        "related_concepts: []\n"
+        "tags: []\n"
+        "---\n\n# Body\n",
+        encoding="utf-8",
+    )
+    images_dir = sources_dir / filename / "images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "teaser.png").write_bytes(b"PNG-stub")
+    (images_dir / "index.md").write_text("# Figure manifest\n", encoding="utf-8")
+
+    await wiki_compile.compile_wiki(tmp_path, now=_NOW)
+
+    # ── Paper note ended up at the canonical location.
+    assert (tmp_path / "Wiki" / "papers" / f"{filename}.md").is_file()
+    # ── Image subdirectory ALSO moved.
+    canonical_images = tmp_path / "Wiki" / "papers" / filename / "images"
+    assert canonical_images.is_dir(), (
+        "per-paper image subdir must follow the .md migration to keep "
+        "Wiki/papers/<id>/ structurally consistent"
+    )
+    assert (canonical_images / "teaser.png").is_file()
+    assert (canonical_images / "index.md").is_file()
+    # ── Legacy directory is fully drained.
+    legacy_paper_subdir = tmp_path / "Wiki" / "sources" / filename
+    assert not legacy_paper_subdir.exists()
+    # ── ``Wiki/sources/`` itself is removed once it's empty.
+    assert not (tmp_path / "Wiki" / "sources").exists()
+
+
+async def test_wiki_compile_migrates_only_image_subdirs_no_md(tmp_path: Path) -> None:
+    """Edge case: a vault that has per-paper image subdirs but NO
+    surviving ``*.md`` (e.g. the user manually moved their notes but
+    left figures behind) still needs migration. ``needs_migration``
+    must return True so ``wiki-compile`` reaches the directory-move
+    branch."""
+    legacy_image_dir = tmp_path / "Wiki" / "sources" / "arxiv_2506.13063" / "images"
+    legacy_image_dir.mkdir(parents=True)
+    (legacy_image_dir / "teaser.png").write_bytes(b"PNG-stub")
+
+    await wiki_compile.compile_wiki(tmp_path, now=_NOW)
+
+    canonical_image_dir = tmp_path / "Wiki" / "papers" / "arxiv_2506.13063" / "images"
+    assert canonical_image_dir.is_dir()
+    assert (canonical_image_dir / "teaser.png").is_file()
+
+
 async def test_wiki_compile_no_legacy_no_banner_no_backup(tmp_path: Path) -> None:
     """A vault that's already on the v0.4.2 layout (only
     ``Wiki/papers/``, no legacy ``Wiki/sources/``) compiles

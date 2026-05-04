@@ -29,7 +29,7 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,10 +54,28 @@ class _PlannedMove:
 
 
 @dataclass(frozen=True, slots=True)
+class _PlannedDirMove:
+    """Phase B.1 hot-fix (Task 9.187 follow-up): per-paper image
+    subdirectories under ``Wiki/sources/<id>/`` (typically
+    ``extract-images`` output) need to follow the ``.md`` migration
+    so the canonical ``Wiki/papers/<id>/`` layout is structurally
+    consistent. SHA-256 is intentionally per-FILE on the
+    ``_PlannedMove`` side; directory moves get a recursive
+    ``shutil.copytree`` backup but no aggregate hash — restore
+    integrity comes from the directory tree round-tripping
+    byte-identical via ``copytree`` semantics.
+    """
+
+    src: Path
+    dst: Path
+
+
+@dataclass(frozen=True, slots=True)
 class MigrationPlan:
     """Result of :func:`dry_run`: planned moves without filesystem touch."""
 
     planned_moves: list[_PlannedMove]
+    planned_dir_moves: list[_PlannedDirMove] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +96,14 @@ def _sha256(path: Path) -> str:
 
 
 def needs_migration(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> bool:
-    """Return True iff ``Wiki/sources/`` has files AND ``Wiki/papers/`` is absent.
+    """Return True iff ``Wiki/sources/`` has user data AND ``Wiki/papers/`` is absent.
+
+    Phase B.1 hot-fix (caught on 2026-05-04 maintainer smoke): "user
+    data" includes BOTH ``*.md`` paper notes AND per-paper image
+    subdirectories (``Wiki/sources/<id>/``). Pre-fix, a vault that
+    had been partially migrated by hand (``.md`` files moved but
+    image dirs left behind) would report ``needs_migration == False``
+    and never auto-recover.
 
     Idempotency anchor — a second invocation of :func:`migrate` after
     the first run must report no work to do.
@@ -87,7 +112,9 @@ def needs_migration(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> bool
     papers = vault_path / wiki_subdir / TYPED_PAPERS_SUBDIR
     if not sources.is_dir():
         return False
-    if not any(sources.glob("*.md")):
+    has_md = any(sources.glob("*.md"))
+    has_subdirs = any(p.is_dir() for p in sources.iterdir())
+    if not has_md and not has_subdirs:
         return False
     return not papers.exists()
 
@@ -97,15 +124,27 @@ def _enumerate_legacy_files(vault_path: Path, wiki_subdir: str) -> list[Path]:
     return sorted(p for p in sources.glob("*.md") if not p.name.startswith("."))
 
 
+def _enumerate_legacy_subdirs(vault_path: Path, wiki_subdir: str) -> list[Path]:
+    """Phase B.1: list per-paper image subdirectories under
+    ``Wiki/sources/`` so :func:`migrate` can co-relocate them with
+    the matching ``.md`` files.
+    """
+    sources = vault_path / wiki_subdir / LEGACY_SOURCES_SUBDIR
+    if not sources.is_dir():
+        return []
+    return sorted(p for p in sources.iterdir() if p.is_dir() and not p.name.startswith("."))
+
+
 def dry_run(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> MigrationPlan:
     """Build the migration plan without touching the filesystem.
 
-    Returns the same ``_PlannedMove`` shape :func:`migrate` would
-    execute, so the caller can preview moves and SHA-256 hashes before
-    committing. Used by ``paperwiki wiki-compile --migrate-dry-run``.
+    Returns the same ``_PlannedMove`` + ``_PlannedDirMove`` shape
+    :func:`migrate` would execute, so the caller can preview moves
+    and SHA-256 hashes before committing. Used by
+    ``paperwiki wiki-compile --migrate-dry-run``.
     """
     if not needs_migration(vault_path, wiki_subdir=wiki_subdir):
-        return MigrationPlan(planned_moves=[])
+        return MigrationPlan(planned_moves=[], planned_dir_moves=[])
     papers_dir = vault_path / wiki_subdir / TYPED_PAPERS_SUBDIR
     moves: list[_PlannedMove] = [
         _PlannedMove(
@@ -115,7 +154,11 @@ def dry_run(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> MigrationPla
         )
         for legacy in _enumerate_legacy_files(vault_path, wiki_subdir)
     ]
-    return MigrationPlan(planned_moves=moves)
+    dir_moves: list[_PlannedDirMove] = [
+        _PlannedDirMove(src=legacy, dst=papers_dir / legacy.name)
+        for legacy in _enumerate_legacy_subdirs(vault_path, wiki_subdir)
+    ]
+    return MigrationPlan(planned_moves=moves, planned_dir_moves=dir_moves)
 
 
 def _utc_timestamp() -> str:
@@ -126,18 +169,24 @@ def _make_backup(
     vault_path: Path,
     wiki_subdir: str,
     moves: list[_PlannedMove],
+    dir_moves: list[_PlannedDirMove],
     *,
     timestamp: str | None = None,
 ) -> tuple[str, Path]:
-    """Copy legacy files to ``<vault>/.paperwiki/migration-backup/<ts>/``.
+    """Copy legacy files + per-paper subdirs to
+    ``<vault>/.paperwiki/migration-backup/<ts>/``.
 
-    Returns ``(timestamp, backup_dir)``. Uses :func:`shutil.copy2` to
-    preserve metadata; the originals stay in place until the
-    typed-subdir move runs after this function returns successfully.
+    Returns ``(timestamp, backup_dir)``. Uses :func:`shutil.copy2`
+    for files (preserves metadata) and :func:`shutil.copytree` for
+    subdirectories (Phase B.1). The originals stay in place until
+    the typed-subdir move runs after this function returns
+    successfully — never delete-then-restore semantics.
     """
     ts = timestamp or _utc_timestamp()
     backup_dir = vault_path / PAPERWIKI_DIR / MIGRATION_BACKUP_SUBDIR / ts
     backup_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- Files (per-paper .md notes, SHA-256 verified) ------------------
     manifest_entries: list[dict[str, str]] = []
     for move in moves:
         rel = move.src.relative_to(vault_path)
@@ -151,10 +200,29 @@ def _make_backup(
                 "sha256": move.sha256,
             }
         )
+
+    # ---- Directories (per-paper image subdirs, recursive copy) ---------
+    dir_entries: list[dict[str, str]] = []
+    for dir_move in dir_moves:
+        rel = dir_move.src.relative_to(vault_path)
+        backup_path = backup_dir / rel
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(dir_move.src, backup_path)
+        dir_entries.append(
+            {
+                "src": str(rel),
+                "dst": str(Path(wiki_subdir) / TYPED_PAPERS_SUBDIR / dir_move.src.name),
+            }
+        )
+
     manifest_path = backup_dir / MANIFEST_FILENAME
     manifest_path.write_text(
         json.dumps(
-            {"timestamp": ts, "files": manifest_entries},
+            {
+                "timestamp": ts,
+                "files": manifest_entries,
+                "directories": dir_entries,
+            },
             indent=2,
             sort_keys=True,
         ),
@@ -181,17 +249,23 @@ def migrate(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> MigrationRes
             backup_dir=vault_path / PAPERWIKI_DIR / MIGRATION_BACKUP_SUBDIR,
         )
     plan = dry_run(vault_path, wiki_subdir=wiki_subdir)
-    if not plan.planned_moves:
+    if not plan.planned_moves and not plan.planned_dir_moves:
         return MigrationResult(
             moved_count=0,
             backup_timestamp="",
             backup_dir=vault_path / PAPERWIKI_DIR / MIGRATION_BACKUP_SUBDIR,
         )
-    timestamp, backup_dir = _make_backup(vault_path, wiki_subdir, plan.planned_moves)
+    timestamp, backup_dir = _make_backup(
+        vault_path,
+        wiki_subdir,
+        plan.planned_moves,
+        plan.planned_dir_moves,
+    )
     logger.info(
         "migrate_v04.backup.complete",
         backup_dir=str(backup_dir),
         files=len(plan.planned_moves),
+        directories=len(plan.planned_dir_moves),
     )
 
     papers_dir = vault_path / wiki_subdir / TYPED_PAPERS_SUBDIR
@@ -204,6 +278,26 @@ def migrate(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> MigrationRes
             # Cross-fs path → fall back to shutil.move.
             shutil.move(str(move.src), str(move.dst))
         moved += 1
+
+    # Phase B.1: relocate per-paper image subdirectories. Always uses
+    # ``shutil.move`` (handles cross-fs and recursive trees). The
+    # backup above guarantees rollback safety.
+    moved_dirs = 0
+    for dir_move in plan.planned_dir_moves:
+        if dir_move.dst.exists():
+            # Defensive: if a same-name subdir already exists under
+            # papers/ (mid-migration retry, or user partially hand-
+            # migrated), skip rather than clobber. The backup still
+            # has the legacy copy for restore.
+            logger.warning(
+                "migrate_v04.dir.skip_existing",
+                src=str(dir_move.src),
+                dst=str(dir_move.dst),
+            )
+            continue
+        shutil.move(str(dir_move.src), str(dir_move.dst))
+        moved_dirs += 1
+
     # Remove the empty legacy sources/ directory if it's empty.
     legacy_dir = vault_path / wiki_subdir / LEGACY_SOURCES_SUBDIR
     if legacy_dir.is_dir() and not any(legacy_dir.iterdir()):
@@ -212,6 +306,7 @@ def migrate(vault_path: Path, *, wiki_subdir: str = WIKI_SUBDIR) -> MigrationRes
         "migrate_v04.move.complete",
         papers_dir=str(papers_dir),
         moved=moved,
+        moved_dirs=moved_dirs,
     )
     return MigrationResult(
         moved_count=moved,
@@ -249,8 +344,11 @@ def restore(
     Reads the manifest, copies each file from the backup back to its
     original ``Wiki/sources/`` location, verifies the SHA-256 matches
     the manifest, and prunes the typed-subdir entries created by the
-    migration. Raises :class:`PaperWikiError` on any SHA-256 mismatch
-    so the caller exits non-zero (per R3).
+    migration. Phase B.1 (Task 9.187 follow-up): also restores
+    per-paper image subdirectories from the ``directories`` manifest
+    block, then prunes their typed-subdir copies. Raises
+    :class:`PaperWikiError` on any SHA-256 mismatch so the caller
+    exits non-zero (per R3).
     """
     backup_dir = vault_path / PAPERWIKI_DIR / MIGRATION_BACKUP_SUBDIR / timestamp
     manifest_path = backup_dir / MANIFEST_FILENAME
@@ -259,6 +357,7 @@ def restore(
         raise PaperWikiError(msg)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     files = manifest.get("files", [])
+    directories = manifest.get("directories", [])
 
     for entry in files:
         backup_path = backup_dir / entry["src"]
@@ -269,6 +368,8 @@ def restore(
     legacy_root = vault_path / wiki_subdir / LEGACY_SOURCES_SUBDIR
     legacy_root.mkdir(parents=True, exist_ok=True)
     typed_root = vault_path / wiki_subdir / TYPED_PAPERS_SUBDIR
+
+    # ---- Files (per-paper .md notes) -----------------------------------
     for entry in files:
         backup_path = backup_dir / entry["src"]
         original_path = vault_path / entry["src"]
@@ -282,6 +383,22 @@ def restore(
         typed_path = vault_path / entry["dst"]
         if typed_path.exists():
             typed_path.unlink()
+
+    # ---- Directories (per-paper image subdirs) -------------------------
+    for entry in directories:
+        backup_subdir = backup_dir / entry["src"]
+        original_subdir = vault_path / entry["src"]
+        # Remove a stale partially-restored copy first so copytree
+        # doesn't trip on FileExistsError.
+        if original_subdir.exists():
+            shutil.rmtree(original_subdir)
+        original_subdir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(backup_subdir, original_subdir)
+        # Remove the typed-subdir copy created by the migration.
+        typed_subdir = vault_path / entry["dst"]
+        if typed_subdir.exists():
+            shutil.rmtree(typed_subdir)
+
     # Clean up empty typed-subdir.
     if typed_root.is_dir() and not any(typed_root.iterdir()):
         typed_root.rmdir()
@@ -289,6 +406,7 @@ def restore(
         "migrate_v04.restore.complete",
         timestamp=timestamp,
         files=len(files),
+        directories=len(directories),
     )
 
 
