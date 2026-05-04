@@ -9,6 +9,59 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-05-04
+
+Phase D — CLI ergonomic alignment per **D-V**. Four runners that
+historically required an explicit ``<vault>`` argument now accept it
+optionally and fall through a precedence chain that ends in a new
+``~/.config/paper-wiki/config.toml`` user config. The two-form CLI
+keeps every existing invocation working unchanged.
+
+### Added
+
+- **`paperwiki.config.config_toml`** (Task 9.192) — typed reader for
+  ``$PAPERWIKI_HOME/config.toml`` with the v0.4.5 minimal schema
+  (``default_vault``, ``default_recipe``). Both fields optional;
+  ``extra="ignore"`` for forward-compat against v0.4.6+ extensions;
+  tilde-expansion at read time so callers always see absolute paths;
+  malformed TOML surfaces as a ``UserError`` that names the offending
+  line.
+- **`paperwiki.config.vault_resolver`** (Task 9.192) — pure D-V
+  precedence-chain resolver: explicit ``Path`` →
+  recipe ``obsidian.vault_path`` → ``$PAPERWIKI_DEFAULT_VAULT`` →
+  ``config.toml::default_vault`` → ``UserError`` whose message names
+  every override path so SKILLs can render the action hint verbatim.
+
+### Changed
+
+- **`paperwiki extract-images <id>`** (Task 9.193) accepts a single
+  positional arg (canonical id) when the vault is resolvable from
+  env or config. Two-arg form ``extract-images <vault> <id>`` is
+  preserved. Disambiguation rule: a single positional containing
+  ``:`` is treated as a canonical id; otherwise the CLI rejects with
+  a usage hint pointing at the missing canonical id.
+- **`paperwiki wiki-graph`** (Task 9.194) makes the vault positional
+  optional — ``wiki-graph --papers-citing <slug>`` works once a
+  default vault is configured. Resolved vault is validated as an
+  existing directory before the query runs (clean error on bad
+  paths instead of a noisy stack trace).
+- **`paperwiki dedup-list` / `dedup-dismiss` / `gc-dedup-ledger`**
+  (Task 9.195) — the ``--vault`` flag is now optional on all three
+  commands; absence triggers the same resolver chain. Existing
+  invocations with explicit ``--vault`` continue to work
+  unchanged.
+
+### Notes
+
+- `wiki-lint`, `wiki-compile`, `digest`, and `migrate-sources`
+  intentionally **do not** gain optional vault in this release —
+  those four either operate from a recipe (digest) or are
+  vault-shape-introspecting (the others), so the ergonomic win is
+  smaller. Promotion candidates for v0.4.7+.
+- Test count: **1440 passed** (1401 baseline + 22 new across 4
+  test files). ``mypy --strict``, ``ruff check``, ``ruff format
+  --check``, and ``claude plugin validate .`` all clean.
+
 ## [0.4.4] - 2026-05-04
 
 Phase B.1 hot-fix caught on the maintainer's first real-machine
