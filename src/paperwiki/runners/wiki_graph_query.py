@@ -36,7 +36,8 @@ from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
-from paperwiki.core.errors import PaperWikiError
+from paperwiki.config.vault_resolver import resolve_vault
+from paperwiki.core.errors import PaperWikiError, UserError
 from paperwiki.runners.wiki_compile_graph import (
     EDGES_FILENAME,
     GRAPH_SUBDIR,
@@ -203,14 +204,16 @@ def format_pretty(records: list[dict[str, Any]], *, header: str) -> str:
 @app.command()
 def main(
     vault: Annotated[
-        Path,
+        Path | None,
         typer.Argument(
-            help="Path to the Obsidian vault root.",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
+            help=(
+                "Path to the Obsidian vault root. Optional (Task 9.194 / D-V) — "
+                "falls back to $PAPERWIKI_DEFAULT_VAULT, then "
+                "~/.config/paper-wiki/config.toml::default_vault."
+            ),
+            show_default=False,
         ),
-    ],
+    ] = None,
     wiki_subdir: Annotated[
         str,
         typer.Option("--wiki-subdir", help="Wiki subdir under the vault."),
@@ -268,6 +271,23 @@ def main(
             err=True,
         )
         raise typer.Exit(2)
+
+    # Task 9.194 / D-V: resolve the vault when the positional was omitted.
+    if vault is None:
+        try:
+            vault = resolve_vault(None)
+        except UserError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(exc.exit_code) from exc
+    else:
+        vault = vault.expanduser()
+
+    if not vault.is_dir():
+        typer.echo(
+            f"Error: vault path does not exist or is not a directory: {vault}",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     try:
         records = query(
