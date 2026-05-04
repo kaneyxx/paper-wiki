@@ -46,6 +46,7 @@ applies the surgical removals/additions.  No external network calls.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,11 +56,21 @@ import typer
 import yaml
 from loguru import logger
 
+from paperwiki import __version__
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.recipe_migrations import RECIPE_MIGRATIONS, TopicMigration
 from paperwiki.core.errors import UserError
 
 PRE_V04_BAK_SUFFIX = ".pre-v04.bak"
+
+# D-Y round-trip stamp regex: matches a single stamp line at the very
+# top of the file (no leading whitespace). Used to detect-and-replace
+# rather than detect-and-stack on repeat invocations.
+_STAMP_RE = re.compile(r"^# round-trip stamp \d{4}-\d{2}-\d{2} v\d+\.\d+\.\d+\n")
+
+# Pre-v0.4 scorer-axis names — presence at ``scorer.config.weights`` is
+# the trigger for the v0.4 schema migration (Task 9.190).
+_PRE_V04_AXES = frozenset({"keyword", "category", "recency"})
 
 app = typer.Typer(
     add_completion=False,
@@ -106,17 +117,37 @@ def migrate_recipe_file(
 ) -> MigrateRecipeReport:
     """Apply all known migrations up to *target_version* to *recipe_path*.
 
+    Two migration tiers run in order:
+
+    1. **v0.4 schema migration** (Task 9.190): when the recipe still
+       carries pre-v0.4 scorer axes (``keyword``/``category``/``recency``),
+       create ``<recipe>.pre-v04.bak`` and rewrite ``scorer.config.weights``
+       via :func:`map_pre_v04_to_v04_weights`. Refuses when the .bak
+       already exists (Task 9.189).
+    2. **Keyword migrations** (v0.3.17 and earlier): the existing
+       :data:`RECIPE_MIGRATIONS` table is applied to topic-keyword lists.
+       This tier preserves the historical behavior — timestamped backups
+       written by :func:`_write_with_backup`.
+
+    The D-Y round-trip stamp (``# round-trip stamp YYYY-MM-DD vX.Y.Z``)
+    is appended (or replaced) at the top of the file at the very end —
+    so even a recipe that's already at the current schema gets a fresh
+    stamp confirming the user opted into the current version.
+
     Parameters
     ----------
     recipe_path:
         Path to the personal recipe YAML to migrate.
     dry_run:
-        When ``True``, compute the diff but do not write the file or create
-        a backup.  The returned report reflects what *would* have changed.
+        When ``True``, compute the diff but do not write the file, create
+        a backup, or stamp. The returned report reflects what *would*
+        have changed.
     target_version:
-        The latest migration version to apply.  Defaults to ``"0.3.17"``,
-        the only migration defined today.  Pass a specific version to
-        limit the scope (useful in tests).
+        The latest migration version to apply. Defaults to ``"0.3.17"``,
+        the latest keyword-migration version defined today. Pass a
+        specific version to limit the scope (useful in tests). The v0.4
+        schema migration is independent of this knob — it always runs
+        when pre-v0.4 axes are present.
 
     Returns
     -------
@@ -139,7 +170,22 @@ def migrate_recipe_file(
         target_version=target_version,
     )
 
-    # Collect all applicable migrations up to target_version.
+    # Tier 1: v0.4 schema migration (Task 9.190 / 9.189). Detect first so
+    # we can refuse cleanly if a stale .pre-v04.bak is already present
+    # before any other state mutation.
+    schema_migrated = _has_pre_v04_weights(data)
+    if schema_migrated and not dry_run:
+        # Refuses with UserError when the bak already exists.
+        create_pre_v04_backup(recipe_path)
+        _apply_v04_schema_migration(data)
+        # Persist the schema-migrated YAML before keyword-tier touches it.
+        new_text = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        recipe_path.write_text(new_text, encoding="utf-8")
+        # Reload so subsequent steps work on the persisted form.
+        data = yaml.safe_load(recipe_path.read_text(encoding="utf-8"))
+        report.backup_path = str(_pre_v04_bak_path(recipe_path))
+
+    # Tier 2: keyword migrations (legacy v0.3.17 era).
     applicable = {
         version: migrations
         for version, migrations in RECIPE_MIGRATIONS.items()
@@ -155,12 +201,22 @@ def migrate_recipe_file(
         else:
             report.applied_changes.extend(changes)
 
-    if not report.applied_changes or dry_run:
+    if dry_run:
         return report
 
-    # Write back with backup.
-    backup_path = _write_with_backup(recipe_path, data)
-    report.backup_path = str(backup_path)
+    # Write keyword-tier changes when applicable. Keyword tier still uses
+    # the legacy timestamped backup so multi-pivot history is preserved.
+    if report.applied_changes:
+        backup_path = _write_with_backup(recipe_path, data)
+        # Keyword-tier backup is **secondary** to schema-tier .pre-v04.bak;
+        # only override when no schema migration ran.
+        if not schema_migrated:
+            report.backup_path = str(backup_path)
+
+    # D-Y stamp — always applied so "did the user opt into the current
+    # schema?" is a one-line grep against the recipe.
+    stamp_round_trip(recipe_path)
+
     return report
 
 
@@ -255,6 +311,106 @@ def _write_with_backup(recipe_path: Path, data: dict[str, Any]) -> Path:
     recipe_path.write_text(new_text, encoding="utf-8")
     logger.debug("migrate_recipe.backup_created", backup=str(backup_path))
     return backup_path
+
+
+# ---------------------------------------------------------------------------
+# v0.4 schema mapping + D-Y round-trip stamp (Task 9.190)
+# ---------------------------------------------------------------------------
+
+_RELEVANCE_FLOOR = 0.4
+_RELEVANCE_CEILING = 0.85
+_NOVELTY_DEFAULT = 0.10
+_RIGOR_DEFAULT = 0.05
+
+
+def map_pre_v04_to_v04_weights(old: dict[str, float]) -> dict[str, float]:
+    """Map pre-v0.4 ``keyword/category/recency`` weights → v0.4 axes.
+
+    Rule (locked in plan §3.5.3 Step 2):
+
+    * ``relevance = clip(keyword + 0.5 * category, 0.4, 0.85)``
+    * ``novelty = 0.10`` (conservative default for "user never opted in")
+    * ``rigor = 0.05`` (same rationale)
+    * ``momentum = max(0, 1 - relevance - novelty - rigor)`` — absorbs the
+      residual so the four axes sum to 1.0.
+    * ``recency`` is silently dropped — recency is now a filter, not a
+      scorer axis. The caller preserves the recipe's existing recency
+      filter block separately.
+
+    All output values rounded to two decimal places so the resulting
+    YAML reads cleanly to humans.
+    """
+    keyword = float(old.get("keyword", 0.0))
+    category = float(old.get("category", 0.0))
+
+    relevance = max(_RELEVANCE_FLOOR, min(_RELEVANCE_CEILING, keyword + 0.5 * category))
+    novelty = _NOVELTY_DEFAULT
+    rigor = _RIGOR_DEFAULT
+    momentum = max(0.0, 1.0 - relevance - novelty - rigor)
+
+    return {
+        "relevance": round(relevance, 2),
+        "novelty": round(novelty, 2),
+        "momentum": round(momentum, 2),
+        "rigor": round(rigor, 2),
+    }
+
+
+def _has_pre_v04_weights(data: dict[str, Any]) -> bool:
+    """Detect whether a parsed recipe dict carries pre-v0.4 scorer axes.
+
+    Returns ``True`` when ``scorer.config.weights`` contains *any* of
+    ``keyword`` / ``category`` / ``recency``.
+    """
+    scorer = data.get("scorer")
+    if not isinstance(scorer, dict):
+        return False
+    config = scorer.get("config")
+    if not isinstance(config, dict):
+        return False
+    weights = config.get("weights")
+    if not isinstance(weights, dict):
+        return False
+    return any(axis in weights for axis in _PRE_V04_AXES)
+
+
+def stamp_round_trip(recipe_path: Path) -> None:
+    """Append (or replace) the D-Y ``# round-trip stamp`` line at file top.
+
+    The stamp line embeds the current ``paperwiki.__version__`` and today's
+    UTC date. Multiple consecutive runs **replace** the existing stamp
+    rather than stacking, so a long-lived recipe that gets touched on
+    every release still has exactly one stamp.
+    """
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    stamp_line = f"# round-trip stamp {today} v{__version__}\n"
+
+    text = recipe_path.read_text(encoding="utf-8")
+    if _STAMP_RE.match(text):
+        new_text = _STAMP_RE.sub(stamp_line, text, count=1)
+    else:
+        new_text = stamp_line + text
+    recipe_path.write_text(new_text, encoding="utf-8")
+
+
+def _apply_v04_schema_migration(data: dict[str, Any]) -> dict[str, float] | None:
+    """Replace pre-v0.4 weights with v0.4 axes in-place.
+
+    Returns the new weights dict so the caller can include it in a
+    structured report, or ``None`` when the recipe doesn't carry
+    pre-v0.4 axes (no-op).
+    """
+    if not _has_pre_v04_weights(data):
+        return None
+    weights: dict[str, Any] = data["scorer"]["config"]["weights"]
+    pre = {k: weights[k] for k in _PRE_V04_AXES if k in weights}
+    new_weights = map_pre_v04_to_v04_weights(pre)
+    # Replace in-place — drop legacy keys, add new keys.
+    for k in list(weights.keys()):
+        if k in _PRE_V04_AXES:
+            del weights[k]
+    weights.update(new_weights)
+    return new_weights
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +552,8 @@ __all__ = [
     "app",
     "create_pre_v04_backup",
     "main",
+    "map_pre_v04_to_v04_weights",
     "migrate_recipe_file",
     "restore_pre_v04_backup",
+    "stamp_round_trip",
 ]
