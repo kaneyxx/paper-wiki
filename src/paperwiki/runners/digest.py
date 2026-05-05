@@ -25,6 +25,7 @@ the network.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,9 +48,18 @@ from paperwiki.config.recipe import (
 from paperwiki.config.secrets import load_secrets_env
 from paperwiki.core.errors import PaperWikiError
 from paperwiki.core.models import Recommendation, RunContext
+from paperwiki.runners.wiki_compile import compile_wiki
+from paperwiki.runners.wiki_compile_graph import compile_graph
 
 if TYPE_CHECKING:
     from paperwiki.core.pipeline import PipelineResult
+
+# Task 9.218 / Phase G — opt-out env var for the digest auto-chain.
+# Set to ``1`` (or any non-empty value) to skip the post-write
+# ``compile_graph`` + ``compile_wiki`` chain. The CLI ``--no-auto-chain``
+# flag is the per-invocation override; this env var is the global one
+# for CI / shell-automation use.
+NO_AUTO_CHAIN_ENV = "PAPERWIKI_NO_AUTO_CHAIN"
 
 app = typer.Typer(
     add_completion=False,
@@ -187,9 +197,76 @@ def _record_run_status(
         )
 
 
+async def _run_post_write_chain(
+    vault_path: Path | None,
+    *,
+    allow_chain: bool,
+) -> None:
+    """Auto-chain ``compile_graph`` + ``compile_wiki`` after a successful digest.
+
+    Task 9.218 / Phase G — closes the "from zero to query-ready" UX
+    promise. After a digest run that wrote ≥ 1 paper, the user expects:
+
+    * ``Wiki/.graph/edges.jsonl`` populated so ``wiki-graph
+      --papers-citing X`` returns edges without ``--rebuild``.
+    * ``Wiki/index.md`` rebuilt so Obsidian's index table reflects the
+      fresh paper + concept counts.
+
+    Both chain steps are idempotent (each helper is a pure rebuild over
+    the current vault state, no double-writes). Failures are non-fatal:
+    a permission error on ``.graph/`` or a corrupt frontmatter would
+    otherwise punish the user with a non-zero exit even though the
+    digest itself succeeded.
+
+    Skipped when:
+
+    * ``vault_path`` is None (recipe has no ``obsidian.vault_path``).
+    * ``allow_chain`` is False (CLI ``--no-auto-chain`` flag).
+    * ``$PAPERWIKI_NO_AUTO_CHAIN`` is set to a truthy value.
+    """
+    if vault_path is None:
+        return
+    if not allow_chain:
+        return
+    if os.environ.get(NO_AUTO_CHAIN_ENV):
+        return
+
+    # Step 1 — compile_graph. Catches PaperWikiError (vault missing,
+    # malformed sidecar) and OSError (FS-level failures). Any other
+    # exception type re-raises as a programming bug.
+    try:
+        graph_result = await compile_graph(vault_path)
+        typer.echo(f"wiki-graph rebuilt ({graph_result.edge_count} edges)")
+    except (PaperWikiError, OSError) as exc:
+        typer.echo(
+            f"wiki-graph rebuild failed: {exc} (digest still saved)",
+            err=True,
+        )
+        logger.warning("digest.chain.compile_graph.failed", error=str(exc))
+
+    # Step 2 — compile_wiki. Same non-fatal semantics. ``allow_auto_
+    # migrate=False`` because the digest path doesn't expect to surface
+    # legacy ``Wiki/sources/`` migrations as a side-effect of writing
+    # new papers — that's the explicit ``paperwiki wiki-compile``
+    # workflow.
+    try:
+        wiki_result = await compile_wiki(vault_path, allow_auto_migrate=False)
+        typer.echo(
+            f"wiki-index compiled ({wiki_result.concepts} concepts, {wiki_result.sources} papers)"
+        )
+    except (PaperWikiError, OSError) as exc:
+        typer.echo(
+            f"wiki-index compile failed: {exc} (digest still saved)",
+            err=True,
+        )
+        logger.warning("digest.chain.compile_wiki.failed", error=str(exc))
+
+
 async def run_digest(
     recipe_path: Path,
     target_date: datetime | None = None,
+    *,
+    allow_chain: bool = True,
 ) -> int:
     """Run a digest from ``recipe_path`` and return a process exit code.
 
@@ -201,6 +278,12 @@ async def run_digest(
     fatal), and hard exceptions during ``instantiate_pipeline`` /
     ``pipeline.run``. The append is best-effort; ledger I/O failures do
     not mask the underlying digest result.
+
+    Task 9.218 / Phase G: when ``allow_chain`` is True (default) AND
+    ``$PAPERWIKI_NO_AUTO_CHAIN`` is unset AND the recipe declares an
+    obsidian reporter, the runner chains ``compile_graph`` then
+    ``compile_wiki`` after a successful pipeline run. Failures of
+    either chain step are non-fatal — digest still exits 0.
     """
     effective_target = target_date or datetime.now(UTC)
     recipe = load_recipe(recipe_path)
@@ -255,6 +338,12 @@ async def run_digest(
         recommendations=len(result.recommendations),
         counters=result.counters,
     )
+
+    # Task 9.218 / Phase G: chain the post-write rebuild steps so the
+    # user gets a query-ready vault in a single command. Best-effort —
+    # failures are warnings, never digest-blockers.
+    await _run_post_write_chain(vault_path, allow_chain=allow_chain)
+
     return 0
 
 
@@ -283,6 +372,18 @@ def main(
             help="YYYY-MM-DD; defaults to today (UTC).",
         ),
     ] = None,
+    no_auto_chain: Annotated[
+        bool,
+        typer.Option(
+            "--no-auto-chain",
+            help=(
+                "Skip the post-write compile_graph + compile_wiki chain "
+                "(Task 9.218 / Phase G). Use when debugging a digest "
+                "issue or when the chain itself is unhealthy. Global "
+                "equivalent: PAPERWIKI_NO_AUTO_CHAIN=1."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
@@ -295,7 +396,7 @@ def main(
     load_secrets_env()
     parsed_date = _parse_date(target_date) if target_date else None
     try:
-        exit_code = asyncio.run(run_digest(recipe, parsed_date))
+        exit_code = asyncio.run(run_digest(recipe, parsed_date, allow_chain=not no_auto_chain))
     except PaperWikiError as exc:
         # Surface the full user-facing message on stderr (Task 9.181 /
         # D-W). Loguru's default format treats ``error=str(exc)`` as a
