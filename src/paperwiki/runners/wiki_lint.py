@@ -46,7 +46,8 @@ from loguru import logger
 
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
-from paperwiki.core.errors import PaperWikiError
+from paperwiki.config.vault_resolver import resolve_vault
+from paperwiki.core.errors import PaperWikiError, UserError
 from paperwiki.plugins.backends.markdown_wiki import (
     ConceptSummary,
     MarkdownWikiBackend,
@@ -362,7 +363,17 @@ async def _read_body_and_last_synth(
 
 @app.command(name="wiki-lint")
 def main(
-    vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
+    vault: Annotated[
+        Path | None,
+        typer.Argument(
+            help=(
+                "Path to the user's vault. Optional (Task 9.216 / D-V) — "
+                "falls back to $PAPERWIKI_DEFAULT_VAULT, then "
+                "~/.config/paper-wiki/config.toml::default_vault."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     wiki_subdir: Annotated[
         str,
         typer.Option(
@@ -390,6 +401,20 @@ def main(
 ) -> None:
     """Run wiki lint and emit a JSON report on stdout."""
     configure_runner_logging(verbose=verbose)
+
+    # Task 9.216 / D-V: resolve the vault when the positional was omitted.
+    # Mirrors the wiki_graph_query.py:294-309 pattern — explicit positional
+    # wins, otherwise fall through $PAPERWIKI_DEFAULT_VAULT →
+    # $PAPERWIKI_HOME/config.toml::default_vault → actionable error.
+    if vault is None:
+        try:
+            vault = resolve_vault(None)
+        except UserError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(exc.exit_code) from exc
+    else:
+        vault = vault.expanduser()
+
     try:
         report = asyncio.run(
             lint_wiki(
