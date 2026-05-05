@@ -9,6 +9,86 @@ before then may break it.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-05-05
+
+v0.4.8 batch follow-up. Closes the three follow-up gaps surfaced by
+v0.4.7 real-machine smoke that all map onto existing v0.4.x decisions
+(D-V resolver, Phase G auto-chain). Each fix wires an existing
+primitive into the place that forgot to call it — no new architectural
+decisions; no schema changes.
+
+### Added
+
+- **`digest` auto-chains `compile_graph` + `compile_wiki`**
+  (Task 9.218 / Phase G) — after a successful digest, the runner now
+  rebuilds `Wiki/.graph/edges.jsonl` (so `--papers-citing` and
+  `--concepts-in-topic` work without `--rebuild`) and `Wiki/index.md`
+  (so Obsidian's index table reflects fresh paper + concept counts)
+  in a single command. Banners on stdout: `wiki-graph rebuilt
+  (N edges)` and `wiki-index compiled (M concepts, N papers)`.
+  Failures are non-fatal — digest still exits 0 with a WARNING log
+  + one-line stderr; the user already has the paper writes.
+  Opt-out: `--no-auto-chain` flag + `PAPERWIKI_NO_AUTO_CHAIN=1` env.
+- **Co-occurrence fallback for `--concepts-in-topic`** (Task 9.217) —
+  real recipes persist user-declared topics as `Wiki/concepts/<slug>.md`
+  (digest auto-ingest writes them under concepts/, not topics/). The
+  v0.4.0 query branch filtered for `concepts/<slug>` as edge SOURCE
+  and returned `[]` because the edges go INTO the concept, never OUT.
+  v0.4.8 adds a co-occurrence fallback: when the resolved target is a
+  concept, find papers linking to it, collect all OTHER concepts those
+  papers link to, dedupe, and synthesise `concepts/<target> →
+  concepts/<other>` records. Hand-authored `Wiki/topics/<slug>.md`
+  always wins over a same-slug concept (forward-compat).
+
+### Changed
+
+- **`wiki-compile` and `wiki-lint` accept omitted vault** (Task 9.216) —
+  both runners now wire the D-V resolver, mirroring the v0.4.5
+  pattern from `extract-images` / `wiki-graph` / `dedup-list` etc.
+  `paperwiki wiki-compile` (no positional) succeeds when
+  `~/.config/paper-wiki/config.toml::default_vault` is set; same for
+  `wiki-lint`. Explicit positional still wins when present
+  (back-compat). Phase D oversight closed.
+
+### Fixed
+
+- **`paperwiki wiki-graph --concepts-in-topic <slug>` returns useful
+  results** when the slug is a recipe-as-concept rather than a
+  hand-authored topic. Previously returned `[]` despite the vault
+  having dozens of relevant edges in `Wiki/.graph/edges.jsonl`.
+
+### Verified
+
+- 1537 unit + integration tests pass (1512 baseline + 25 new across
+  9.216 / 9.217 / 9.218).
+- `ruff check src tests` clean.
+- `ruff format --check src tests` clean.
+- `mypy --strict src` clean.
+- `claude plugin validate .` clean.
+
+### Internal
+
+- **Resolver wiring is now uniform across all 7 vault-needing
+  runners** — `dedup-list`, `dedup-dismiss`, `gc-dedup-ledger`,
+  `extract-images`, `wiki-graph`, `wiki-compile`, `wiki-lint`. Single
+  D-V code path, single error message, single test pattern.
+- **No API breaks**: existing CLI invocations with explicit vault
+  paths continue to work unchanged. New optional `allow_chain` kwarg
+  on `digest.run_digest()` defaults True so existing programmatic
+  callers keep their current behavior.
+- **Auto-chain primitives (`compile_graph`, `compile_wiki`) reused
+  as-is** — both already idempotent, no changes to their signatures
+  or contracts. The chain only adds a wiring layer.
+
+### Notes
+
+- **9.219 (rename "sources" → "papers" in `wiki-compile` output
+  text)** — cosmetic only, batch into a future doc-pass release.
+- **9.222 (auto-bootstrap `Wiki/topics/` from recipe declarations)**
+  — candidate for v0.4.9 if the 9.217 fallback proves insufficient
+  on real-world topic-cluster queries.
+- **9.199 (Fish shell support)** still deferred to v0.5+.
+
 ## [0.4.7] - 2026-05-04
 
 Phase E + post-launch UX hot-fixes from v0.4.6 real-machine smoke.

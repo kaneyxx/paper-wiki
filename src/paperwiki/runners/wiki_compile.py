@@ -35,7 +35,8 @@ from paperwiki import __version__
 from paperwiki._internal.locking import acquire_vault_lock
 from paperwiki._internal.logging import configure_runner_logging
 from paperwiki.config.layout import WIKI_SUBDIR
-from paperwiki.core.errors import PaperWikiError
+from paperwiki.config.vault_resolver import resolve_vault
+from paperwiki.core.errors import PaperWikiError, UserError
 from paperwiki.plugins.backends.markdown_wiki import MarkdownWikiBackend
 
 if TYPE_CHECKING:
@@ -226,7 +227,17 @@ def _render_frontmatter(
 
 @app.command(name="wiki-compile")
 def main(
-    vault: Annotated[Path, typer.Argument(help="Path to the user's vault")],
+    vault: Annotated[
+        Path | None,
+        typer.Argument(
+            help=(
+                "Path to the user's vault. Optional (Task 9.216 / D-V) — "
+                "falls back to $PAPERWIKI_DEFAULT_VAULT, then "
+                "~/.config/paper-wiki/config.toml::default_vault."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     migrate_dry_run: Annotated[
         bool,
         typer.Option(
@@ -304,6 +315,19 @@ def main(
     Phase-1 → Phase-2 Obsidian Properties frontmatter rewrite.
     """
     configure_runner_logging(verbose=verbose)
+
+    # Task 9.216 / D-V: resolve the vault when the positional was omitted.
+    # Mirrors the wiki_graph_query.py:294-309 pattern — explicit positional
+    # wins, otherwise fall through $PAPERWIKI_DEFAULT_VAULT →
+    # $PAPERWIKI_HOME/config.toml::default_vault → actionable error.
+    if vault is None:
+        try:
+            vault = resolve_vault(None)
+        except UserError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(exc.exit_code) from exc
+    else:
+        vault = vault.expanduser()
 
     # Migration short-circuits — handled before the normal compile path.
     if migrate_dry_run:
