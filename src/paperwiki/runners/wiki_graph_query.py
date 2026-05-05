@@ -83,6 +83,87 @@ def _resolve_target(
     return alias_to_id.get(target.strip())
 
 
+def _resolve_target_for_concepts_in_topic(
+    vault_path: Path,
+    wiki_subdir: str,
+    target: str,
+) -> str | None:
+    """Topic-preferring resolver for the ``--concepts-in-topic`` branch.
+
+    Task 9.217: real recipes persist user-declared topics as
+    ``Wiki/concepts/<slug>.md`` (digest auto-ingest writes them under
+    concepts/, not topics/). When BOTH ``topics/<slug>.md`` and
+    ``concepts/<slug>.md`` exist for the same slug, the regular
+    :func:`_resolve_target` returns whichever entity sorts first by
+    ``entity_id`` — ``concepts/`` (alphabetically before ``topics/``).
+    That breaks forward-compat for users who hand-author a real
+    ``Wiki/topics/<slug>.md`` and expect it to win.
+
+    This resolver scans the typed-subdir walk twice with topics first,
+    then concepts, then any other type — so a hand-authored topic
+    always shadows a same-slug concept under the
+    ``--concepts-in-topic`` branch (and only that branch).
+    """
+    wiki_root = vault_path / wiki_subdir
+    needle = target.strip()
+    entities = walk_entities(wiki_root)
+    for preferred_type in ("topics", "concepts"):
+        for entity in entities:
+            if entity.entity_type == preferred_type and needle in entity.aliases:
+                return entity.entity_id
+    for entity in entities:
+        if needle in entity.aliases:
+            return entity.entity_id
+    return None
+
+
+def _co_occurring_concepts(
+    edges_path: Path,
+    *,
+    target: str,
+) -> list[dict[str, Any]]:
+    """Synthesise co-occurrence edges for a concept-shaped target (Task 9.217).
+
+    Process:
+
+    1. Find all ``papers/X → target`` edges (papers linking INTO the target).
+    2. For each such paper X, collect ``papers/X → concepts/Y`` edges
+       where ``Y != target`` (other concepts those papers link to).
+    3. Dedupe by ``dst`` (collapse multiple papers linking to the same concept).
+    4. Synthesise records with ``src=target``, ``dst=concepts/Y``,
+       ``type=builds_on``, ``weight=1.0`` (canonical-path edge shape).
+
+    Output is sorted by ``dst`` for determinism so SKILL-pipe consumers
+    see the same JSON across re-queries on the same vault state.
+    """
+    edges = list(iter_edges_jsonl(edges_path))
+
+    papers_with_target = {
+        edge.src for edge in edges if edge.dst == target and edge.src.startswith("papers/")
+    }
+    if not papers_with_target:
+        return []
+
+    co_concepts: set[str] = set()
+    for edge in edges:
+        if (
+            edge.src in papers_with_target
+            and edge.dst.startswith("concepts/")
+            and edge.dst != target
+        ):
+            co_concepts.add(edge.dst)
+
+    return [
+        {
+            "src": target,
+            "dst": dst,
+            "type": "builds_on",
+            "weight": 1.0,
+        }
+        for dst in sorted(co_concepts)
+    ]
+
+
 def _ensure_fresh_graph(
     vault_path: Path,
     wiki_subdir: str,
@@ -173,20 +254,40 @@ def query(
         return records
 
     if concepts_in_topic is not None:
-        topic_id = _resolve_target(vault_path, wiki_subdir, concepts_in_topic)
+        # Task 9.217: prefer topics/<slug> over concepts/<slug> when the
+        # same slug exists in both subdirs, so hand-authored topics
+        # always take precedence under this query branch.
+        topic_id = _resolve_target_for_concepts_in_topic(vault_path, wiki_subdir, concepts_in_topic)
         if topic_id is None:
             return []
-        records = [
-            {
-                "src": edge.src,
-                "dst": edge.dst,
-                "type": edge.type.value if hasattr(edge.type, "value") else edge.type,
-                "weight": edge.weight,
-            }
-            for edge in iter_edges_jsonl(edges_path)
-            if edge.src == topic_id and edge.dst.startswith("concepts/")
-        ]
-        return records
+
+        # Canonical path — slug resolved to an actual ``topics/<slug>``
+        # entity. Return literal ``topics/<slug> → concepts/<X>`` edges
+        # from edges.jsonl.
+        if topic_id.startswith("topics/"):
+            records = [
+                {
+                    "src": edge.src,
+                    "dst": edge.dst,
+                    "type": edge.type.value if hasattr(edge.type, "value") else edge.type,
+                    "weight": edge.weight,
+                }
+                for edge in iter_edges_jsonl(edges_path)
+                if edge.src == topic_id and edge.dst.startswith("concepts/")
+            ]
+            return records
+
+        # Fallback path — slug resolved to ``concepts/<slug>`` (the
+        # recipe-as-concept case). Synthesise co-occurrence edges by
+        # finding papers that link INTO the target and reporting the
+        # OTHER concepts those papers link to.
+        if topic_id.startswith("concepts/"):
+            return _co_occurring_concepts(edges_path, target=topic_id)
+
+        # Other entity types (papers/, people/) have no defined
+        # ``--concepts-in-topic`` semantics — return empty rather than
+        # crash so SKILL pipes stay clean.
+        return []
 
     # collaborators_of branch.
     person_id = _resolve_target(vault_path, wiki_subdir, collaborators_of or "")
